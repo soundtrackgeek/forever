@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import App from "./App";
 
@@ -41,5 +41,51 @@ describe("Forever shell", () => {
     expect(
       screen.getByRole("heading", { name: "No signals found" }),
     ).toBeInTheDocument();
+  });
+
+  it("opens the live connection settings from the sidebar", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Connection" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Network online")).not.toHaveLength(0);
+    expect(screen.getByDisplayValue("SignalLevel")).toBeInTheDocument();
+  });
+
+  it("guides a fresh profile through its first connection", async () => {
+    window.history.replaceState({}, "", "/?onboarding=1");
+    render(<App />);
+
+    expect(
+      screen.getByRole("heading", { name: "Tune into Soulseek" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Username"), {
+      target: { value: "MidnightListener" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "not-logged-or-persisted-by-the-preview" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Connect to Soulseek" }),
+    );
+
+    await waitFor(
+      () =>
+        expect(
+          screen.queryByRole("heading", { name: "Tune into Soulseek" }),
+        ).not.toBeInTheDocument(),
+      { timeout: 3_000 },
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: "MidnightListener profile. Online. Open connection settings.",
+        }),
+      ).toBeInTheDocument(),
+    );
   });
 });

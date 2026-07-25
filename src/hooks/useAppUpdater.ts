@@ -20,9 +20,9 @@ export type UpdateDetails = {
 };
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.1",
-  version: "0.0.2",
-  body: "A quieter startup, faster transfer recovery, and small Midnight Radio interface refinements.",
+  currentVersion: "0.0.2",
+  version: "0.0.3",
+  body: "A preview release for exercising Forever’s signed update experience.",
   date: "2026-07-25",
 };
 

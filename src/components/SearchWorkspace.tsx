@@ -12,13 +12,15 @@ import {
   XCircle,
 } from "@phosphor-icons/react";
 import { useState, type FormEvent, type KeyboardEvent } from "react";
-import type { SearchResult } from "../types";
+import type { ConnectionSnapshot, SearchResult } from "../types";
 
 type SearchWorkspaceProps = {
   query: string;
   submittedQuery: string;
   results: SearchResult[];
   selectedResult: SearchResult;
+  connection: ConnectionSnapshot;
+  onOpenConnection: () => void;
   onQueryChange: (query: string) => void;
   onSearch: (query: string) => void;
   onSelectResult: (result: SearchResult) => void;
@@ -58,6 +60,8 @@ export function SearchWorkspace({
   submittedQuery,
   results,
   selectedResult,
+  connection,
+  onOpenConnection,
   onQueryChange,
   onSearch,
   onSelectResult,
@@ -65,6 +69,18 @@ export function SearchWorkspace({
 }: SearchWorkspaceProps) {
   const [filterOpen, setFilterOpen] = useState(false);
   const [layout, setLayout] = useState<"list" | "grid">("list");
+  const online = connection.state === "online";
+  const connectionLabel =
+    connection.state === "online"
+      ? "Network online"
+      : connection.state === "connecting" ||
+          connection.state === "authenticating"
+        ? "Connecting"
+        : connection.state === "reconnecting"
+          ? `Retrying in ${connection.retryInSeconds ?? "a few"}s`
+          : connection.state === "error"
+            ? "Connection needs attention"
+            : "Network offline";
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -75,12 +91,22 @@ export function SearchWorkspace({
   return (
     <section className="search-workspace" aria-label="Search workspace">
       <div className="network-toolbar">
-        <span className="network-status">
-          <i aria-hidden="true" /> Network online
-        </span>
+        <button
+          type="button"
+          className={`network-status is-${connection.state}`}
+          onClick={onOpenConnection}
+          title={connection.message}
+        >
+          <i aria-hidden="true" /> {connectionLabel}
+        </button>
 
         <form className="global-search" onSubmit={submit}>
-          <button type="submit" className="search-submit" aria-label="Search">
+          <button
+            type="submit"
+            className="search-submit"
+            aria-label="Search"
+            disabled={!online}
+          >
             <MagnifyingGlass size={18} weight="light" />
           </button>
           <input
@@ -94,6 +120,7 @@ export function SearchWorkspace({
             }}
             aria-label="Search the network"
             placeholder="Search the network"
+            disabled={!online}
           />
           {query && (
             <button
@@ -108,9 +135,10 @@ export function SearchWorkspace({
         </form>
 
         <div className="filter-wrap">
-          <button
-            type="button"
-            className={`toolbar-button ${filterOpen ? "is-open" : ""}`}
+            <button
+              type="button"
+              className={`toolbar-button ${filterOpen ? "is-open" : ""}`}
+              disabled={!online}
             aria-expanded={filterOpen}
             onClick={() => setFilterOpen((open) => !open)}
           >

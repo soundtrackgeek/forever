@@ -2,6 +2,8 @@ import { DownloadSimple, MagnifyingGlass, Radio, Sliders } from "@phosphor-icons
 import { useMemo, useState } from "react";
 import "./App.css";
 import { AppSidebar } from "./components/AppSidebar";
+import { ConnectionOnboarding } from "./components/ConnectionOnboarding";
+import { ConnectionSettings } from "./components/ConnectionSettings";
 import { ReleaseInspector } from "./components/ReleaseInspector";
 import { SearchWorkspace } from "./components/SearchWorkspace";
 import { TransferShelf } from "./components/TransferShelf";
@@ -9,6 +11,7 @@ import { UpdateExperience } from "./components/UpdateExperience";
 import { WindowControls } from "./components/WindowControls";
 import { initialTransfers, searchResults } from "./data/mockData";
 import { useAppUpdater } from "./hooks/useAppUpdater";
+import { useSoulseekConnection } from "./hooks/useSoulseekConnection";
 import type { SearchResult, Transfer } from "./types";
 
 const viewDetails = {
@@ -79,6 +82,12 @@ function App() {
   const [selectedResult, setSelectedResult] = useState(searchResults[0]);
   const [transfers, setTransfers] = useState<Transfer[]>(initialTransfers);
   const updater = useAppUpdater();
+  const connection = useSoulseekConnection();
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const onboardingOpen =
+    connection.ready &&
+    (!connection.profile || !connection.hasPassword) &&
+    !onboardingDismissed;
 
   const filteredResults = useMemo(() => {
     const terms = submittedQuery
@@ -153,6 +162,8 @@ function App() {
         <AppSidebar
           activeView={activeView}
           updateStatus={updater.status}
+          username={connection.snapshot.username}
+          connectionState={connection.snapshot.state}
           onNavigate={navigate}
           onCheckForUpdates={() => void updater.checkForUpdates(true)}
         />
@@ -164,6 +175,8 @@ function App() {
               submittedQuery={submittedQuery}
               results={filteredResults}
               selectedResult={selectedResult}
+              connection={connection.snapshot}
+              onOpenConnection={() => setActiveView("settings")}
               onQueryChange={setQuery}
               onSearch={(nextQuery) => {
                 const normalizedQuery = nextQuery.trim();
@@ -178,6 +191,24 @@ function App() {
               onQueueDownload={queueDownload}
             />
           </>
+        ) : activeView === "settings" && connection.profile ? (
+          <ConnectionSettings
+            profile={connection.profile}
+            hasPassword={connection.hasPassword}
+            snapshot={connection.snapshot}
+            diagnostics={connection.diagnostics}
+            diagnosticsPath={connection.diagnosticsPath}
+            error={connection.error}
+            onSave={connection.saveProfile}
+            onConnect={connection.connect}
+            onDisconnect={connection.disconnect}
+            onReset={async () => {
+              await connection.reset();
+              setOnboardingDismissed(false);
+            }}
+            onLoadDiagnostics={connection.loadDiagnostics}
+            onCheckForUpdates={() => void updater.checkForUpdates(true)}
+          />
         ) : (
           <PlaceholderView
             view={activeView as keyof typeof viewDetails}
@@ -194,6 +225,19 @@ function App() {
       />
 
       <UpdateExperience {...updater} />
+
+      {onboardingOpen && connection.ready && (
+        <ConnectionOnboarding
+          profile={connection.profile ?? connection.suggestedProfile}
+          hasPassword={connection.hasPassword}
+          snapshot={connection.snapshot}
+          error={connection.error}
+          onSave={connection.saveProfile}
+          onConnect={connection.connect}
+          onComplete={() => setOnboardingDismissed(true)}
+          onExploreOffline={() => setOnboardingDismissed(true)}
+        />
+      )}
     </div>
   );
 }

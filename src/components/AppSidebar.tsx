@@ -9,10 +9,13 @@ import {
   UsersThree,
 } from "@phosphor-icons/react";
 import type { UpdateStatus } from "../hooks/useAppUpdater";
+import type { ConnectionState } from "../types";
 
 type AppSidebarProps = {
   activeView: string;
   updateStatus: UpdateStatus;
+  username: string | null;
+  connectionState: ConnectionState;
   onNavigate: (view: string) => void;
   onCheckForUpdates: () => void;
 };
@@ -28,6 +31,8 @@ const navItems = [
 export function AppSidebar({
   activeView,
   updateStatus,
+  username,
+  connectionState,
   onNavigate,
   onCheckForUpdates,
 }: AppSidebarProps) {
@@ -37,6 +42,16 @@ export function AppSidebar({
       : updateStatus === "current"
         ? "Forever is up to date"
         : "Check for updates";
+  const connectionLabel =
+    connectionState === "online"
+      ? "Online"
+      : connectionState === "connecting" ||
+          connectionState === "authenticating" ||
+          connectionState === "reconnecting"
+        ? "Connecting"
+        : connectionState === "error"
+          ? "Needs attention"
+          : "Offline";
 
   return (
     <aside className="sidebar">
@@ -93,15 +108,15 @@ export function AppSidebar({
 
       <button
         type="button"
-        className="profile-row"
-        onClick={onCheckForUpdates}
-        aria-label="SignalLevel profile. Check for updates."
+        className={`profile-row is-${connectionState}`}
+        onClick={() => onNavigate("settings")}
+        aria-label={`${username || "Soulseek"} profile. ${connectionLabel}. Open connection settings.`}
       >
         <img src="/assets/listener-avatar.png" alt="" />
         <span className="profile-copy">
-          <strong>SignalLevel</strong>
+          <strong>{username || "Connect Soulseek"}</strong>
           <span>
-            <i aria-hidden="true" /> Online
+            <i aria-hidden="true" /> {connectionLabel}
           </span>
         </span>
         <CaretDown className="profile-caret" size={12} weight="bold" />

@@ -3,15 +3,24 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.1` establishes the Midnight Radio
-> application shell, quality gates, Windows installers, and signed in-app
-> updater. Soulseek connectivity begins in the next development stage.
+> **Status:** pre-alpha. Version `0.0.2` adds the first real Soulseek
+> connection: secure local credential storage, live login state, reconnects,
+> first-run setup, and connection settings. Search results and transfers still
+> use local development data.
 
-![Forever Midnight Radio interface](design/implementation/midnight-radio-stage0.png)
+![Forever Midnight Radio interface](design/implementation/midnight-radio-0.0.2.png)
 
 ## Current foundation
 
 - Faithful Midnight Radio desktop interface
+- First-run Soulseek account setup with native download-folder selection
+- Live TCP login to the Soulseek server with explicit connecting,
+  authenticating, online, reconnecting, offline, and error states
+- Automatic reconnect with bounded exponential backoff and optional connection
+  on startup
+- Passwords stored in Windows Credential Manager, or held only in memory when
+  “Remember password” is disabled
+- Non-secret JSON connection preferences and sanitized local diagnostics
 - Search, selection, filtering, inspector, and transfer interactions using local
   development data
 - Custom frameless Windows shell and branded application icons
@@ -44,6 +53,24 @@ npm run dev
 
 Use `http://localhost:1420/?update=available` during frontend development to
 preview the update toast and modal without publishing a release.
+
+Use `http://localhost:1420/?onboarding=1` to preview the fresh-install
+connection flow. The browser preview simulates connection state; run
+`npm run tauri dev` to exercise the native credential vault and live Soulseek
+login.
+
+## Connection data and privacy
+
+Forever writes non-secret account preferences to the Tauri application
+configuration directory and connection events to
+`logs/connection.log`. Passwords are excluded from both. With “Remember
+password” enabled, Windows Credential Manager stores the password; otherwise it
+exists only for the current app session.
+
+The legacy Soulseek protocol itself does not provide transport encryption.
+Credential protection described above applies to local storage, not the
+connection between the client and Soulseek server. Use a unique password that
+you do not reuse for another service.
 
 ## Quality checks
 
@@ -92,8 +119,8 @@ installer is downloaded.
 ## Project structure
 
 ```text
-src/                    React interface and updater experience
-src-tauri/              Rust/Tauri application and bundle configuration
+src/                    React interface, connection UX, and updater experience
+src-tauri/              Rust/Tauri app, Soulseek connection service, and bundling
 .github/workflows/      CI and automatic Windows release pipelines
 design/concepts/        Approved design explorations
 public/assets/          Production raster assets

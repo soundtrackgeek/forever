@@ -31,3 +31,48 @@ export type Transfer = {
   eta: string;
   status: "downloading" | "queued" | "paused";
 };
+
+export type ConnectionState =
+  | "unconfigured"
+  | "offline"
+  | "connecting"
+  | "authenticating"
+  | "online"
+  | "reconnecting"
+  | "error";
+
+export type ConnectionProfile = {
+  username: string;
+  serverHost: string;
+  serverPort: number;
+  downloadDirectory: string;
+  rememberPassword: boolean;
+  autoConnect: boolean;
+};
+
+export type ConnectionSnapshot = {
+  state: ConnectionState;
+  username: string | null;
+  server: string | null;
+  message: string;
+  attempt: number;
+  connectedAtMs: number | null;
+  retryInSeconds: number | null;
+  updatedAtMs: number;
+};
+
+export type DiagnosticEntry = {
+  timestampMs: number;
+  level: string;
+  event: string;
+  message: string;
+};
+
+export type ConnectionBootstrap = {
+  profile: ConnectionProfile | null;
+  suggestedProfile: ConnectionProfile;
+  hasPassword: boolean;
+  snapshot: ConnectionSnapshot;
+  diagnosticsPath: string;
+  diagnostics: DiagnosticEntry[];
+};
