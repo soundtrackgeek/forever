@@ -1,0 +1,111 @@
+import {
+  ArrowsClockwise,
+  CaretDown,
+  DownloadSimple,
+  GearSix,
+  House,
+  MagnifyingGlass,
+  MusicNotes,
+  UsersThree,
+} from "@phosphor-icons/react";
+import type { UpdateStatus } from "../hooks/useAppUpdater";
+
+type AppSidebarProps = {
+  activeView: string;
+  updateStatus: UpdateStatus;
+  onNavigate: (view: string) => void;
+  onCheckForUpdates: () => void;
+};
+
+const navItems = [
+  { id: "home", label: "Home", icon: House },
+  { id: "search", label: "Search", icon: MagnifyingGlass },
+  { id: "rooms", label: "Rooms", icon: UsersThree },
+  { id: "transfers", label: "Transfers", icon: DownloadSimple },
+  { id: "library", label: "Library", icon: MusicNotes },
+];
+
+export function AppSidebar({
+  activeView,
+  updateStatus,
+  onNavigate,
+  onCheckForUpdates,
+}: AppSidebarProps) {
+  const statusLabel =
+    updateStatus === "checking"
+      ? "Checking for updates"
+      : updateStatus === "current"
+        ? "Forever is up to date"
+        : "Check for updates";
+
+  return (
+    <aside className="sidebar">
+      <div className="wordmark" aria-label="Forever">
+        FOREVER
+      </div>
+
+      <nav className="primary-nav" aria-label="Primary">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeView === item.id;
+
+          return (
+            <button
+              type="button"
+              className={`nav-item ${isActive ? "is-active" : ""}`}
+              aria-current={isActive ? "page" : undefined}
+              onClick={() => onNavigate(item.id)}
+              key={item.id}
+            >
+              <Icon size={21} weight={isActive ? "regular" : "light"} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="sidebar-spacer" />
+
+      <div className="sidebar-actions">
+        <button
+          type="button"
+          className="sidebar-icon-button"
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => onNavigate("settings")}
+        >
+          <GearSix size={18} weight="light" />
+        </button>
+        <button
+          type="button"
+          className="sidebar-icon-button"
+          aria-label={statusLabel}
+          title={statusLabel}
+          onClick={onCheckForUpdates}
+        >
+          <ArrowsClockwise
+            className={updateStatus === "checking" ? "is-spinning" : ""}
+            size={18}
+            weight="light"
+          />
+        </button>
+      </div>
+
+      <button
+        type="button"
+        className="profile-row"
+        onClick={onCheckForUpdates}
+        aria-label="SignalLevel profile. Check for updates."
+      >
+        <img src="/assets/listener-avatar.png" alt="" />
+        <span className="profile-copy">
+          <strong>SignalLevel</strong>
+          <span>
+            <i aria-hidden="true" /> Online
+          </span>
+        </span>
+        <CaretDown className="profile-caret" size={12} weight="bold" />
+      </button>
+    </aside>
+  );
+}
