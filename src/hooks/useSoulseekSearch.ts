@@ -48,10 +48,13 @@ const formatBytes = (bytes: number) => {
 const basename = (path: string) =>
   path.split(/[\\/]/).filter(Boolean).slice(-1)[0] ?? path;
 
-const dirname = (path: string) => {
-  const segments = path.split(/[\\/]/).filter(Boolean);
-  return segments.length > 1 ? segments.slice(0, -1).join(" / ") : "Shared file";
+export const remoteDirectory = (path: string) => {
+  const separator = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  return separator >= 0 ? path.slice(0, separator) : "";
 };
+
+const displayDirectory = (path: string) =>
+  remoteDirectory(path).replace(/[\\/]/g, " / ") || "Shared file";
 
 const formatDuration = (seconds: number | null) => {
   if (!seconds) return null;
@@ -83,7 +86,7 @@ const presentResult = (result: LiveSearchResult): SearchResult => {
   return {
     id: result.id,
     title,
-    subtitle: `${dirname(result.filename)}${duration ? ` · ${duration}` : ""}`,
+    subtitle: `${displayDirectory(result.filename)}${duration ? ` · ${duration}` : ""}`,
     owner: result.username,
     trust: result.slotFree ? 100 : Math.max(70, 98 - result.queueLength),
     format: (
@@ -99,7 +102,7 @@ const presentResult = (result: LiveSearchResult): SearchResult => {
     availability: barsFor(result),
     source: "live",
     filename: result.filename,
-    folder: dirname(result.filename),
+    folder: remoteDirectory(result.filename),
     sizeBytes: result.sizeBytes,
     bitrate: result.bitrate,
     durationSeconds: result.durationSeconds,

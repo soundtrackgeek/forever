@@ -5,6 +5,23 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] - 2026-07-25
+
+### Fixed
+
+- Live folder browsing now sends the exact remote directory from a search
+  result instead of the slash-separated display label, preventing valid peers
+  from timing out on a path that did not exist in their shares.
+- Search-response peer sockets close after their response is recorded so a
+  folder request can establish the single active peer connection Soulseek
+  permits for that user.
+- Folder peer connections now surface premature socket closure or peer idle
+  timeout immediately instead of silently waiting for the outer request timer.
+
+### Changed
+
+- Application and updater preview metadata now identify version `0.0.8`.
+
 ## [0.0.7] - 2026-07-25
 
 ### Added

@@ -3,9 +3,9 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.7` expands the first download into a
-> release workflow: inspect a source folder, choose its files, and keep the
-> entire release organized and resumable.
+> **Status:** pre-alpha. Version `0.0.8` fixes live source-folder browsing in
+> the release workflow introduced in 0.0.7: inspect a source folder, choose its
+> files, and keep the entire release organized and resumable.
 
 ![Forever Midnight Radio release transfers interface](design/implementation/release-transfers-0.0.7.png)
 
@@ -87,7 +87,7 @@ complete source folder. Choose the files you want, then select **Download**;
 Forever creates a safe release folder beneath the download location configured
 in Connection settings and adds the files in their displayed order.
 
-Version `0.0.7` intentionally keeps one active file at a time, even when an
+Version `0.0.8` intentionally keeps one active file at a time, even when an
 entire release is queued. Multiple simultaneous downloads, uploads, library
 management, metadata/cover lookup, and playback remain outside this release.
 
@@ -128,7 +128,7 @@ Incomplete files use a `.part` suffix and remain resumable. Forever accepts a
 file stream only when its username, exact remote filename, transfer token, and
 announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
-protocol does not provide chunk hashes, so v0.0.7 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.8 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

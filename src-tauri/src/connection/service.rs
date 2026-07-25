@@ -156,6 +156,13 @@ struct PeerServices {
     command_sender: mpsc::UnboundedSender<ConnectionCommand>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PeerMessagePurpose {
+    General,
+    Transfer,
+    Folder,
+}
+
 #[derive(Clone)]
 pub struct ConnectionManager {
     app: AppHandle,
@@ -1221,6 +1228,7 @@ async fn handle_direct_peer(
                 folders,
                 transfers,
                 command_sender,
+                PeerMessagePurpose::General,
             )
             .await
         }
@@ -1277,6 +1285,7 @@ async fn handle_indirect_peer(
         folders,
         transfers,
         command_sender,
+        PeerMessagePurpose::General,
     )
     .await
 }
@@ -1418,6 +1427,7 @@ async fn queue_download_on_peer(
         folders,
         transfers,
         command_sender,
+        PeerMessagePurpose::Transfer,
     )
     .await
 }
@@ -1442,6 +1452,7 @@ async fn browse_folder_on_peer(
         folders,
         transfers,
         command_sender,
+        PeerMessagePurpose::Folder,
     )
     .await
 }
@@ -1453,6 +1464,7 @@ async fn handle_peer_messages(
     folders: FolderHub,
     transfers: TransferHub,
     command_sender: mpsc::UnboundedSender<ConnectionCommand>,
+    purpose: PeerMessagePurpose,
 ) -> Result<(), super::protocol::ProtocolError> {
     loop {
         let frame = match timeout(PEER_IDLE_TIMEOUT, read_frame(stream)).await {
@@ -1466,13 +1478,22 @@ async fn handle_peer_messages(
                         | std::io::ErrorKind::BrokenPipe
                 ) =>
             {
-                return Ok(())
+                if purpose == PeerMessagePurpose::Folder {
+                    return Err(error.into());
+                }
+                return Ok(());
             }
             Ok(Err(error)) => return Err(error),
+            Err(_) if purpose == PeerMessagePurpose::Folder => return Err(peer_timeout_error()),
             Err(_) => return Ok(()),
         };
         match frame.code {
-            FILE_SEARCH_RESPONSE_CODE => search.record(parse_search_response(&frame)?),
+            FILE_SEARCH_RESPONSE_CODE => {
+                search.record(parse_search_response(&frame)?);
+                if purpose == PeerMessagePurpose::General {
+                    return Ok(());
+                }
+            }
             FOLDER_CONTENTS_RESPONSE_CODE
                 if folders.resolve(username, parse_folder_contents_response(&frame)?) =>
             {
