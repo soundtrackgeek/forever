@@ -6,6 +6,7 @@ mod protocol;
 mod search;
 mod service;
 mod settings;
+mod shares;
 
 use search::SearchSnapshot;
 use service::{ConnectionBootstrap, ConnectionManager, ConnectionSnapshot, SaveConnectionRequest};
@@ -157,6 +158,41 @@ pub async fn folder_inspect(
     manager
         .inspect_folder(username, folder)
         .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn shares_browse(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+    refresh: bool,
+) -> Result<shares::UserSharesOverview, String> {
+    manager
+        .browse_shares(username, refresh)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn shares_folder(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+    directory: String,
+) -> Result<shares::ShareFolderSnapshot, String> {
+    manager
+        .shared_folder(&username, &directory)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn shares_search(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+    query: String,
+    extension: Option<String>,
+) -> Result<shares::ShareSearchSnapshot, String> {
+    manager
+        .search_shares(&username, &query, extension.as_deref())
         .map_err(|error| error.to_string())
 }
 

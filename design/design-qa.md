@@ -1,5 +1,71 @@
 # Midnight Radio design QA
 
+## 0.0.9 — User Shares Explorer
+
+- Approved shell reference: `design/concepts/03-midnight-radio.png`
+  (1584 × 992)
+- Coordinated shares reference:
+  `design/concepts/07-midnight-radio-user-shares.png` (1584 × 992)
+- Native implementation capture:
+  `design/implementation/release-user-shares-0.0.9.png` (1584 × 992)
+- Minimum-window capture:
+  `design/implementation/release-user-shares-0.0.9-minimum.png` (1024 × 680)
+- Render method: the live Vite application was opened and the complete
+  search-result → user shares → selection → transfer handoff was exercised in
+  the Codex in-app browser. No console warnings or errors were present.
+
+### Fidelity ledger
+
+1. Layout matched: the persistent navigation rail and transfer shelf frame a
+   dedicated three-pane explorer with folder navigation, file table, and user/
+   selection inspector in the same hierarchy as the coordinated reference.
+2. Palette matched: midnight navy surfaces, indigo hairlines, violet navigation
+   and metadata signals, amber folders/checks/primary action, and green online
+   state carry directly from the accepted system.
+3. Typography matched: the light editorial user heading and compact uppercase
+   utility labels, file metadata, path text, and transfer details retain the
+   established desktop scale.
+4. Component geometry matched: shallow radii, restrained framed controls,
+   unboxed table rows, square selection checks, fine dividers, and the circular
+   selection summary preserve the reference's dense precision.
+5. Interaction hierarchy matched: browse and search remain primary, individual
+   files or a whole folder feed a persistent selection, and one amber Download
+   selection action hands the exact files to the grouped transfer queue.
+6. Responsive behavior passed: at 1024 × 680 the existing navigation rail
+   collapses to icons, all three explorer panes remain available, the file table
+   gains an intentional horizontal scroll rail, and nothing overlaps the fixed
+   transfer shelf.
+
+### Copy and intentional deviations
+
+- The visible reference copy—user shares, Refresh, share search, Folders,
+  Format, Quality, Size, Selection, Select folder, and Download selection—is
+  preserved or made more explicit without adding promotional copy.
+- Reference-only library totals are replaced by counts and bytes returned by
+  the actual peer. Private directories remain identifiable but private files
+  cannot be selected as if they were publicly downloadable.
+- The coordinated concept shows a nested sample tree and a playback-oriented
+  bottom rail. The implementation lists the peer's real shared directories and
+  retains Forever's already-approved live transfer shelf because playback is
+  outside 0.0.9.
+- A short session-cache note explains that received share lists are not written
+  to disk. Empty, loading, timeout, retry, and truncated-search states add only
+  the copy necessary for the live protocol workflow.
+
+### Browser interaction review
+
+- Opened `audiophile92` from the search result row and confirmed the explorer
+  defaulted to Night Geometry after the share list arrived.
+- Selected a complete ten-file folder, searched the cached list for
+  “thresholds,” returned to folder view with the search field reset, and kept
+  the selection intact.
+- Download selection navigated into the Transfers workspace and preserved the
+  existing grouped-release queue behavior.
+
+The 0.0.9 explorer is faithful to the approved Midnight Radio shares direction.
+Its intentional differences are driven by real Soulseek data and the existing
+release scope; no material visual mismatch remains.
+
 ## 0.0.7 — Download the Release
 
 - Approved primary reference: `design/concepts/03-midnight-radio.png`

@@ -30,8 +30,8 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.8",
-  version: "0.0.8",
+  currentVersion: "0.0.9",
+  version: "0.0.9",
   body: "A preview release for exercising Forever’s signed update experience.",
   date: "2026-07-25",
 };

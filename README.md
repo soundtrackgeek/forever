@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.8` fixes live source-folder browsing in
-> the release workflow introduced in 0.0.7: inspect a source folder, choose its
-> files, and keep the entire release organized and resumable.
+> **Status:** pre-alpha. Version `0.0.9` adds the complete User Shares Explorer:
+> open any search-result source, browse or search their public share list, build
+> a multi-folder selection, and send it to the resumable release queue.
 
-![Forever Midnight Radio release transfers interface](design/implementation/release-transfers-0.0.7.png)
+![Forever Midnight Radio user shares interface](design/implementation/release-user-shares-0.0.9.png)
 
 ## Current foundation
 
@@ -28,6 +28,12 @@ Rust, Tauri 2, React, and TypeScript.
 - Live source-folder inspection using Soulseek Folder Contents requests, with
   complete subfolder results, file sizes, formats, and available audio quality
   attributes
+- Complete user-share browsing using Soulseek's compressed Shared File List
+  exchange, including public/private folder metadata, bounded parsing, a
+  session-only cache, local filename/path search, format filters, and sorting
+- A three-pane User Shares Explorer with folder navigation, detailed file
+  metadata, multi-folder selection, selected-byte totals, and direct handoff to
+  the grouped transfer queue
 - A polished release selector with per-file choices, Select all/Deselect all,
   selected-file counts, and aggregate download size
 - Whole-release enqueue into a collision-free local release folder, with
@@ -85,9 +91,14 @@ peers respond. Each search listens for responses for 15 seconds and can be
 stopped early. Select a live file and choose **Browse folder** to request its
 complete source folder. Choose the files you want, then select **Download**;
 Forever creates a safe release folder beneath the download location configured
-in Connection settings and adds the files in their displayed order.
+in Connection settings and adds the files in their displayed order. Choose the
+folder icon on any result—or **Browse shares** in the source inspector—to open
+that listener's complete shares. Source names in the transfer shelf and full
+Transfers workspace open the same explorer. Share-list search and format
+filtering run locally after the list is received; **Refresh** explicitly asks
+the peer again.
 
-Version `0.0.8` intentionally keeps one active file at a time, even when an
+Version `0.0.9` intentionally keeps one active file at a time, even when an
 entire release is queued. Multiple simultaneous downloads, uploads, library
 management, metadata/cover lookup, and playback remain outside this release.
 
@@ -107,8 +118,9 @@ Forever writes non-secret account preferences to the Tauri application
 configuration directory and connection events to
 `logs/connection.log`. Release grouping, file order, and transfer metadata are
 stored in `transfers.json` in the same configuration directory; peer IP
-addresses, temporary folder listings, and credentials are excluded. Passwords
-are excluded from both. With “Remember
+addresses, temporary folder listings, cached user share lists, and credentials
+are excluded. Share lists stay in memory only for the current app session.
+Passwords are excluded from both. With “Remember
 password” enabled, Windows Credential Manager stores the password; otherwise it
 exists only for the current app session.
 
@@ -128,7 +140,9 @@ Incomplete files use a `.part` suffix and remain resumable. Forever accepts a
 file stream only when its username, exact remote filename, transfer token, and
 announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
-protocol does not provide chunk hashes, so v0.0.8 verifies the expected byte
+Shared File List parser bounds peer frames, decompressed payloads, directory
+counts, file counts, and file attributes before caching a response. The
+protocol does not provide chunk hashes, so v0.0.9 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

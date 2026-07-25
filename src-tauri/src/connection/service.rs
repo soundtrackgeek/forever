@@ -11,17 +11,23 @@ use super::{
         folder_contents_request_frame, get_peer_address_frame, login_frame,
         parse_cant_connect_token, parse_connect_to_peer, parse_filename,
         parse_folder_contents_response, parse_login_response, parse_peer_address,
-        parse_queue_position, parse_search_response, parse_transfer_request, parse_upload_denied,
-        peer_init_frame, pierce_firewall_frame, place_in_queue_request_frame, queue_upload_frame,
-        read_frame, read_peer_init, server_ping_frame, set_online_frame, set_wait_port_frame,
-        shared_counts_frame, transfer_response_frame, write_raw_frame, ConnectToPeer, Frame,
-        LoginResponse, PeerAddress, PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE,
-        CONNECT_TO_PEER_CODE, FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_RESPONSE_CODE,
-        GET_PEER_ADDRESS_CODE, PLACE_IN_QUEUE_RESPONSE_CODE, RELOGGED_CODE, TRANSFER_REQUEST_CODE,
-        UPLOAD_DENIED_CODE, UPLOAD_FAILED_CODE,
+        parse_queue_position, parse_search_response, parse_shared_file_list_response,
+        parse_transfer_request, parse_upload_denied, peer_init_frame, pierce_firewall_frame,
+        place_in_queue_request_frame, queue_upload_frame, read_frame, read_peer_frame,
+        read_peer_init, server_ping_frame, set_online_frame, set_wait_port_frame,
+        shared_counts_frame, shared_file_list_request_frame, transfer_response_frame,
+        write_raw_frame, ConnectToPeer, Frame, LoginResponse, PeerAddress, PeerInit, ProtocolError,
+        CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE, FILE_SEARCH_RESPONSE_CODE,
+        FOLDER_CONTENTS_RESPONSE_CODE, GET_PEER_ADDRESS_CODE, PLACE_IN_QUEUE_RESPONSE_CODE,
+        RELOGGED_CODE, SHARED_FILE_LIST_RESPONSE_CODE, TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE,
+        UPLOAD_FAILED_CODE,
     },
     search::{SearchHub, SearchSnapshot, SearchState},
     settings::{ConnectionProfile, SettingsStore},
+    shares::{
+        ShareFolderSnapshot, ShareSearchSnapshot, SharesError, SharesHub, SharesTicket,
+        UserSharesOverview,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -54,6 +60,7 @@ const SERVER_FRAME_QUEUE_SIZE: usize = 64;
 const MAX_SEARCH_QUERY_BYTES: usize = 250;
 const TRANSFER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const FOLDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
+const SHARES_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 const PEER_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const FILE_BUFFER_SIZE: usize = 128 * 1024;
 
@@ -144,6 +151,7 @@ impl Drop for AbortOnDrop {
 enum ConnectionCommand {
     StartSearch { token: u32, query: String },
     InspectFolder { ticket: FolderTicket },
+    BrowseShares { ticket: SharesTicket },
     PeerConnectionFailed { token: u32, username: String },
     ScheduleDownloads,
 }
@@ -152,6 +160,7 @@ enum ConnectionCommand {
 struct PeerServices {
     search: SearchHub,
     folders: FolderHub,
+    shares: SharesHub,
     transfers: TransferHub,
     command_sender: mpsc::UnboundedSender<ConnectionCommand>,
 }
@@ -161,6 +170,7 @@ enum PeerMessagePurpose {
     General,
     Transfer,
     Folder,
+    Shares(u32),
 }
 
 #[derive(Clone)]
@@ -179,6 +189,7 @@ pub struct ConnectionManager {
     next_connection_token: Arc<AtomicU32>,
     search: SearchHub,
     folders: FolderHub,
+    shares: SharesHub,
     transfers: TransferHub,
 }
 
@@ -219,6 +230,7 @@ impl ConnectionManager {
             )),
             search,
             folders: FolderHub::default(),
+            shares: SharesHub::default(),
             transfers,
         })
     }
@@ -498,6 +510,78 @@ impl ConnectionManager {
         }
     }
 
+    pub async fn browse_shares(
+        &self,
+        username: String,
+        refresh: bool,
+    ) -> Result<UserSharesOverview, ConnectionServiceError> {
+        let username = username.trim().to_owned();
+        if username.is_empty() || username.len() > 64 {
+            return Err(ConnectionServiceError::InvalidSharesRequest);
+        }
+        if !refresh {
+            if let Some(cached) = self.shares.cached(&username) {
+                return Ok(cached);
+            }
+        }
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::SharesUnavailable);
+        }
+        let sender = self
+            .command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .ok_or(ConnectionServiceError::SharesUnavailable)?;
+        let ticket = SharesTicket {
+            connection_token: self.take_connection_token(),
+            username,
+        };
+        let connection_token = ticket.connection_token;
+        let receiver = self.shares.start(ticket.clone());
+        if sender
+            .send(ConnectionCommand::BrowseShares { ticket })
+            .is_err()
+        {
+            self.shares.fail_connection(
+                connection_token,
+                "The Soulseek connection changed before share browsing could start.".to_owned(),
+            );
+            return Err(ConnectionServiceError::SharesUnavailable);
+        }
+        match timeout(SHARES_REQUEST_TIMEOUT, receiver).await {
+            Ok(Ok(result)) => result.map_err(Into::into),
+            Ok(Err(_)) => Err(ConnectionServiceError::SharesUnavailable),
+            Err(_) => {
+                self.shares.fail_connection(
+                    connection_token,
+                    "The user did not answer the share-list request in time.".to_owned(),
+                );
+                Err(ConnectionServiceError::SharesTimeout)
+            }
+        }
+    }
+
+    pub fn shared_folder(
+        &self,
+        username: &str,
+        directory: &str,
+    ) -> Result<ShareFolderSnapshot, ConnectionServiceError> {
+        Ok(self.shares.folder(username, directory)?)
+    }
+
+    pub fn search_shares(
+        &self,
+        username: &str,
+        query: &str,
+        extension: Option<&str>,
+    ) -> Result<ShareSearchSnapshot, ConnectionServiceError> {
+        if query.len() > MAX_SEARCH_QUERY_BYTES {
+            return Err(ConnectionServiceError::InvalidSharesRequest);
+        }
+        Ok(self.shares.search(username, query, extension)?)
+    }
+
     fn schedule_downloads(&self) {
         if self.current_snapshot().state != ConnectionState::Online {
             return;
@@ -629,6 +713,7 @@ impl ConnectionManager {
             self.clear_command_sender();
             self.transfers.connection_lost();
             self.folders.connection_lost();
+            self.shares.connection_lost();
             self.search
                 .fail("Search stopped because the Soulseek connection was interrupted.");
 
@@ -852,10 +937,13 @@ impl ConnectionManager {
                         if let Ok(request) = parse_connect_to_peer(&frame) {
                             spawn_indirect_peer(
                                 request,
-                                self.search.clone(),
-                                self.folders.clone(),
-                                self.transfers.clone(),
-                                command_sender.clone(),
+                                PeerServices {
+                                    search: self.search.clone(),
+                                    folders: self.folders.clone(),
+                                    shares: self.shares.clone(),
+                                    transfers: self.transfers.clone(),
+                                    command_sender: command_sender.clone(),
+                                },
                                 peer_limit.clone(),
                             );
                         }
@@ -869,6 +957,21 @@ impl ConnectionManager {
                                     PeerServices {
                                         search: self.search.clone(),
                                         folders: self.folders.clone(),
+                                        shares: self.shares.clone(),
+                                        transfers: self.transfers.clone(),
+                                        command_sender: command_sender.clone(),
+                                    },
+                                    peer_limit.clone(),
+                                );
+                            } else if let Some(ticket) = self.shares.requesting_for_username(&address.username) {
+                                spawn_outbound_shares_peer(
+                                    address,
+                                    ticket,
+                                    profile.username.clone(),
+                                    PeerServices {
+                                        search: self.search.clone(),
+                                        folders: self.folders.clone(),
+                                        shares: self.shares.clone(),
                                         transfers: self.transfers.clone(),
                                         command_sender: command_sender.clone(),
                                     },
@@ -885,6 +988,7 @@ impl ConnectionManager {
                                     PeerServices {
                                         search: self.search.clone(),
                                         folders: self.folders.clone(),
+                                        shares: self.shares.clone(),
                                         transfers: self.transfers.clone(),
                                         command_sender: command_sender.clone(),
                                     },
@@ -904,6 +1008,10 @@ impl ConnectionManager {
                                 token,
                                 "The source could not establish a peer connection.".to_owned(),
                             );
+                            self.shares.fail_connection(
+                                token,
+                                "The source could not establish a peer connection.".to_owned(),
+                            );
                         }
                     }
                 }
@@ -916,10 +1024,13 @@ impl ConnectionManager {
                     })?;
                     spawn_direct_peer(
                         peer_stream,
-                        self.search.clone(),
-                        self.folders.clone(),
-                        self.transfers.clone(),
-                        command_sender.clone(),
+                        PeerServices {
+                            search: self.search.clone(),
+                            folders: self.folders.clone(),
+                            shares: self.shares.clone(),
+                            transfers: self.transfers.clone(),
+                            command_sender: command_sender.clone(),
+                        },
                         peer_limit.clone(),
                     );
                 }
@@ -960,6 +1071,34 @@ impl ConnectionManager {
                                 ConnectionFailure::retryable(
                                     format!("The folder source address request could not be sent: {error}"),
                                     "folder_address_failed",
+                                )
+                            })?;
+                        }
+                        Some(ConnectionCommand::BrowseShares { ticket }) => {
+                            write_raw_frame(
+                                &mut server_writer,
+                                &connect_to_peer_frame(
+                                    ticket.connection_token,
+                                    &ticket.username,
+                                    "P",
+                                ),
+                            )
+                            .await
+                            .map_err(|error| {
+                                ConnectionFailure::retryable(
+                                    format!("The share-list peer request could not be sent: {error}"),
+                                    "shares_request_failed",
+                                )
+                            })?;
+                            write_raw_frame(
+                                &mut server_writer,
+                                &get_peer_address_frame(&ticket.username),
+                            )
+                            .await
+                            .map_err(|error| {
+                                ConnectionFailure::retryable(
+                                    format!("The share-list source address request could not be sent: {error}"),
+                                    "shares_address_failed",
                                 )
                             })?;
                         }
@@ -1064,6 +1203,7 @@ impl ConnectionManager {
         self.search.stop();
         self.transfers.connection_lost();
         self.folders.connection_lost();
+        self.shares.connection_lost();
         if let Some(active) = self
             .task
             .lock()
@@ -1108,31 +1248,17 @@ where
     }
 }
 
-fn spawn_direct_peer(
-    stream: TcpStream,
-    search: SearchHub,
-    folders: FolderHub,
-    transfers: TransferHub,
-    command_sender: mpsc::UnboundedSender<ConnectionCommand>,
-    limit: Arc<Semaphore>,
-) {
+fn spawn_direct_peer(stream: TcpStream, services: PeerServices, limit: Arc<Semaphore>) {
     let Ok(permit) = limit.try_acquire_owned() else {
         return;
     };
     tauri::async_runtime::spawn(async move {
         let _permit = permit;
-        let _ = handle_direct_peer(stream, search, folders, transfers, command_sender).await;
+        let _ = handle_direct_peer(stream, services).await;
     });
 }
 
-fn spawn_indirect_peer(
-    request: ConnectToPeer,
-    search: SearchHub,
-    folders: FolderHub,
-    transfers: TransferHub,
-    command_sender: mpsc::UnboundedSender<ConnectionCommand>,
-    limit: Arc<Semaphore>,
-) {
+fn spawn_indirect_peer(request: ConnectToPeer, services: PeerServices, limit: Arc<Semaphore>) {
     if !matches!(request.connection_type.as_str(), "P" | "F")
         || request.port == 0
         || request.port > u16::MAX.into()
@@ -1144,34 +1270,31 @@ fn spawn_indirect_peer(
     };
     tauri::async_runtime::spawn(async move {
         let _permit = permit;
-        if handle_indirect_peer(
-            &request,
-            search,
-            folders.clone(),
-            transfers,
-            command_sender.clone(),
-        )
-        .await
-        .is_err()
+        if handle_indirect_peer(&request, services.clone())
+            .await
+            .is_err()
         {
-            folders.fail_connection(
+            services.folders.fail_connection(
                 request.token,
                 "The source peer connection failed before the folder could be read.".to_owned(),
             );
-            let _ = command_sender.send(ConnectionCommand::PeerConnectionFailed {
-                token: request.token,
-                username: request.username,
-            });
+            services.shares.fail_connection(
+                request.token,
+                "The source peer connection failed before the share list could be read.".to_owned(),
+            );
+            let _ = services
+                .command_sender
+                .send(ConnectionCommand::PeerConnectionFailed {
+                    token: request.token,
+                    username: request.username,
+                });
         }
     });
 }
 
 async fn handle_direct_peer(
     mut stream: TcpStream,
-    search: SearchHub,
-    folders: FolderHub,
-    transfers: TransferHub,
-    command_sender: mpsc::UnboundedSender<ConnectionCommand>,
+    services: PeerServices,
 ) -> Result<(), super::protocol::ProtocolError> {
     let _ = stream.set_nodelay(true);
     let init = timeout(PEER_MESSAGE_TIMEOUT, read_peer_init(&mut stream))
@@ -1179,38 +1302,37 @@ async fn handle_direct_peer(
         .map_err(|_| peer_timeout_error())??;
     match init {
         PeerInit::PierceFirewall { token } => {
-            if let Some(ticket) = transfers.claim_peer(token) {
-                if let Err(error) = queue_download_on_peer(
-                    &mut stream,
-                    ticket.clone(),
-                    search.clone(),
-                    folders.clone(),
-                    transfers.clone(),
-                    command_sender.clone(),
-                )
-                .await
+            if let Some(ticket) = services.transfers.claim_peer(token) {
+                if let Err(error) =
+                    queue_download_on_peer(&mut stream, ticket.clone(), services.clone()).await
                 {
-                    if transfers.fail_id(
+                    if services.transfers.fail_id(
                         &ticket.id,
                         format!("The source connection ended before the file was queued: {error}"),
                     ) {
-                        let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
+                        let _ = services
+                            .command_sender
+                            .send(ConnectionCommand::ScheduleDownloads);
                     }
                 }
-            } else if let Some(ticket) = folders.claim_peer(token) {
-                if let Err(error) = browse_folder_on_peer(
-                    &mut stream,
-                    ticket.clone(),
-                    search,
-                    folders.clone(),
-                    transfers,
-                    command_sender,
-                )
-                .await
+            } else if let Some(ticket) = services.folders.claim_peer(token) {
+                if let Err(error) =
+                    browse_folder_on_peer(&mut stream, ticket.clone(), services.clone()).await
                 {
-                    folders.fail_connection(
+                    services.folders.fail_connection(
                         ticket.connection_token,
                         format!("The folder connection ended before the source answered: {error}"),
+                    );
+                }
+            } else if let Some(ticket) = services.shares.claim_peer(token) {
+                if let Err(error) =
+                    browse_shares_on_peer(&mut stream, ticket.clone(), services.clone()).await
+                {
+                    services.shares.fail_connection(
+                        ticket.connection_token,
+                        format!(
+                            "The share-list connection ended before the source answered: {error}"
+                        ),
                     );
                 }
             }
@@ -1224,10 +1346,7 @@ async fn handle_direct_peer(
             handle_peer_messages(
                 &mut stream,
                 &username,
-                search,
-                folders,
-                transfers,
-                command_sender,
+                services,
                 PeerMessagePurpose::General,
             )
             .await
@@ -1238,7 +1357,12 @@ async fn handle_direct_peer(
             let transfer_token = timeout(PEER_MESSAGE_TIMEOUT, stream.read_u32_le())
                 .await
                 .map_err(|_| peer_timeout_error())??;
-            spawn_file_download(stream, transfer_token, transfers, command_sender);
+            spawn_file_download(
+                stream,
+                transfer_token,
+                services.transfers,
+                services.command_sender,
+            );
             Ok(())
         }
         _ => Ok(()),
@@ -1247,10 +1371,7 @@ async fn handle_direct_peer(
 
 async fn handle_indirect_peer(
     request: &ConnectToPeer,
-    search: SearchHub,
-    folders: FolderHub,
-    transfers: TransferHub,
-    command_sender: mpsc::UnboundedSender<ConnectionCommand>,
+    services: PeerServices,
 ) -> Result<(), super::protocol::ProtocolError> {
     let mut stream = timeout(
         PEER_CONNECT_TIMEOUT,
@@ -1264,27 +1385,24 @@ async fn handle_indirect_peer(
         let transfer_token = timeout(PEER_MESSAGE_TIMEOUT, stream.read_u32_le())
             .await
             .map_err(|_| peer_timeout_error())??;
-        spawn_file_download(stream, transfer_token, transfers, command_sender);
+        spawn_file_download(
+            stream,
+            transfer_token,
+            services.transfers,
+            services.command_sender,
+        );
         return Ok(());
     }
-    if let Some(ticket) = folders.claim_peer(request.token) {
-        return browse_folder_on_peer(
-            &mut stream,
-            ticket,
-            search,
-            folders,
-            transfers,
-            command_sender,
-        )
-        .await;
+    if let Some(ticket) = services.folders.claim_peer(request.token) {
+        return browse_folder_on_peer(&mut stream, ticket, services).await;
+    }
+    if let Some(ticket) = services.shares.claim_peer(request.token) {
+        return browse_shares_on_peer(&mut stream, ticket, services).await;
     }
     handle_peer_messages(
         &mut stream,
         &request.username,
-        search,
-        folders,
-        transfers,
-        command_sender,
+        services,
         PeerMessagePurpose::General,
     )
     .await
@@ -1307,6 +1425,7 @@ fn spawn_outbound_download_peer(
         let PeerServices {
             search,
             folders,
+            shares,
             transfers,
             command_sender,
         } = services;
@@ -1332,10 +1451,13 @@ fn spawn_outbound_download_peer(
         if let Err(error) = queue_download_on_peer(
             &mut stream,
             claimed.clone(),
-            search,
-            folders,
-            transfers.clone(),
-            command_sender.clone(),
+            PeerServices {
+                search,
+                folders,
+                shares,
+                transfers: transfers.clone(),
+                command_sender: command_sender.clone(),
+            },
         )
         .await
         {
@@ -1366,6 +1488,7 @@ fn spawn_outbound_folder_peer(
         let PeerServices {
             search,
             folders,
+            shares,
             transfers,
             command_sender,
         } = services;
@@ -1391,10 +1514,13 @@ fn spawn_outbound_folder_peer(
         if let Err(error) = browse_folder_on_peer(
             &mut stream,
             claimed.clone(),
-            search,
-            folders.clone(),
-            transfers,
-            command_sender,
+            PeerServices {
+                search,
+                folders: folders.clone(),
+                shares,
+                transfers,
+                command_sender,
+            },
         )
         .await
         {
@@ -1406,13 +1532,54 @@ fn spawn_outbound_folder_peer(
     });
 }
 
+fn spawn_outbound_shares_peer(
+    address: PeerAddress,
+    ticket: SharesTicket,
+    own_username: String,
+    services: PeerServices,
+    limit: Arc<Semaphore>,
+) {
+    if address.port == 0 || address.port > u16::MAX.into() {
+        return;
+    }
+    let Ok(permit) = limit.try_acquire_owned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let _permit = permit;
+        let Ok(Ok(mut stream)) = timeout(
+            PEER_CONNECT_TIMEOUT,
+            TcpStream::connect((address.address, address.port as u16)),
+        )
+        .await
+        else {
+            return;
+        };
+        let _ = stream.set_nodelay(true);
+        if write_raw_frame(&mut stream, &peer_init_frame(&own_username, "P"))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let Some(claimed) = services.shares.claim_peer(ticket.connection_token) else {
+            return;
+        };
+        if let Err(error) =
+            browse_shares_on_peer(&mut stream, claimed.clone(), services.clone()).await
+        {
+            services.shares.fail_connection(
+                claimed.connection_token,
+                format!("The share-list connection ended before the source answered: {error}"),
+            );
+        }
+    });
+}
+
 async fn queue_download_on_peer(
     stream: &mut TcpStream,
     ticket: TransferTicket,
-    search: SearchHub,
-    folders: FolderHub,
-    transfers: TransferHub,
-    command_sender: mpsc::UnboundedSender<ConnectionCommand>,
+    services: PeerServices,
 ) -> Result<(), super::protocol::ProtocolError> {
     write_raw_frame(stream, &queue_upload_frame(&ticket.remote_filename)).await?;
     write_raw_frame(
@@ -1423,10 +1590,7 @@ async fn queue_download_on_peer(
     handle_peer_messages(
         stream,
         &ticket.username,
-        search,
-        folders,
-        transfers,
-        command_sender,
+        services,
         PeerMessagePurpose::Transfer,
     )
     .await
@@ -1435,10 +1599,7 @@ async fn queue_download_on_peer(
 async fn browse_folder_on_peer(
     stream: &mut TcpStream,
     ticket: FolderTicket,
-    search: SearchHub,
-    folders: FolderHub,
-    transfers: TransferHub,
-    command_sender: mpsc::UnboundedSender<ConnectionCommand>,
+    services: PeerServices,
 ) -> Result<(), super::protocol::ProtocolError> {
     write_raw_frame(
         stream,
@@ -1448,11 +1609,23 @@ async fn browse_folder_on_peer(
     handle_peer_messages(
         stream,
         &ticket.username,
-        search,
-        folders,
-        transfers,
-        command_sender,
+        services,
         PeerMessagePurpose::Folder,
+    )
+    .await
+}
+
+async fn browse_shares_on_peer(
+    stream: &mut TcpStream,
+    ticket: SharesTicket,
+    services: PeerServices,
+) -> Result<(), super::protocol::ProtocolError> {
+    write_raw_frame(stream, &shared_file_list_request_frame()).await?;
+    handle_peer_messages(
+        stream,
+        &ticket.username,
+        services,
+        PeerMessagePurpose::Shares(ticket.connection_token),
     )
     .await
 }
@@ -1460,14 +1633,11 @@ async fn browse_folder_on_peer(
 async fn handle_peer_messages(
     stream: &mut TcpStream,
     username: &str,
-    search: SearchHub,
-    folders: FolderHub,
-    transfers: TransferHub,
-    command_sender: mpsc::UnboundedSender<ConnectionCommand>,
+    services: PeerServices,
     purpose: PeerMessagePurpose,
 ) -> Result<(), super::protocol::ProtocolError> {
     loop {
-        let frame = match timeout(PEER_IDLE_TIMEOUT, read_frame(stream)).await {
+        let frame = match timeout(PEER_IDLE_TIMEOUT, read_peer_frame(stream)).await {
             Ok(Ok(frame)) => frame,
             Ok(Err(ProtocolError::Io(error)))
                 if matches!(
@@ -1478,33 +1648,56 @@ async fn handle_peer_messages(
                         | std::io::ErrorKind::BrokenPipe
                 ) =>
             {
-                if purpose == PeerMessagePurpose::Folder {
+                if matches!(
+                    purpose,
+                    PeerMessagePurpose::Folder | PeerMessagePurpose::Shares(_)
+                ) {
                     return Err(error.into());
                 }
                 return Ok(());
             }
             Ok(Err(error)) => return Err(error),
-            Err(_) if purpose == PeerMessagePurpose::Folder => return Err(peer_timeout_error()),
+            Err(_)
+                if matches!(
+                    purpose,
+                    PeerMessagePurpose::Folder | PeerMessagePurpose::Shares(_)
+                ) =>
+            {
+                return Err(peer_timeout_error())
+            }
             Err(_) => return Ok(()),
         };
         match frame.code {
             FILE_SEARCH_RESPONSE_CODE => {
-                search.record(parse_search_response(&frame)?);
+                services.search.record(parse_search_response(&frame)?);
                 if purpose == PeerMessagePurpose::General {
                     return Ok(());
                 }
             }
             FOLDER_CONTENTS_RESPONSE_CODE
-                if folders.resolve(username, parse_folder_contents_response(&frame)?) =>
+                if services
+                    .folders
+                    .resolve(username, parse_folder_contents_response(&frame)?) =>
             {
                 return Ok(())
             }
             FOLDER_CONTENTS_RESPONSE_CODE => {}
+            SHARED_FILE_LIST_RESPONSE_CODE => {
+                if let PeerMessagePurpose::Shares(connection_token) = purpose {
+                    services.shares.resolve(
+                        connection_token,
+                        username,
+                        parse_shared_file_list_response(&frame)?,
+                    );
+                    return Ok(());
+                }
+            }
             TRANSFER_REQUEST_CODE => {
                 let request = parse_transfer_request(&frame)?;
                 let accepted = request.direction == 1
                     && request.size_bytes.is_some_and(|size| {
-                        transfers
+                        services
+                            .transfers
                             .accept_upload_request(username, &request.filename, request.token, size)
                             .is_some()
                     });
@@ -1518,38 +1711,46 @@ async fn handle_peer_messages(
                 )
                 .await?;
                 if !accepted
-                    && transfers.fail_for_filename(
+                    && services.transfers.fail_for_filename(
                         username,
                         &request.filename,
                         "The source reported a different file size than the search result."
                             .to_owned(),
                     )
                 {
-                    let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
+                    let _ = services
+                        .command_sender
+                        .send(ConnectionCommand::ScheduleDownloads);
                 }
             }
             PLACE_IN_QUEUE_RESPONSE_CODE => {
                 let (filename, position) = parse_queue_position(&frame)?;
-                transfers.set_queue_position(username, &filename, position);
+                services
+                    .transfers
+                    .set_queue_position(username, &filename, position);
             }
             UPLOAD_FAILED_CODE => {
                 let filename = parse_filename(&frame, UPLOAD_FAILED_CODE)?;
-                if transfers.fail_for_filename(
+                if services.transfers.fail_for_filename(
                     username,
                     &filename,
                     "The source stopped the upload before the file completed.".to_owned(),
                 ) {
-                    let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
+                    let _ = services
+                        .command_sender
+                        .send(ConnectionCommand::ScheduleDownloads);
                 }
             }
             UPLOAD_DENIED_CODE => {
                 let (filename, reason) = parse_upload_denied(&frame)?;
-                if transfers.fail_for_filename(
+                if services.transfers.fail_for_filename(
                     username,
                     &filename,
                     format!("The source declined the download: {reason}"),
                 ) {
-                    let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
+                    let _ = services
+                        .command_sender
+                        .send(ConnectionCommand::ScheduleDownloads);
                 }
             }
             _ => {}
@@ -1777,6 +1978,8 @@ pub enum ConnectionServiceError {
     Transfer(#[from] TransferError),
     #[error("{0}")]
     Folder(#[from] FolderError),
+    #[error("{0}")]
+    Shares(#[from] SharesError),
     #[error("Add your Soulseek account before connecting.")]
     NotConfigured,
     #[error("Enter your Soulseek password.")]
@@ -1789,6 +1992,12 @@ pub enum ConnectionServiceError {
     InvalidFolderRequest,
     #[error("The source did not answer the folder request in time.")]
     FolderTimeout,
+    #[error("Connect to Soulseek before browsing a user's shares.")]
+    SharesUnavailable,
+    #[error("Choose a valid Soulseek username and share search.")]
+    InvalidSharesRequest,
+    #[error("The user did not answer the share-list request in time.")]
+    SharesTimeout,
     #[error("{0}")]
     InvalidSearch(String),
     #[error("Could not initialize connection diagnostics: {0}")]

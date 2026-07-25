@@ -4,6 +4,7 @@ import {
   CircleNotch,
   DownloadSimple,
   FunnelSimple,
+  FolderOpen,
   GridFour,
   ListBullets,
   MagnifyingGlass,
@@ -41,6 +42,7 @@ type SearchWorkspaceProps = {
   onStopSearch: () => void;
   onSelectResult: (result: SearchResult) => void;
   onQueueDownload: (result: SearchResult) => void;
+  onBrowseUser: (username: string) => void;
 };
 
 const losslessFormats = new Set(["FLAC", "ALAC", "WAV", "AIFF", "APE", "WV"]);
@@ -100,6 +102,7 @@ export function SearchWorkspace({
   onStopSearch,
   onSelectResult,
   onQueueDownload,
+  onBrowseUser,
 }: SearchWorkspaceProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -490,6 +493,14 @@ export function SearchWorkspace({
                   </button>
 
                   <span className="result-row-actions">
+                    <button
+                      type="button"
+                      aria-label={`Browse files shared by ${result.owner}`}
+                      title="Browse user shares"
+                      onClick={() => onBrowseUser(result.owner)}
+                    >
+                      <FolderOpen size={16} />
+                    </button>
                     <button
                       type="button"
                       aria-label={

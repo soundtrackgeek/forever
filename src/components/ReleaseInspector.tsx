@@ -21,6 +21,7 @@ type ReleaseInspectorProps = {
   folderError: string | null;
   onInspectFolder: (result: SearchResult) => void;
   onQueueDownload: (result: SearchResult) => void;
+  onBrowseUser: (username: string) => void;
   onQueueRelease: (
     result: SearchResult,
     title: string,
@@ -65,6 +66,7 @@ export function ReleaseInspector({
   folderError,
   onInspectFolder,
   onQueueDownload,
+  onBrowseUser,
   onQueueRelease,
 }: ReleaseInspectorProps) {
   const [selection, setSelection] = useState<{
@@ -266,6 +268,13 @@ export function ReleaseInspector({
                 <small><ShieldCheck size={11} weight="fill" aria-hidden="true" /> {live ? "Live Soulseek response" : `${result.trust}% · 2,341 shares`}</small>
                 <small><i aria-hidden="true" /> Online now</small>
               </span>
+              <button
+                type="button"
+                className="browse-user-shares"
+                onClick={() => onBrowseUser(result.owner)}
+              >
+                Browse shares
+              </button>
             </section>
 
             {folderError && (

@@ -30,6 +30,7 @@ type TransfersWorkspaceProps = {
   onRevealRelease: (id: string) => void;
   onClearCompleted: () => void;
   onDismissError: () => void;
+  onBrowseUser: (username: string) => void;
 };
 
 const formatBytes = (bytes: number) => {
@@ -83,6 +84,7 @@ export function TransfersWorkspace({
   onRevealRelease,
   onClearCompleted,
   onDismissError,
+  onBrowseUser,
 }: TransfersWorkspaceProps) {
   const groups = useMemo(() => groupTransfers(transfers), [transfers]);
   const [filter, setFilter] = useState<Filter>("all");
@@ -203,7 +205,17 @@ export function TransfersWorkspace({
                 )}
                 <span className="release-transfer-identity">
                   <strong>{group.title}</strong>
-                  <small>from {group.username}<i aria-label="Online" /></small>
+                  <small>
+                    from{" "}
+                    <button
+                      type="button"
+                      className="transfer-user-link"
+                      onClick={() => onBrowseUser(group.username)}
+                    >
+                      {group.username}
+                    </button>
+                    <i aria-label="Online" />
+                  </small>
                   <small>{group.transfers.length} {group.transfers.length === 1 ? "file" : "files"} · {formatBytes(group.sizeBytes)}</small>
                 </span>
                 <span className="release-transfer-total">

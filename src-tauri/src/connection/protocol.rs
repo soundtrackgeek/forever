@@ -14,6 +14,8 @@ pub const SERVER_PING_CODE: u32 = 32;
 pub const SHARED_COUNTS_CODE: u32 = 35;
 pub const RELOGGED_CODE: u32 = 41;
 pub const CANT_CONNECT_TO_PEER_CODE: u32 = 1001;
+pub const SHARED_FILE_LIST_REQUEST_CODE: u32 = 4;
+pub const SHARED_FILE_LIST_RESPONSE_CODE: u32 = 5;
 pub const FILE_SEARCH_RESPONSE_CODE: u32 = 9;
 pub const FOLDER_CONTENTS_REQUEST_CODE: u32 = 36;
 pub const FOLDER_CONTENTS_RESPONSE_CODE: u32 = 37;
@@ -27,13 +29,17 @@ pub const PLACE_IN_QUEUE_REQUEST_CODE: u32 = 51;
 pub const EXPERIMENTAL_MAJOR_VERSION: u32 = 177;
 pub const FOREVER_MINOR_VERSION: u32 = 3;
 const MAX_MESSAGE_LENGTH: usize = 16 * 1024 * 1024;
+const MAX_PEER_MESSAGE_LENGTH: usize = 64 * 1024 * 1024;
 const MAX_PEER_INIT_LENGTH: usize = 64 * 1024;
 const MAX_DECOMPRESSED_SEARCH_LENGTH: usize = 64 * 1024 * 1024;
 const MAX_DECOMPRESSED_FOLDER_LENGTH: usize = 64 * 1024 * 1024;
+const MAX_DECOMPRESSED_SHARE_LENGTH: usize = 256 * 1024 * 1024;
 const MAX_RESULTS_PER_RESPONSE: usize = 20_000;
 const MAX_FOLDERS_PER_RESPONSE: usize = 5_000;
 const MAX_FILES_PER_FOLDER: usize = 20_000;
 const MAX_FOLDER_FILES_TOTAL: usize = 50_000;
+const MAX_SHARE_DIRECTORIES: usize = 100_000;
+const MAX_SHARE_FILES_TOTAL: usize = 500_000;
 const MAX_FILE_ATTRIBUTES: usize = 64;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -138,6 +144,18 @@ pub struct FolderContentsResponse {
     pub folders: Vec<FolderListing>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShareListing {
+    pub directory: String,
+    pub files: Vec<FolderFile>,
+    pub is_private: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedFileListResponse {
+    pub directories: Vec<ShareListing>,
+}
+
 pub fn login_frame(username: &str, password: &str) -> Vec<u8> {
     let mut payload = Vec::new();
     push_string(&mut payload, username);
@@ -161,6 +179,10 @@ pub fn file_search_frame(token: u32, query: &str) -> Vec<u8> {
     push_u32(&mut payload, token);
     push_string(&mut payload, query);
     encode_message(FILE_SEARCH_CODE, &payload)
+}
+
+pub fn shared_file_list_request_frame() -> Vec<u8> {
+    encode_message(SHARED_FILE_LIST_REQUEST_CODE, &[])
 }
 
 pub fn folder_contents_request_frame(token: u32, folder: &str) -> Vec<u8> {
@@ -582,6 +604,121 @@ pub fn parse_folder_contents_response(
     })
 }
 
+pub fn parse_shared_file_list_response(
+    frame: &Frame,
+) -> Result<SharedFileListResponse, ProtocolError> {
+    if frame.code != SHARED_FILE_LIST_RESPONSE_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: SHARED_FILE_LIST_RESPONSE_CODE,
+            actual: frame.code,
+        });
+    }
+
+    let decoder = ZlibDecoder::new(frame.payload.as_slice());
+    let mut payload = Vec::new();
+    decoder
+        .take((MAX_DECOMPRESSED_SHARE_LENGTH + 1) as u64)
+        .read_to_end(&mut payload)?;
+    if payload.len() > MAX_DECOMPRESSED_SHARE_LENGTH {
+        return Err(ProtocolError::DecompressedPayloadTooLarge);
+    }
+
+    let mut reader = PayloadReader::new(&payload);
+    let mut total_files = 0_usize;
+    let mut directories = read_share_directories(&mut reader, false, &mut total_files)?;
+    let _unknown = reader.read_u32()?;
+    directories.extend(read_share_directories(&mut reader, true, &mut total_files)?);
+    Ok(SharedFileListResponse { directories })
+}
+
+fn read_share_directories(
+    reader: &mut PayloadReader<'_>,
+    is_private: bool,
+    total_files: &mut usize,
+) -> Result<Vec<ShareListing>, ProtocolError> {
+    let count = reader.read_u32()? as usize;
+    if count > MAX_SHARE_DIRECTORIES {
+        return Err(ProtocolError::InvalidCount {
+            kind: "shared directories",
+            count,
+        });
+    }
+
+    let mut directories = Vec::with_capacity(count);
+    for _ in 0..count {
+        let directory = reader.read_string_lossy()?.replace('/', "\\");
+        let file_count = reader.read_u32()? as usize;
+        *total_files = (*total_files).saturating_add(file_count);
+        if *total_files > MAX_SHARE_FILES_TOTAL {
+            return Err(ProtocolError::InvalidCount {
+                kind: "shared files",
+                count: *total_files,
+            });
+        }
+
+        let mut files = Vec::with_capacity(file_count);
+        for _ in 0..file_count {
+            files.push(read_folder_file(reader)?);
+        }
+        directories.push(ShareListing {
+            directory,
+            files,
+            is_private,
+        });
+    }
+    Ok(directories)
+}
+
+fn read_folder_file(reader: &mut PayloadReader<'_>) -> Result<FolderFile, ProtocolError> {
+    let _code = reader.read_u8()?;
+    let filename = reader.read_string_lossy()?.replace('/', "\\");
+    let size_bytes = reader.read_u64()?;
+    let supplied_extension = reader.read_string_lossy()?;
+    let attribute_count = reader.read_u32()? as usize;
+    if attribute_count > MAX_FILE_ATTRIBUTES {
+        return Err(ProtocolError::InvalidCount {
+            kind: "file attributes",
+            count: attribute_count,
+        });
+    }
+
+    let mut bitrate = None;
+    let mut duration_seconds = None;
+    let mut vbr = None;
+    let mut sample_rate = None;
+    let mut bit_depth = None;
+    for _ in 0..attribute_count {
+        let attribute = reader.read_u32()?;
+        let value = reader.read_u32()?;
+        match attribute {
+            0 => bitrate = Some(value),
+            1 => duration_seconds = Some(value),
+            2 => vbr = Some(value != 0),
+            4 => sample_rate = Some(value),
+            5 => bit_depth = Some(value),
+            _ => {}
+        }
+    }
+    let extension = if supplied_extension.is_empty() {
+        filename
+            .rsplit_once('.')
+            .map(|(_, extension)| extension.to_ascii_lowercase())
+            .unwrap_or_default()
+    } else {
+        supplied_extension.to_ascii_lowercase()
+    };
+    Ok(FolderFile {
+        filename,
+        size_bytes,
+        extension,
+        bitrate,
+        duration_seconds,
+        vbr,
+        sample_rate,
+        bit_depth,
+    })
+}
+
 fn read_search_files(
     reader: &mut PayloadReader<'_>,
     is_private: bool,
@@ -662,8 +799,22 @@ pub async fn read_frame<R>(reader: &mut R) -> Result<Frame, ProtocolError>
 where
     R: AsyncRead + Unpin,
 {
+    read_frame_with_limit(reader, MAX_MESSAGE_LENGTH).await
+}
+
+pub async fn read_peer_frame<R>(reader: &mut R) -> Result<Frame, ProtocolError>
+where
+    R: AsyncRead + Unpin,
+{
+    read_frame_with_limit(reader, MAX_PEER_MESSAGE_LENGTH).await
+}
+
+async fn read_frame_with_limit<R>(reader: &mut R, maximum: usize) -> Result<Frame, ProtocolError>
+where
+    R: AsyncRead + Unpin,
+{
     let length = reader.read_u32_le().await? as usize;
-    if !(4..=MAX_MESSAGE_LENGTH).contains(&length) {
+    if !(4..=maximum).contains(&length) {
         return Err(ProtocolError::InvalidLength(length));
     }
 
@@ -1094,6 +1245,46 @@ mod tests {
         assert_eq!(response.folders[0].files.len(), 1);
         assert_eq!(response.folders[0].files[0].extension, "flac");
         assert_eq!(response.folders[0].files[0].bit_depth, Some(24));
+    }
+
+    #[test]
+    fn encodes_share_list_requests_and_parses_public_and_private_directories() {
+        let request = shared_file_list_request_frame();
+        assert_eq!(request.len(), 8);
+        assert_eq!(
+            u32::from_le_bytes(request[4..8].try_into().unwrap()),
+            SHARED_FILE_LIST_REQUEST_CODE
+        );
+
+        let mut payload = 1_u32.to_le_bytes().to_vec();
+        payload.extend(encoded_string("Music\\Night Geometry"));
+        payload.extend(1_u32.to_le_bytes());
+        payload.push(1);
+        payload.extend(encoded_string("01 - Thresholds.flac"));
+        payload.extend(112_400_000_u64.to_le_bytes());
+        payload.extend(encoded_string(""));
+        payload.extend(2_u32.to_le_bytes());
+        payload.extend(4_u32.to_le_bytes());
+        payload.extend(96_000_u32.to_le_bytes());
+        payload.extend(5_u32.to_le_bytes());
+        payload.extend(24_u32.to_le_bytes());
+        payload.extend(0_u32.to_le_bytes());
+        payload.extend(1_u32.to_le_bytes());
+        payload.extend(encoded_string("Private Mixes"));
+        payload.extend(0_u32.to_le_bytes());
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&payload).unwrap();
+        let response = parse_shared_file_list_response(&Frame {
+            code: SHARED_FILE_LIST_RESPONSE_CODE,
+            payload: encoder.finish().unwrap(),
+        })
+        .unwrap();
+        assert_eq!(response.directories.len(), 2);
+        assert!(!response.directories[0].is_private);
+        assert_eq!(response.directories[0].files[0].extension, "flac");
+        assert_eq!(response.directories[0].files[0].bit_depth, Some(24));
+        assert!(response.directories[1].is_private);
     }
 
     #[tokio::test]

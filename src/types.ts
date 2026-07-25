@@ -126,6 +126,46 @@ export type FolderInspection = {
   receivedAtMs: number;
 };
 
+export type ShareDirectorySummary = {
+  path: string;
+  name: string;
+  parent: string | null;
+  depth: number;
+  fileCount: number;
+  totalSizeBytes: number;
+  isPrivate: boolean;
+};
+
+export type UserSharesOverview = {
+  username: string;
+  directories: ShareDirectorySummary[];
+  totalFileCount: number;
+  totalSizeBytes: number;
+  publicDirectoryCount: number;
+  privateDirectoryCount: number;
+  receivedAtMs: number;
+};
+
+export type ShareFile = FolderFile & {
+  isPrivate: boolean;
+};
+
+export type ShareFolderSnapshot = {
+  username: string;
+  directory: string;
+  isPrivate: boolean;
+  files: ShareFile[];
+  totalSizeBytes: number;
+};
+
+export type ShareSearchSnapshot = {
+  username: string;
+  query: string;
+  extension: string | null;
+  files: ShareFile[];
+  truncated: boolean;
+};
+
 export type TransferQueueSnapshot = {
   transfers: Transfer[];
   activeCount: number;

@@ -37,6 +37,9 @@ pub fn run() {
             connection::transfer_clear_completed,
             connection::transfer_reveal_release_path,
             connection::folder_inspect,
+            connection::shares_browse,
+            connection::shares_folder,
+            connection::shares_search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

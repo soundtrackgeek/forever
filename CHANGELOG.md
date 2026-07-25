@@ -5,6 +5,31 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.9] - 2026-07-25
+
+### Added
+
+- Live complete-share browsing using Soulseek Shared File List requests and
+  zlib-compressed public/private directory responses over direct or indirect
+  peer connections.
+- A bounded, session-only share cache with folder summaries, exact file
+  metadata, local path/filename search, format filtering, and explicit refresh.
+- A Midnight Radio User Shares Explorer with a folder rail, sortable file
+  table, source summary, persistent multi-folder selection, selected-byte
+  totals, private-share handling, and grouped-release download handoff.
+- Browse-shares entry points on every search result, in the selected source
+  profile, and on transfer source names, plus responsive captures at the native
+  and minimum window sizes.
+- Rust coverage for request framing, compressed public/private list parsing,
+  share caching, folder lookup, and local search, alongside a complete frontend
+  browse/select/download regression flow.
+
+### Changed
+
+- Peer messages use a separate bounded frame reader sized for legitimate large
+  compressed share lists while server frames retain their stricter limit.
+- Application and updater preview metadata now identify version `0.0.9`.
+
 ## [0.0.8] - 2026-07-25
 
 ### Fixed

@@ -100,6 +100,34 @@ describe("Forever shell", () => {
     expect(screen.getAllByText("Night Geometry").length).toBeGreaterThan(0);
   });
 
+  it("explores a user's complete shares and downloads a selection", async () => {
+    render(<App />);
+
+    fireEvent.click(
+      screen.getAllByRole("button", {
+        name: "Browse files shared by audiophile92",
+      })[0],
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "audiophile92’s shares" }),
+      ).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Select folder" }));
+    expect(screen.getByText("10 files selected")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Deselect 01 - Thresholds.flac" }),
+    );
+    expect(screen.getByText("9 files selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download selection" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument(),
+    );
+    expect(screen.getAllByText("audiophile92 selection").length).toBeGreaterThan(0);
+  });
+
   it("opens the release-grouped Transfers workspace and filters completed releases", () => {
     render(<App />);
 
@@ -114,6 +142,19 @@ describe("Forever shell", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Completed 1" }));
     expect(within(workspace).getByText("Apex Horizon (Deluxe)")).toBeInTheDocument();
     expect(within(workspace).queryByText("Spheric Dusk")).not.toBeInTheDocument();
+  });
+
+  it("opens a source's shares from transfer history", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "audiophile92" })[0]);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "audiophile92’s shares" }),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("opens the live connection settings from the sidebar", () => {

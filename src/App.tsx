@@ -8,12 +8,14 @@ import { ReleaseInspector } from "./components/ReleaseInspector";
 import { SearchWorkspace } from "./components/SearchWorkspace";
 import { TransferShelf } from "./components/TransferShelf";
 import { TransfersWorkspace } from "./components/TransfersWorkspace";
+import { UserSharesWorkspace } from "./components/UserSharesWorkspace";
 import { UpdateExperience } from "./components/UpdateExperience";
 import { WindowControls } from "./components/WindowControls";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { useSoulseekConnection } from "./hooks/useSoulseekConnection";
 import { useSoulseekFolders } from "./hooks/useSoulseekFolders";
 import { useSoulseekSearch } from "./hooks/useSoulseekSearch";
+import { useSoulseekShares } from "./hooks/useSoulseekShares";
 import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
 import type { SearchResult } from "./types";
 
@@ -89,6 +91,8 @@ function App() {
   const search = useSoulseekSearch();
   const transfers = useSoulseekTransfers();
   const folders = useSoulseekFolders();
+  const shares = useSoulseekShares();
+  const [sharesUsername, setSharesUsername] = useState("audiophile92");
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const onboardingOpen =
     connection.ready &&
@@ -108,6 +112,12 @@ function App() {
     setActiveView(view);
   };
 
+  const browseUser = (username: string) => {
+    setSharesUsername(username);
+    setActiveView("shares");
+    void shares.browse(username).catch(() => undefined);
+  };
+
   const isSearchView = activeView === "search";
 
   return (
@@ -119,7 +129,7 @@ function App() {
 
       <div className={`app-shell ${isSearchView ? "" : "is-single-view"}`}>
         <AppSidebar
-          activeView={activeView}
+          activeView={activeView === "shares" ? "search" : activeView}
           updateStatus={updater.status}
           username={connection.snapshot.username}
           connectionState={connection.snapshot.state}
@@ -150,6 +160,7 @@ function App() {
                 folders.clear();
               }}
               onQueueDownload={queueDownload}
+              onBrowseUser={browseUser}
             />
             <ReleaseInspector
               result={selectedResult}
@@ -160,6 +171,7 @@ function App() {
                 void folders.inspect(result).catch(() => undefined);
               }}
               onQueueDownload={queueDownload}
+              onBrowseUser={browseUser}
               onQueueRelease={(result, title, inspection, files) => {
                 void transfers
                   .enqueueRelease({
@@ -173,6 +185,34 @@ function App() {
               }}
             />
           </>
+        ) : activeView === "shares" ? (
+          <UserSharesWorkspace
+            key={sharesUsername}
+            username={sharesUsername}
+            overview={shares.overview}
+            folder={shares.folder}
+            results={shares.results}
+            loading={shares.loading}
+            error={shares.error}
+            onRefresh={() => void shares.browse(sharesUsername, true).catch(() => undefined)}
+            onOpenFolder={(directory) =>
+              void shares.openFolder(sharesUsername, directory).catch(() => undefined)
+            }
+            onSearch={(shareQuery, extension) =>
+              void shares.search(sharesUsername, shareQuery, extension).catch(() => undefined)
+            }
+            onDownload={(title, remoteFolder, files) => {
+              void transfers
+                .enqueueRelease({
+                  title,
+                  username: sharesUsername,
+                  remoteFolder,
+                  files,
+                })
+                .then(() => setActiveView("transfers"))
+                .catch(() => undefined);
+            }}
+          />
         ) : activeView === "transfers" ? (
           <TransfersWorkspace
             transfers={transfers.snapshot.transfers}
@@ -187,6 +227,7 @@ function App() {
             onRevealRelease={(id) => void transfers.revealRelease(id).catch(() => undefined)}
             onClearCompleted={() => void transfers.clearCompleted().catch(() => undefined)}
             onDismissError={transfers.clearError}
+            onBrowseUser={browseUser}
           />
         ) : activeView === "settings" && connection.profile ? (
           <ConnectionSettings
@@ -233,6 +274,7 @@ function App() {
         onRevealRelease={(id) => void transfers.revealRelease(id).catch(() => undefined)}
         onViewAll={() => setActiveView("transfers")}
         onDismissError={transfers.clearError}
+        onBrowseUser={browseUser}
       />
 
       <UpdateExperience {...updater} />

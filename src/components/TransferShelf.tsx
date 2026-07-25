@@ -25,6 +25,7 @@ type TransferShelfProps = {
   onRevealRelease: (id: string) => void;
   onViewAll: () => void;
   onDismissError: () => void;
+  onBrowseUser: (username: string) => void;
 };
 
 const formatBytes = (bytes: number) => {
@@ -63,6 +64,7 @@ export function TransferShelf({
   onRevealRelease,
   onViewAll,
   onDismissError,
+  onBrowseUser,
 }: TransferShelfProps) {
   const groups = groupTransfers(transfers);
   const visibleGroups = groups.slice(0, 3);
@@ -109,7 +111,19 @@ export function TransferShelf({
           const completed = group.status === "completed";
           return (
             <article className={`transfer-row is-${group.status}`} key={group.id}>
-              <span className="transfer-name"><strong>{group.title}</strong><small>{group.username} · {group.transfers.length} files</small></span>
+              <span className="transfer-name">
+                <strong>{group.title}</strong>
+                <small>
+                  <button
+                    type="button"
+                    className="transfer-user-link"
+                    onClick={() => onBrowseUser(group.username)}
+                  >
+                    {group.username}
+                  </button>{" "}
+                  · {group.transfers.length} files
+                </small>
+              </span>
               <span className="transfer-progress"><i><b style={{ width: `${progress}%` }} /></i><small>{formatBytes(group.transferredBytes)} / {formatBytes(group.sizeBytes)}</small></span>
               <span className="transfer-meta"><strong>{groupStatus(group)}</strong><small>{Math.round(progress)}%</small></span>
               <button
