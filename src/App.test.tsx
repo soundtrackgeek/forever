@@ -32,16 +32,36 @@ describe("Forever shell", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows an empty state for an unmatched search", () => {
+  it("streams a search and shows an empty state when no responses match", async () => {
     render(<App />);
 
     const search = screen.getByRole("textbox", { name: "Search the network" });
     fireEvent.change(search, { target: { value: "unfindable transmission" } });
-    fireEvent.submit(search.closest("form")!);
+    fireEvent.keyDown(search, { key: "Enter" });
 
     expect(
-      screen.getByRole("heading", { name: "No signals found" }),
+      screen.getByRole("heading", { name: "Listening for responses" }),
     ).toBeInTheDocument();
+
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole("heading", { name: "No signals found" }),
+        ).toBeInTheDocument(),
+      { timeout: 1_500 },
+    );
+  });
+
+  it("filters preview results by real audio type counts", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "All types" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Compressed audio 1" }));
+
+    expect(
+      screen.getByText("1 result"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("320 kbps")).toBeInTheDocument();
   });
 
   it("opens the live connection settings from the sidebar", () => {

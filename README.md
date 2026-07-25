@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.3` clarifies Soulseek’s automatic account
-> registration and adds configurable update polling. Search results and
-> transfers still use local development data.
+> **Status:** pre-alpha. Version `0.0.4` adds live, streamed Soulseek network
+> search with real file and source metadata. Downloads and the transfer shelf
+> remain staged for the next release.
 
-![Forever Midnight Radio interface](design/implementation/midnight-radio-0.0.2.png)
+![Forever Midnight Radio interface](design/implementation/midnight-radio-0.0.4.png)
 
 ## Current foundation
 
@@ -18,11 +18,15 @@ Rust, Tauri 2, React, and TypeScript.
   authenticating, online, reconnecting, offline, and error states
 - Automatic reconnect with bounded exponential backoff and optional connection
   on startup
+- Live Soulseek search with direct and indirect peer-response handling,
+  streamed and deduplicated results, a 15-second response window, and bounded
+  protocol parsing
+- Working lossless/compressed filters, ready/speed/size sorting, stop control,
+  and a live file inspector with source speed, queue, and share visibility
 - Passwords stored in Windows Credential Manager, or held only in memory when
   “Remember password” is disabled
 - Non-secret JSON connection preferences and sanitized local diagnostics
-- Search, selection, filtering, inspector, and transfer interactions using local
-  development data
+- Local design-preview data when the React frontend runs outside Tauri
 - Custom frameless Windows shell and branded application icons
 - In-app update checks at startup and every five minutes by default, with a
   persistent cadence setting, toast, release modal, progress, verification,
@@ -58,7 +62,9 @@ preview the update toast and modal without publishing a release.
 Use `http://localhost:1420/?onboarding=1` to preview the fresh-install
 connection flow. The browser preview simulates connection state; run
 `npm run tauri dev` to exercise the native credential vault and live Soulseek
-login.
+login and network search. Search for an artist, album, track, or filename while
+connected; results stream into the table as peers respond. Each search listens
+for responses for 15 seconds and can be stopped early.
 
 Soulseek does not have a separate sign-up step. Connecting with a valid unused
 username creates that account using the password you enter; only an existing
@@ -82,6 +88,13 @@ The legacy Soulseek protocol itself does not provide transport encryption.
 Credential protection described above applies to local storage, not the
 connection between the client and Soulseek server. Use a unique password that
 you do not reuse for another service.
+
+Live searches are sent to the Soulseek server, and responding peers connect to
+Forever’s temporary listening port or receive an indirect connection attempt.
+Forever limits concurrent peer connections, message sizes, decompressed
+payloads, per-peer entries, and each search to 5,000 displayed files. Peer
+addresses are used for the active protocol exchange and are not exposed in the
+interface or written to diagnostics.
 
 ## Quality checks
 

@@ -1,16 +1,26 @@
-use std::string::FromUtf8Error;
+use flate2::read::ZlibDecoder;
+use std::{io::Read, net::Ipv4Addr, string::FromUtf8Error};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use zeroize::Zeroizing;
 
 pub const LOGIN_CODE: u32 = 1;
+pub const SET_WAIT_PORT_CODE: u32 = 2;
+pub const CONNECT_TO_PEER_CODE: u32 = 18;
+pub const FILE_SEARCH_CODE: u32 = 26;
 pub const SET_STATUS_CODE: u32 = 28;
 pub const SERVER_PING_CODE: u32 = 32;
 pub const SHARED_COUNTS_CODE: u32 = 35;
 pub const RELOGGED_CODE: u32 = 41;
+pub const CANT_CONNECT_TO_PEER_CODE: u32 = 1001;
+pub const FILE_SEARCH_RESPONSE_CODE: u32 = 9;
 pub const EXPERIMENTAL_MAJOR_VERSION: u32 = 177;
-pub const FOREVER_MINOR_VERSION: u32 = 2;
-const MAX_SERVER_MESSAGE_LENGTH: usize = 8 * 1024 * 1024;
+pub const FOREVER_MINOR_VERSION: u32 = 3;
+const MAX_MESSAGE_LENGTH: usize = 16 * 1024 * 1024;
+const MAX_PEER_INIT_LENGTH: usize = 64 * 1024;
+const MAX_DECOMPRESSED_SEARCH_LENGTH: usize = 64 * 1024 * 1024;
+const MAX_RESULTS_PER_RESPONSE: usize = 20_000;
+const MAX_FILE_ATTRIBUTES: usize = 64;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Frame {
@@ -30,6 +40,49 @@ pub enum LoginResponse {
     },
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct ConnectToPeer {
+    pub username: String,
+    pub connection_type: String,
+    pub address: Ipv4Addr,
+    pub port: u32,
+    pub token: u32,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum PeerInit {
+    PierceFirewall {
+        token: u32,
+    },
+    Peer {
+        username: String,
+        connection_type: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchFile {
+    pub filename: String,
+    pub size_bytes: u64,
+    pub extension: String,
+    pub bitrate: Option<u32>,
+    pub duration_seconds: Option<u32>,
+    pub vbr: Option<bool>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u32>,
+    pub is_private: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchResponse {
+    pub username: String,
+    pub token: u32,
+    pub files: Vec<SearchFile>,
+    pub slot_free: bool,
+    pub average_speed: u32,
+    pub queue_length: u32,
+}
+
 pub fn login_frame(username: &str, password: &str) -> Vec<u8> {
     let mut payload = Vec::new();
     push_string(&mut payload, username);
@@ -42,6 +95,32 @@ pub fn login_frame(username: &str, password: &str) -> Vec<u8> {
     );
     push_u32(&mut payload, FOREVER_MINOR_VERSION);
     encode_message(LOGIN_CODE, &payload)
+}
+
+pub fn set_wait_port_frame(port: u16) -> Vec<u8> {
+    encode_message(SET_WAIT_PORT_CODE, &u32::from(port).to_le_bytes())
+}
+
+pub fn file_search_frame(token: u32, query: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(query.len() + 8);
+    push_u32(&mut payload, token);
+    push_string(&mut payload, query);
+    encode_message(FILE_SEARCH_CODE, &payload)
+}
+
+pub fn cant_connect_to_peer_frame(token: u32, username: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(username.len() + 8);
+    push_u32(&mut payload, token);
+    push_string(&mut payload, username);
+    encode_message(CANT_CONNECT_TO_PEER_CODE, &payload)
+}
+
+pub fn pierce_firewall_frame(token: u32) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(9);
+    push_u32(&mut frame, 5);
+    frame.push(0);
+    push_u32(&mut frame, token);
+    frame
 }
 
 pub fn set_online_frame() -> Vec<u8> {
@@ -89,6 +168,163 @@ pub fn parse_login_response(frame: &Frame) -> Result<LoginResponse, ProtocolErro
     }
 }
 
+pub fn parse_connect_to_peer(frame: &Frame) -> Result<ConnectToPeer, ProtocolError> {
+    if frame.code != CONNECT_TO_PEER_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: CONNECT_TO_PEER_CODE,
+            actual: frame.code,
+        });
+    }
+
+    let mut reader = PayloadReader::new(&frame.payload);
+    let username = reader.read_string_lossy()?;
+    let connection_type = reader.read_string_lossy()?;
+    let address = reader.read_ipv4()?;
+    let port = reader.read_u32()?;
+    let token = reader.read_u32()?;
+    let _privileged = reader.read_bool()?;
+    let _obfuscation_type = reader.read_u32()?;
+    let _obfuscated_port = reader.read_u32()?;
+
+    Ok(ConnectToPeer {
+        username,
+        connection_type,
+        address,
+        port,
+        token,
+    })
+}
+
+pub fn parse_peer_init(code: u8, payload: &[u8]) -> Result<PeerInit, ProtocolError> {
+    let mut reader = PayloadReader::new(payload);
+    match code {
+        0 => Ok(PeerInit::PierceFirewall {
+            token: reader.read_u32()?,
+        }),
+        1 => {
+            let username = reader.read_string_lossy()?;
+            let connection_type = reader.read_string_lossy()?;
+            if reader.remaining() >= 4 {
+                let _token = reader.read_u32()?;
+            }
+            Ok(PeerInit::Peer {
+                username,
+                connection_type,
+            })
+        }
+        actual => Err(ProtocolError::UnexpectedPeerInitCode(actual)),
+    }
+}
+
+pub fn parse_search_response(frame: &Frame) -> Result<SearchResponse, ProtocolError> {
+    if frame.code != FILE_SEARCH_RESPONSE_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: FILE_SEARCH_RESPONSE_CODE,
+            actual: frame.code,
+        });
+    }
+
+    let decoder = ZlibDecoder::new(frame.payload.as_slice());
+    let mut payload = Vec::new();
+    decoder
+        .take((MAX_DECOMPRESSED_SEARCH_LENGTH + 1) as u64)
+        .read_to_end(&mut payload)?;
+    if payload.len() > MAX_DECOMPRESSED_SEARCH_LENGTH {
+        return Err(ProtocolError::DecompressedPayloadTooLarge);
+    }
+
+    let mut reader = PayloadReader::new(&payload);
+    let username = reader.read_string_lossy()?;
+    let token = reader.read_u32()?;
+    let mut files = read_search_files(&mut reader, false)?;
+    let slot_free = reader.read_bool()?;
+    let average_speed = reader.read_u32()?;
+    let queue_length = reader.read_u32()?;
+
+    if reader.remaining() >= 4 {
+        let _unknown = reader.read_u32()?;
+    }
+    if reader.remaining() >= 4 {
+        files.extend(read_search_files(&mut reader, true)?);
+    }
+
+    Ok(SearchResponse {
+        username,
+        token,
+        files,
+        slot_free,
+        average_speed,
+        queue_length,
+    })
+}
+
+fn read_search_files(
+    reader: &mut PayloadReader<'_>,
+    is_private: bool,
+) -> Result<Vec<SearchFile>, ProtocolError> {
+    let count = reader.read_u32()? as usize;
+    if count > MAX_RESULTS_PER_RESPONSE {
+        return Err(ProtocolError::InvalidCount {
+            kind: "search results",
+            count,
+        });
+    }
+
+    let mut files = Vec::with_capacity(count);
+    for _ in 0..count {
+        let _code = reader.read_u8()?;
+        let filename = reader.read_string_lossy()?.replace('/', "\\");
+        let size_bytes = reader.read_u64()?;
+        let supplied_extension = reader.read_string_lossy()?;
+        let attribute_count = reader.read_u32()? as usize;
+        if attribute_count > MAX_FILE_ATTRIBUTES {
+            return Err(ProtocolError::InvalidCount {
+                kind: "file attributes",
+                count: attribute_count,
+            });
+        }
+
+        let mut bitrate = None;
+        let mut duration_seconds = None;
+        let mut vbr = None;
+        let mut sample_rate = None;
+        let mut bit_depth = None;
+        for _ in 0..attribute_count {
+            let attribute = reader.read_u32()?;
+            let value = reader.read_u32()?;
+            match attribute {
+                0 => bitrate = Some(value),
+                1 => duration_seconds = Some(value),
+                2 => vbr = Some(value != 0),
+                4 => sample_rate = Some(value),
+                5 => bit_depth = Some(value),
+                _ => {}
+            }
+        }
+
+        let extension = if supplied_extension.is_empty() {
+            filename
+                .rsplit_once('.')
+                .map(|(_, extension)| extension.to_ascii_lowercase())
+                .unwrap_or_default()
+        } else {
+            supplied_extension.to_ascii_lowercase()
+        };
+        files.push(SearchFile {
+            filename,
+            size_bytes,
+            extension,
+            bitrate,
+            duration_seconds,
+            vbr,
+            sample_rate,
+            bit_depth,
+            is_private,
+        });
+    }
+    Ok(files)
+}
+
 pub async fn write_raw_frame<W>(writer: &mut W, frame: &[u8]) -> Result<(), ProtocolError>
 where
     W: AsyncWrite + Unpin,
@@ -103,7 +339,7 @@ where
     R: AsyncRead + Unpin,
 {
     let length = reader.read_u32_le().await? as usize;
-    if !(4..=MAX_SERVER_MESSAGE_LENGTH).contains(&length) {
+    if !(4..=MAX_MESSAGE_LENGTH).contains(&length) {
         return Err(ProtocolError::InvalidLength(length));
     }
 
@@ -111,6 +347,20 @@ where
     let mut payload = vec![0; length - 4];
     reader.read_exact(&mut payload).await?;
     Ok(Frame { code, payload })
+}
+
+pub async fn read_peer_init<R>(reader: &mut R) -> Result<PeerInit, ProtocolError>
+where
+    R: AsyncRead + Unpin,
+{
+    let length = reader.read_u32_le().await? as usize;
+    if !(1..=MAX_PEER_INIT_LENGTH).contains(&length) {
+        return Err(ProtocolError::InvalidLength(length));
+    }
+    let code = reader.read_u8().await?;
+    let mut payload = vec![0; length - 1];
+    reader.read_exact(&mut payload).await?;
+    parse_peer_init(code, &payload)
 }
 
 fn encode_message(code: u32, payload: &[u8]) -> Vec<u8> {
@@ -161,6 +411,15 @@ impl<'a> PayloadReader<'a> {
         Ok(value != 0)
     }
 
+    fn read_u8(&mut self) -> Result<u8, ProtocolError> {
+        let value = *self
+            .payload
+            .get(self.position)
+            .ok_or(ProtocolError::TruncatedPayload)?;
+        self.position += 1;
+        Ok(value)
+    }
+
     fn read_u32(&mut self) -> Result<u32, ProtocolError> {
         let bytes = self.read_bytes(4)?;
         Ok(u32::from_le_bytes(
@@ -168,10 +427,27 @@ impl<'a> PayloadReader<'a> {
         ))
     }
 
+    fn read_u64(&mut self) -> Result<u64, ProtocolError> {
+        let bytes = self.read_bytes(8)?;
+        Ok(u64::from_le_bytes(
+            bytes.try_into().expect("eight byte slice"),
+        ))
+    }
+
     fn read_string(&mut self) -> Result<String, ProtocolError> {
         let length = self.read_u32()? as usize;
         let bytes = self.read_bytes(length)?.to_vec();
         String::from_utf8(bytes).map_err(Into::into)
+    }
+
+    fn read_string_lossy(&mut self) -> Result<String, ProtocolError> {
+        let length = self.read_u32()? as usize;
+        Ok(String::from_utf8_lossy(self.read_bytes(length)?).into_owned())
+    }
+
+    fn read_ipv4(&mut self) -> Result<Ipv4Addr, ProtocolError> {
+        let bytes = self.read_bytes(4)?;
+        Ok(Ipv4Addr::new(bytes[3], bytes[2], bytes[1], bytes[0]))
     }
 
     fn read_bytes(&mut self, length: usize) -> Result<&'a [u8], ProtocolError> {
@@ -196,6 +472,12 @@ pub enum ProtocolError {
     TruncatedPayload,
     #[error("Expected Soulseek message code {expected}, received {actual}")]
     UnexpectedCode { expected: u32, actual: u32 },
+    #[error("Unexpected Soulseek peer initialization code {0}")]
+    UnexpectedPeerInitCode(u8),
+    #[error("Soulseek {kind} count {count} exceeds the safety limit")]
+    InvalidCount { kind: &'static str, count: usize },
+    #[error("Decompressed Soulseek search payload exceeds the safety limit")]
+    DecompressedPayloadTooLarge,
     #[error("Soulseek message text is not valid UTF-8: {0}")]
     InvalidUtf8(#[from] FromUtf8Error),
     #[error("Soulseek socket error: {0}")]
@@ -205,6 +487,8 @@ pub enum ProtocolError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::{write::ZlibEncoder, Compression};
+    use std::io::Write;
 
     fn encoded_string(value: &str) -> Vec<u8> {
         let mut result = Vec::new();
@@ -268,6 +552,110 @@ mod tests {
                 detail: Some("Nick too long.".to_owned()),
             }
         );
+    }
+
+    #[test]
+    fn encodes_wait_port_and_file_search_frames() {
+        let wait_port = set_wait_port_frame(48_123);
+        assert_eq!(
+            u32::from_le_bytes(wait_port[4..8].try_into().unwrap()),
+            SET_WAIT_PORT_CODE
+        );
+        assert_eq!(
+            u32::from_le_bytes(wait_port[8..12].try_into().unwrap()),
+            48_123
+        );
+
+        let search = file_search_frame(91, "night geometry");
+        assert_eq!(
+            u32::from_le_bytes(search[4..8].try_into().unwrap()),
+            FILE_SEARCH_CODE
+        );
+        assert_eq!(u32::from_le_bytes(search[8..12].try_into().unwrap()), 91);
+        assert!(search.ends_with(b"night geometry"));
+    }
+
+    #[test]
+    fn parses_connect_to_peer_with_reversed_ipv4_bytes() {
+        let mut payload = encoded_string("signalpath");
+        payload.extend(encoded_string("P"));
+        payload.extend([1, 0, 0, 127]);
+        payload.extend(48_123_u32.to_le_bytes());
+        payload.extend(77_u32.to_le_bytes());
+        payload.push(0);
+        payload.extend(0_u32.to_le_bytes());
+        payload.extend(0_u32.to_le_bytes());
+
+        let request = parse_connect_to_peer(&Frame {
+            code: CONNECT_TO_PEER_CODE,
+            payload,
+        })
+        .unwrap();
+        assert_eq!(request.username, "signalpath");
+        assert_eq!(request.connection_type, "P");
+        assert_eq!(request.address, Ipv4Addr::new(127, 0, 0, 1));
+        assert_eq!(request.port, 48_123);
+        assert_eq!(request.token, 77);
+    }
+
+    #[test]
+    fn parses_peer_initialization_messages() {
+        let mut peer_payload = encoded_string("audiophile92");
+        peer_payload.extend(encoded_string("P"));
+        peer_payload.extend(42_u32.to_le_bytes());
+
+        assert_eq!(
+            parse_peer_init(1, &peer_payload).unwrap(),
+            PeerInit::Peer {
+                username: "audiophile92".to_owned(),
+                connection_type: "P".to_owned(),
+            }
+        );
+        assert_eq!(
+            parse_peer_init(0, &42_u32.to_le_bytes()).unwrap(),
+            PeerInit::PierceFirewall { token: 42 }
+        );
+    }
+
+    #[test]
+    fn decompresses_and_parses_a_search_response() {
+        let mut payload = encoded_string("audiophile92");
+        payload.extend(739_u32.to_le_bytes());
+        payload.extend(1_u32.to_le_bytes());
+        payload.push(1);
+        payload.extend(encoded_string("Music\\Night Geometry\\Thresholds.flac"));
+        payload.extend(1_204_567_890_u64.to_le_bytes());
+        payload.extend(encoded_string("flac"));
+        payload.extend(3_u32.to_le_bytes());
+        payload.extend(0_u32.to_le_bytes());
+        payload.extend(2_304_u32.to_le_bytes());
+        payload.extend(1_u32.to_le_bytes());
+        payload.extend(321_u32.to_le_bytes());
+        payload.extend(4_u32.to_le_bytes());
+        payload.extend(96_000_u32.to_le_bytes());
+        payload.push(1);
+        payload.extend(8_200_000_u32.to_le_bytes());
+        payload.extend(0_u32.to_le_bytes());
+        payload.extend(0_u32.to_le_bytes());
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let response = parse_search_response(&Frame {
+            code: FILE_SEARCH_RESPONSE_CODE,
+            payload: compressed,
+        })
+        .unwrap();
+
+        assert_eq!(response.username, "audiophile92");
+        assert_eq!(response.token, 739);
+        assert!(response.slot_free);
+        assert_eq!(response.average_speed, 8_200_000);
+        assert_eq!(response.files.len(), 1);
+        assert_eq!(response.files[0].size_bytes, 1_204_567_890);
+        assert_eq!(response.files[0].bitrate, Some(2_304));
+        assert_eq!(response.files[0].duration_seconds, Some(321));
+        assert_eq!(response.files[0].sample_rate, Some(96_000));
     }
 
     #[tokio::test]

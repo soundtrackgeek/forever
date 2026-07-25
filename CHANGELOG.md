@@ -5,6 +5,33 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.4] - 2026-07-25
+
+### Added
+
+- Live Soulseek network search using server search requests and compressed peer
+  search responses.
+- Temporary peer listener plus indirect connection fallback for users behind
+  NAT or firewalls.
+- Streamed, deduplicated search results with real filenames, file sizes, audio
+  attributes, slot availability, queue length, source speed, and share
+  visibility.
+- Working audio-type filters, ready/speed/size sorting, an early stop control,
+  live status counts, and a native file inspector.
+- Protocol safety limits for queries, frames, decompression, file attributes,
+  response entries, concurrent peers, and displayed results.
+- Rust coverage for search frames, peer initialization, connection requests,
+  compressed result parsing, stale tokens, deduplication, and search resets.
+- Frontend coverage for streamed empty states and real type filtering.
+
+### Changed
+
+- Search results now represent live Soulseek files in the desktop app; the
+  browser-only frontend continues to use staged data for visual development.
+- Result actions clearly identify downloads as a `0.0.5` feature instead of
+  adding a simulated transfer for live network files.
+- Application and updater preview metadata now identify version `0.0.4`.
+
 ## [0.0.3] - 2026-07-25
 
 ### Added

@@ -1,5 +1,5 @@
 import { DownloadSimple, MagnifyingGlass, Radio, Sliders } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import "./App.css";
 import { AppSidebar } from "./components/AppSidebar";
 import { ConnectionOnboarding } from "./components/ConnectionOnboarding";
@@ -9,9 +9,10 @@ import { SearchWorkspace } from "./components/SearchWorkspace";
 import { TransferShelf } from "./components/TransferShelf";
 import { UpdateExperience } from "./components/UpdateExperience";
 import { WindowControls } from "./components/WindowControls";
-import { initialTransfers, searchResults } from "./data/mockData";
+import { initialTransfers } from "./data/mockData";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { useSoulseekConnection } from "./hooks/useSoulseekConnection";
+import { useSoulseekSearch } from "./hooks/useSoulseekSearch";
 import type { SearchResult, Transfer } from "./types";
 
 const viewDetails = {
@@ -78,31 +79,23 @@ function PlaceholderView({
 function App() {
   const [activeView, setActiveView] = useState("search");
   const [query, setQuery] = useState("night geometry");
-  const [submittedQuery, setSubmittedQuery] = useState("night geometry");
-  const [selectedResult, setSelectedResult] = useState(searchResults[0]);
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(
+    "night-geometry",
+  );
   const [transfers, setTransfers] = useState<Transfer[]>(initialTransfers);
   const updater = useAppUpdater();
   const connection = useSoulseekConnection();
+  const search = useSoulseekSearch();
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const onboardingOpen =
     connection.ready &&
     (!connection.profile || !connection.hasPassword) &&
     !onboardingDismissed;
 
-  const filteredResults = useMemo(() => {
-    const terms = submittedQuery
-      .toLowerCase()
-      .split(/\s+/)
-      .filter(Boolean);
-
-    if (terms.length === 0) return searchResults;
-
-    return searchResults.filter((result) => {
-      const haystack =
-        `${result.title} ${result.subtitle} ${result.owner} ${result.format}`.toLowerCase();
-      return terms.every((term) => haystack.includes(term));
-    });
-  }, [submittedQuery]);
+  const selectedResult =
+    search.results.find((result) => result.id === selectedResultId) ??
+    search.results[0] ??
+    null;
 
   const queueDownload = (result: SearchResult) => {
     const id = `queued-${result.id}`;
@@ -172,18 +165,21 @@ function App() {
           <>
             <SearchWorkspace
               query={query}
-              submittedQuery={submittedQuery}
-              results={filteredResults}
+              results={search.results}
               selectedResult={selectedResult}
+              search={search.snapshot}
+              searchError={search.error}
               connection={connection.snapshot}
               onOpenConnection={() => setActiveView("settings")}
               onQueryChange={setQuery}
               onSearch={(nextQuery) => {
                 const normalizedQuery = nextQuery.trim();
                 setQuery(normalizedQuery);
-                setSubmittedQuery(normalizedQuery);
+                setSelectedResultId(null);
+                void search.startSearch(normalizedQuery).catch(() => undefined);
               }}
-              onSelectResult={setSelectedResult}
+              onStopSearch={() => void search.stopSearch()}
+              onSelectResult={(result) => setSelectedResultId(result.id)}
               onQueueDownload={queueDownload}
             />
             <ReleaseInspector

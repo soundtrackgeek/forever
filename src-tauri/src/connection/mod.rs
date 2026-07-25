@@ -1,9 +1,11 @@
 mod credentials;
 mod diagnostics;
 mod protocol;
+mod search;
 mod service;
 mod settings;
 
+use search::SearchSnapshot;
 use service::{ConnectionBootstrap, ConnectionManager, ConnectionSnapshot, SaveConnectionRequest};
 use tauri::{AppHandle, Manager, State};
 
@@ -70,4 +72,26 @@ pub async fn connection_diagnostics(
     manager: State<'_, ConnectionManager>,
 ) -> Result<Vec<diagnostics::DiagnosticEntry>, String> {
     Ok(manager.diagnostics())
+}
+
+#[tauri::command]
+pub async fn search_snapshot(
+    manager: State<'_, ConnectionManager>,
+) -> Result<SearchSnapshot, String> {
+    Ok(manager.current_search())
+}
+
+#[tauri::command]
+pub async fn search_start(
+    manager: State<'_, ConnectionManager>,
+    query: String,
+) -> Result<SearchSnapshot, String> {
+    manager
+        .start_search(query)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn search_stop(manager: State<'_, ConnectionManager>) -> Result<SearchSnapshot, String> {
+    Ok(manager.stop_search())
 }

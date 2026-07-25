@@ -2,29 +2,41 @@ use super::{
     credentials::CredentialVault,
     diagnostics::{DiagnosticEntry, Diagnostics},
     protocol::{
-        login_frame, parse_login_response, read_frame, server_ping_frame, set_online_frame,
-        shared_counts_frame, write_raw_frame, LoginResponse, RELOGGED_CODE,
+        cant_connect_to_peer_frame, file_search_frame, login_frame, parse_connect_to_peer,
+        parse_login_response, parse_search_response, pierce_firewall_frame, read_frame,
+        read_peer_init, server_ping_frame, set_online_frame, set_wait_port_frame,
+        shared_counts_frame, write_raw_frame, ConnectToPeer, LoginResponse, PeerInit,
+        CONNECT_TO_PEER_CODE, FILE_SEARCH_RESPONSE_CODE, RELOGGED_CODE,
     },
+    search::{SearchHub, SearchSnapshot, SearchState},
     settings::{ConnectionProfile, SettingsStore},
 };
 use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         Arc, Mutex, RwLock,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
-use tokio::{net::TcpStream, time::timeout};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::{mpsc, Semaphore},
+    time::timeout,
+};
 use zeroize::Zeroizing;
 
 const CONNECTION_EVENT: &str = "forever://connection-status";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(12);
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
+const PEER_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+const PEER_MESSAGE_TIMEOUT: Duration = Duration::from_secs(12);
+const MAX_CONCURRENT_PEERS: usize = 32;
+const MAX_SEARCH_QUERY_BYTES: usize = 250;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,6 +114,11 @@ struct ActiveTask {
     handle: tauri::async_runtime::JoinHandle<()>,
 }
 
+enum ConnectionCommand {
+    StartSearch { token: u32, query: String },
+    PeerConnectionFailed { token: u32, username: String },
+}
+
 #[derive(Clone)]
 pub struct ConnectionManager {
     app: AppHandle,
@@ -111,7 +128,10 @@ pub struct ConnectionManager {
     suggested_profile: ConnectionProfile,
     snapshot: Arc<RwLock<ConnectionSnapshot>>,
     task: Arc<Mutex<Option<ActiveTask>>>,
+    command_sender: Arc<Mutex<Option<mpsc::UnboundedSender<ConnectionCommand>>>>,
     generation: Arc<AtomicU64>,
+    next_search_token: Arc<AtomicU32>,
+    search: SearchHub,
 }
 
 impl ConnectionManager {
@@ -128,6 +148,7 @@ impl ConnectionManager {
             .as_ref()
             .map(ConnectionSnapshot::offline)
             .unwrap_or_else(ConnectionSnapshot::unconfigured);
+        let search = SearchHub::new(app.clone());
 
         Ok(Self {
             app,
@@ -137,7 +158,10 @@ impl ConnectionManager {
             suggested_profile: ConnectionProfile::suggested(&download_directory),
             snapshot: Arc::new(RwLock::new(snapshot)),
             task: Arc::new(Mutex::new(None)),
+            command_sender: Arc::new(Mutex::new(None)),
             generation: Arc::new(AtomicU64::new(0)),
+            next_search_token: Arc::new(AtomicU32::new((timestamp_ms() as u32).max(1))),
+            search,
         })
     }
 
@@ -257,6 +281,63 @@ impl ConnectionManager {
         self.diagnostics.recent()
     }
 
+    pub fn current_search(&self) -> SearchSnapshot {
+        self.search.current()
+    }
+
+    pub fn start_search(&self, query: String) -> Result<SearchSnapshot, ConnectionServiceError> {
+        let query = query.trim().to_owned();
+        if query.is_empty() {
+            return Err(ConnectionServiceError::InvalidSearch(
+                "Enter something to search for.".to_owned(),
+            ));
+        }
+        if query.len() > MAX_SEARCH_QUERY_BYTES {
+            return Err(ConnectionServiceError::InvalidSearch(format!(
+                "Search queries can be at most {MAX_SEARCH_QUERY_BYTES} bytes."
+            )));
+        }
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::SearchUnavailable);
+        }
+
+        let sender = self
+            .command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .ok_or(ConnectionServiceError::SearchUnavailable)?;
+        let mut token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
+        if token == 0 {
+            token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
+        }
+
+        let snapshot = self.search.start(token, query.clone());
+        if sender
+            .send(ConnectionCommand::StartSearch { token, query })
+            .is_err()
+        {
+            self.search
+                .fail("The Soulseek connection changed before the search could start.");
+            return Err(ConnectionServiceError::SearchUnavailable);
+        }
+        self.diagnostics.record(
+            "info",
+            "search_started",
+            "A live Soulseek search was started.",
+        );
+        Ok(snapshot)
+    }
+
+    pub fn stop_search(&self) -> SearchSnapshot {
+        let snapshot = self.search.stop();
+        if snapshot.state == SearchState::Stopped {
+            self.diagnostics
+                .record("info", "search_stopped", "The live search was stopped.");
+        }
+        snapshot
+    }
+
     pub fn current_snapshot(&self) -> ConnectionSnapshot {
         self.snapshot
             .read()
@@ -306,10 +387,14 @@ impl ConnectionManager {
                 &format!("Connecting to {}.", server_label(&profile)),
             );
 
-            match self
+            let outcome = self
                 .connect_once(&profile, password.as_str(), attempt)
-                .await
-            {
+                .await;
+            self.clear_command_sender();
+            self.search
+                .fail("Search stopped because the Soulseek connection was interrupted.");
+
+            match outcome {
                 Ok(()) => {
                     let failure = ConnectionFailure::retryable(
                         "The Soulseek server closed the connection.",
@@ -413,6 +498,29 @@ impl ConnectionManager {
             }
         }
 
+        let listener = TcpListener::bind(("0.0.0.0", 0)).await.map_err(|error| {
+            ConnectionFailure::retryable(
+                format!("Forever could not open a peer listening port: {error}"),
+                "listen_failed",
+            )
+        })?;
+        let listen_port = listener
+            .local_addr()
+            .map_err(|error| {
+                ConnectionFailure::retryable(
+                    format!("Forever could not inspect its peer listening port: {error}"),
+                    "listen_failed",
+                )
+            })?
+            .port();
+        write_raw_frame(&mut stream, &set_wait_port_frame(listen_port))
+            .await
+            .map_err(|error| {
+                ConnectionFailure::retryable(
+                    format!("The Soulseek peer listener could not be announced: {error}"),
+                    "session_setup_failed",
+                )
+            })?;
         write_raw_frame(&mut stream, &set_online_frame())
             .await
             .map_err(|error| {
@@ -429,6 +537,12 @@ impl ConnectionManager {
                     "session_setup_failed",
                 )
             })?;
+
+        let (command_sender, mut command_receiver) = mpsc::unbounded_channel();
+        *self
+            .command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(command_sender.clone());
 
         let connected_at_ms = timestamp_ms();
         self.diagnostics.record(
@@ -448,7 +562,10 @@ impl ConnectionManager {
         });
 
         let mut keepalive = tokio::time::interval(KEEPALIVE_INTERVAL);
+        let mut search_tick = tokio::time::interval(Duration::from_millis(250));
+        let peer_limit = Arc::new(Semaphore::new(MAX_CONCURRENT_PEERS));
         keepalive.tick().await;
+        search_tick.tick().await;
         loop {
             tokio::select! {
                 _ = keepalive.tick() => {
@@ -472,6 +589,61 @@ impl ConnectionManager {
                             "relogged",
                         ));
                     }
+                    if frame.code == CONNECT_TO_PEER_CODE {
+                        if let Ok(request) = parse_connect_to_peer(&frame) {
+                            spawn_indirect_peer(
+                                request,
+                                self.search.clone(),
+                                command_sender.clone(),
+                                peer_limit.clone(),
+                            );
+                        }
+                    }
+                }
+                accepted = listener.accept() => {
+                    let (peer_stream, _) = accepted.map_err(|error| {
+                        ConnectionFailure::retryable(
+                            format!("The Soulseek peer listener stopped: {error}"),
+                            "listen_failed",
+                        )
+                    })?;
+                    spawn_direct_peer(peer_stream, self.search.clone(), peer_limit.clone());
+                }
+                command = command_receiver.recv() => {
+                    match command {
+                        Some(ConnectionCommand::StartSearch { token, query }) => {
+                            write_raw_frame(&mut stream, &file_search_frame(token, &query))
+                                .await
+                                .map_err(|error| {
+                                    ConnectionFailure::retryable(
+                                        format!("The live search could not be sent: {error}"),
+                                        "search_send_failed",
+                                    )
+                                })?;
+                        }
+                        Some(ConnectionCommand::PeerConnectionFailed { token, username }) => {
+                            write_raw_frame(
+                                &mut stream,
+                                &cant_connect_to_peer_frame(token, &username),
+                            )
+                            .await
+                            .map_err(|error| {
+                                ConnectionFailure::retryable(
+                                    format!("The peer connection response could not be sent: {error}"),
+                                    "peer_response_failed",
+                                )
+                            })?;
+                        }
+                        None => {
+                            return Err(ConnectionFailure::retryable(
+                                "The Soulseek command channel closed.",
+                                "command_channel_closed",
+                            ));
+                        }
+                    }
+                }
+                _ = search_tick.tick() => {
+                    self.search.expire_if_due();
                 }
             }
         }
@@ -510,6 +682,8 @@ impl ConnectionManager {
 
     fn stop_active_task(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
+        self.clear_command_sender();
+        self.search.stop();
         if let Some(active) = self
             .task
             .lock()
@@ -518,6 +692,13 @@ impl ConnectionManager {
         {
             active.handle.abort();
         }
+    }
+
+    fn clear_command_sender(&self) {
+        self.command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
     }
 
     fn clear_task(&self, generation: u64) {
@@ -532,6 +713,91 @@ impl ConnectionManager {
             *task = None;
         }
     }
+}
+
+fn spawn_direct_peer(stream: TcpStream, search: SearchHub, limit: Arc<Semaphore>) {
+    let Ok(permit) = limit.try_acquire_owned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let _permit = permit;
+        let _ = handle_direct_peer(stream, search).await;
+    });
+}
+
+fn spawn_indirect_peer(
+    request: ConnectToPeer,
+    search: SearchHub,
+    command_sender: mpsc::UnboundedSender<ConnectionCommand>,
+    limit: Arc<Semaphore>,
+) {
+    if request.connection_type != "P" || request.port == 0 || request.port > u16::MAX.into() {
+        return;
+    }
+    let Ok(permit) = limit.try_acquire_owned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let _permit = permit;
+        if handle_indirect_peer(&request, search).await.is_err() {
+            let _ = command_sender.send(ConnectionCommand::PeerConnectionFailed {
+                token: request.token,
+                username: request.username,
+            });
+        }
+    });
+}
+
+async fn handle_direct_peer(
+    mut stream: TcpStream,
+    search: SearchHub,
+) -> Result<(), super::protocol::ProtocolError> {
+    let _ = stream.set_nodelay(true);
+    let init = timeout(PEER_MESSAGE_TIMEOUT, read_peer_init(&mut stream))
+        .await
+        .map_err(|_| peer_timeout_error())??;
+    match init {
+        PeerInit::Peer {
+            connection_type, ..
+        } if connection_type == "P" => read_search_result(&mut stream, search).await,
+        _ => Ok(()),
+    }
+}
+
+async fn handle_indirect_peer(
+    request: &ConnectToPeer,
+    search: SearchHub,
+) -> Result<(), super::protocol::ProtocolError> {
+    let mut stream = timeout(
+        PEER_CONNECT_TIMEOUT,
+        TcpStream::connect((request.address, request.port as u16)),
+    )
+    .await
+    .map_err(|_| peer_timeout_error())??;
+    let _ = stream.set_nodelay(true);
+    write_raw_frame(&mut stream, &pierce_firewall_frame(request.token)).await?;
+    read_search_result(&mut stream, search).await
+}
+
+async fn read_search_result(
+    stream: &mut TcpStream,
+    search: SearchHub,
+) -> Result<(), super::protocol::ProtocolError> {
+    let frame = timeout(PEER_MESSAGE_TIMEOUT, read_frame(stream))
+        .await
+        .map_err(|_| peer_timeout_error())??;
+    if frame.code != FILE_SEARCH_RESPONSE_CODE {
+        return Ok(());
+    }
+    search.record(parse_search_response(&frame)?);
+    Ok(())
+}
+
+fn peer_timeout_error() -> super::protocol::ProtocolError {
+    super::protocol::ProtocolError::Io(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "Soulseek peer timed out",
+    ))
 }
 
 fn server_label(profile: &ConnectionProfile) -> String {
@@ -625,6 +891,10 @@ pub enum ConnectionServiceError {
     NotConfigured,
     #[error("Enter your Soulseek password.")]
     MissingPassword,
+    #[error("Connect to Soulseek before starting a live search.")]
+    SearchUnavailable,
+    #[error("{0}")]
+    InvalidSearch(String),
     #[error("Could not initialize connection diagnostics: {0}")]
     Diagnostics(#[from] std::io::Error),
 }

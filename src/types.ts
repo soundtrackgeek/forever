@@ -2,16 +2,71 @@ export type SearchResult = {
   id: string;
   title: string;
   subtitle: string;
-  year: number;
   owner: string;
   trust: number;
-  format: "FLAC" | "MP3";
+  format: string;
   quality: string;
   size: string;
   tracks: number;
   rating: number;
   ratingLabel: string;
   availability: number[];
+  source?: "preview" | "live";
+  year?: number;
+  filename?: string;
+  folder?: string;
+  sizeBytes?: number;
+  bitrate?: number | null;
+  durationSeconds?: number | null;
+  vbr?: boolean | null;
+  sampleRate?: number | null;
+  bitDepth?: number | null;
+  slotFree?: boolean;
+  averageSpeed?: number;
+  queueLength?: number;
+  isPrivate?: boolean;
+};
+
+export type SearchState =
+  | "idle"
+  | "searching"
+  | "completed"
+  | "stopped"
+  | "error";
+
+export type SearchSnapshot = {
+  state: SearchState;
+  token: number | null;
+  query: string;
+  resultCount: number;
+  peerCount: number;
+  message: string;
+  startedAtMs: number | null;
+  finishedAtMs: number | null;
+};
+
+export type LiveSearchResult = {
+  id: string;
+  token: number;
+  username: string;
+  filename: string;
+  sizeBytes: number;
+  extension: string;
+  bitrate: number | null;
+  durationSeconds: number | null;
+  vbr: boolean | null;
+  sampleRate: number | null;
+  bitDepth: number | null;
+  slotFree: boolean;
+  averageSpeed: number;
+  queueLength: number;
+  isPrivate: boolean;
+};
+
+export type SearchEvent = {
+  event: "started" | "results" | "completed" | "stopped" | "error";
+  snapshot: SearchSnapshot;
+  results: LiveSearchResult[];
 };
 
 export type Track = {
