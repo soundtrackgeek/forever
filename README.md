@@ -3,11 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.5` stabilizes the live Soulseek session
-> while retaining the streamed search and real file/source metadata introduced
-> in `0.0.4`. Downloads and the transfer shelf remain staged for a later release.
+> **Status:** pre-alpha. Version `0.0.6` completes the first search-to-download
+> journey: a live Soulseek result can now become a safe, resumable local file.
 
-![Forever Midnight Radio interface](design/implementation/midnight-radio-0.0.4.png)
+![Forever Midnight Radio first-download interface](design/implementation/first-download-0.0.6.png)
 
 ## Current foundation
 
@@ -23,6 +22,12 @@ Rust, Tauri 2, React, and TypeScript.
   protocol parsing
 - Working lossless/compressed filters, ready/speed/size sorting, stop control,
   and a live file inspector with source speed, queue, and share visibility
+- Real single-file downloads from live results using direct and indirect peer
+  connections, with one active file at a time
+- Persistent transfers with source-queue position, byte progress, speed, ETA,
+  pause, resume, retry, cancel, completion, and Show in folder controls
+- Safe `.part` files, resumable offsets, exact-size checks, sanitized local
+  names, collision-free destinations, and no overwrite of existing files
 - Passwords stored in Windows Credential Manager, or held only in memory when
   “Remember password” is disabled
 - Non-secret JSON connection preferences and sanitized local diagnostics
@@ -64,7 +69,13 @@ connection flow. The browser preview simulates connection state; run
 `npm run tauri dev` to exercise the native credential vault and live Soulseek
 login and network search. Search for an artist, album, track, or filename while
 connected; results stream into the table as peers respond. Each search listens
-for responses for 15 seconds and can be stopped early.
+for responses for 15 seconds and can be stopped early. Select a live file and
+choose **Download file**; Forever queues the exact remote filename in the shelf
+and writes it to the download folder configured in Connection settings.
+
+Version `0.0.6` intentionally downloads one file at a time. Album/folder
+downloads, uploads, library management, and playback remain outside this first
+download release.
 
 Soulseek does not have a separate sign-up step. Connecting with a valid unused
 username creates that account using the password you enter; only an existing
@@ -80,7 +91,9 @@ Automatic update checks**.
 
 Forever writes non-secret account preferences to the Tauri application
 configuration directory and connection events to
-`logs/connection.log`. Passwords are excluded from both. With “Remember
+`logs/connection.log`. Transfer metadata is stored in `transfers.json` in the
+same configuration directory; peer IP addresses and credentials are excluded.
+Passwords are excluded from both. With “Remember
 password” enabled, Windows Credential Manager stores the password; otherwise it
 exists only for the current app session.
 
@@ -95,6 +108,12 @@ Forever limits concurrent peer connections, message sizes, decompressed
 payloads, per-peer entries, and each search to 5,000 displayed files. Peer
 addresses are used for the active protocol exchange and are not exposed in the
 interface or written to diagnostics.
+
+Incomplete files use a `.part` suffix and remain resumable. Forever accepts a
+file stream only when its username, exact remote filename, transfer token, and
+announced size match the active queue item. The Soulseek protocol does not
+provide chunk hashes, so v0.0.6 verifies the expected byte count but cannot
+cryptographically verify file contents.
 
 ## Quality checks
 

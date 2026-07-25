@@ -5,6 +5,34 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2026-07-25
+
+### Added
+
+- Real single-file Soulseek downloads from live search results using the modern
+  peer queue, upload request, and file-connection protocol flow.
+- A persistent one-at-a-time transfer queue with live source-queue position,
+  byte progress, speed, ETA, completion, and actionable failure states.
+- Pause, resume, retry, cancel, and Show in folder controls backed by native
+  transfer state rather than staged frontend data.
+- Safe `.part` files, exact-size validation, resumable byte offsets, sanitized
+  local filenames, collision-free destinations, and final-file promotion only
+  after every expected byte has been written and flushed.
+- Direct and indirect peer connection handling for download negotiation and file
+  streams, including local timeouts and source rejection/failure reporting.
+- Rust regression coverage for download protocol frames, address and request
+  parsing, safe paths, collision handling, and persisted resume progress, plus
+  frontend coverage for queue and pause/resume controls.
+
+### Changed
+
+- The Midnight Radio transfer shelf now renders persisted native download state
+  and clearly distinguishes contacting, remote queue, connecting, downloading,
+  paused, completed, and failed phases.
+- Interrupted active transfers return to the queue and resume from their saved
+  partial-file offset after the Soulseek session reconnects.
+- Application and updater preview metadata now identify version `0.0.6`.
+
 ## [0.0.5] - 2026-07-25
 
 ### Fixed

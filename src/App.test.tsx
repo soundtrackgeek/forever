@@ -64,6 +64,26 @@ describe("Forever shell", () => {
     expect(screen.getByText("320 kbps")).toBeInTheDocument();
   });
 
+  it("queues a first file and exposes pause and resume controls", async () => {
+    render(<App />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Pause 01 - Thresholds.flac" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Resume 01 - Thresholds.flac" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Resume 01 - Thresholds.flac" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Get files" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Night Geometry.flac")).toBeInTheDocument(),
+    );
+  });
+
   it("opens the live connection settings from the sidebar", () => {
     render(<App />);
 

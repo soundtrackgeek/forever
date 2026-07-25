@@ -1682,6 +1682,7 @@ button:disabled {
 }
 
 .transfer-list {
+  position: relative;
   min-width: 0;
   padding: 8px 14px 10px;
 }
@@ -1727,7 +1728,7 @@ button:disabled {
 .transfer-row {
   display: grid;
   height: 35px;
-  grid-template-columns: minmax(170px, 1fr) minmax(280px, 2fr) 105px 28px 28px;
+  grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.7fr) minmax(150px, 0.8fr) 28px 28px;
   align-items: center;
   gap: 12px;
   padding: 0 9px;
@@ -1794,6 +1795,14 @@ button:disabled {
   border-radius: inherit;
 }
 
+.transfer-row.is-completed .transfer-progress > i b {
+  background: linear-gradient(90deg, #4d9d72, #71ce76);
+}
+
+.transfer-row.is-failed .transfer-progress > i b {
+  background: linear-gradient(90deg, #9f565f, #e76a72);
+}
+
 .transfer-progress small {
   color: #85899b;
   font-size: 8px;
@@ -1807,7 +1816,10 @@ button:disabled {
 }
 
 .transfer-meta small {
+  overflow: hidden;
   color: #727789;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .transfer-row > button {
@@ -1831,6 +1843,47 @@ button:disabled {
   height: 96px;
   color: #73788a;
   font-size: 11px;
+  place-items: center;
+}
+
+.transfer-error {
+  position: absolute;
+  right: 14px;
+  bottom: calc(100% + 10px);
+  display: grid;
+  min-width: 340px;
+  max-width: min(620px, calc(100vw - 32px));
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 11px;
+  color: #e7d7d9;
+  background: #21141d;
+  border: 1px solid #6b3542;
+  border-radius: 7px;
+  box-shadow: 0 16px 42px rgb(0 0 0 / 35%);
+  font-size: 10px;
+}
+
+.transfer-error > svg {
+  color: var(--danger);
+}
+
+.transfer-error > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-error > button {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: #a89399;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
   place-items: center;
 }
 

@@ -6,6 +6,7 @@ use zeroize::Zeroizing;
 
 pub const LOGIN_CODE: u32 = 1;
 pub const SET_WAIT_PORT_CODE: u32 = 2;
+pub const GET_PEER_ADDRESS_CODE: u32 = 3;
 pub const CONNECT_TO_PEER_CODE: u32 = 18;
 pub const FILE_SEARCH_CODE: u32 = 26;
 pub const SET_STATUS_CODE: u32 = 28;
@@ -14,6 +15,13 @@ pub const SHARED_COUNTS_CODE: u32 = 35;
 pub const RELOGGED_CODE: u32 = 41;
 pub const CANT_CONNECT_TO_PEER_CODE: u32 = 1001;
 pub const FILE_SEARCH_RESPONSE_CODE: u32 = 9;
+pub const TRANSFER_REQUEST_CODE: u32 = 40;
+pub const TRANSFER_RESPONSE_CODE: u32 = 41;
+pub const QUEUE_UPLOAD_CODE: u32 = 43;
+pub const PLACE_IN_QUEUE_RESPONSE_CODE: u32 = 44;
+pub const UPLOAD_FAILED_CODE: u32 = 46;
+pub const UPLOAD_DENIED_CODE: u32 = 50;
+pub const PLACE_IN_QUEUE_REQUEST_CODE: u32 = 51;
 pub const EXPERIMENTAL_MAJOR_VERSION: u32 = 177;
 pub const FOREVER_MINOR_VERSION: u32 = 3;
 const MAX_MESSAGE_LENGTH: usize = 16 * 1024 * 1024;
@@ -50,6 +58,13 @@ pub struct ConnectToPeer {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct PeerAddress {
+    pub username: String,
+    pub address: Ipv4Addr,
+    pub port: u32,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum PeerInit {
     PierceFirewall {
         token: u32,
@@ -57,7 +72,16 @@ pub enum PeerInit {
     Peer {
         username: String,
         connection_type: String,
+        token: u32,
     },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct TransferRequest {
+    pub direction: u32,
+    pub token: u32,
+    pub filename: String,
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,6 +130,57 @@ pub fn file_search_frame(token: u32, query: &str) -> Vec<u8> {
     push_u32(&mut payload, token);
     push_string(&mut payload, query);
     encode_message(FILE_SEARCH_CODE, &payload)
+}
+
+pub fn get_peer_address_frame(username: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(username.len() + 4);
+    push_string(&mut payload, username);
+    encode_message(GET_PEER_ADDRESS_CODE, &payload)
+}
+
+pub fn connect_to_peer_frame(token: u32, username: &str, connection_type: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(username.len() + connection_type.len() + 12);
+    push_u32(&mut payload, token);
+    push_string(&mut payload, username);
+    push_string(&mut payload, connection_type);
+    encode_message(CONNECT_TO_PEER_CODE, &payload)
+}
+
+pub fn peer_init_frame(username: &str, connection_type: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(username.len() + connection_type.len() + 13);
+    push_string(&mut payload, username);
+    push_string(&mut payload, connection_type);
+    push_u32(&mut payload, 0);
+    let mut frame = Vec::with_capacity(payload.len() + 5);
+    push_u32(
+        &mut frame,
+        u32::try_from(payload.len() + 1).expect("peer init length fits in u32"),
+    );
+    frame.push(1);
+    frame.extend(payload);
+    frame
+}
+
+pub fn queue_upload_frame(filename: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(filename.len() + 4);
+    push_string(&mut payload, filename);
+    encode_message(QUEUE_UPLOAD_CODE, &payload)
+}
+
+pub fn place_in_queue_request_frame(filename: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(filename.len() + 4);
+    push_string(&mut payload, filename);
+    encode_message(PLACE_IN_QUEUE_REQUEST_CODE, &payload)
+}
+
+pub fn transfer_response_frame(token: u32, allowed: bool, reason: Option<&str>) -> Vec<u8> {
+    let mut payload = Vec::new();
+    push_u32(&mut payload, token);
+    payload.push(u8::from(allowed));
+    if !allowed {
+        push_string(&mut payload, reason.unwrap_or("Cancelled"));
+    }
+    encode_message(TRANSFER_RESPONSE_CODE, &payload)
 }
 
 pub fn cant_connect_to_peer_frame(token: u32, username: &str) -> Vec<u8> {
@@ -195,6 +270,40 @@ pub fn parse_connect_to_peer(frame: &Frame) -> Result<ConnectToPeer, ProtocolErr
     })
 }
 
+pub fn parse_peer_address(frame: &Frame) -> Result<PeerAddress, ProtocolError> {
+    if frame.code != GET_PEER_ADDRESS_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: GET_PEER_ADDRESS_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let username = reader.read_string_lossy()?;
+    let address = reader.read_ipv4()?;
+    let port = reader.read_u32()?;
+    if reader.remaining() >= 4 {
+        let _obfuscation_type = reader.read_u32()?;
+    }
+    if reader.remaining() >= 2 {
+        let _obfuscated_port = reader.read_u16()?;
+    }
+    Ok(PeerAddress {
+        username,
+        address,
+        port,
+    })
+}
+
+pub fn parse_cant_connect_token(frame: &Frame) -> Result<u32, ProtocolError> {
+    if frame.code != CANT_CONNECT_TO_PEER_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: CANT_CONNECT_TO_PEER_CODE,
+            actual: frame.code,
+        });
+    }
+    PayloadReader::new(&frame.payload).read_u32()
+}
+
 pub fn parse_peer_init(code: u8, payload: &[u8]) -> Result<PeerInit, ProtocolError> {
     let mut reader = PayloadReader::new(payload);
     match code {
@@ -204,16 +313,83 @@ pub fn parse_peer_init(code: u8, payload: &[u8]) -> Result<PeerInit, ProtocolErr
         1 => {
             let username = reader.read_string_lossy()?;
             let connection_type = reader.read_string_lossy()?;
-            if reader.remaining() >= 4 {
-                let _token = reader.read_u32()?;
-            }
+            let token = if reader.remaining() >= 4 {
+                reader.read_u32()?
+            } else {
+                0
+            };
             Ok(PeerInit::Peer {
                 username,
                 connection_type,
+                token,
             })
         }
         actual => Err(ProtocolError::UnexpectedPeerInitCode(actual)),
     }
+}
+
+pub fn parse_transfer_request(frame: &Frame) -> Result<TransferRequest, ProtocolError> {
+    if frame.code != TRANSFER_REQUEST_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: TRANSFER_REQUEST_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let direction = reader.read_u32()?;
+    let token = reader.read_u32()?;
+    let filename = reader.read_string_lossy()?.replace('/', "\\");
+    let size_bytes = if direction == 1 {
+        Some(reader.read_u64()?)
+    } else {
+        None
+    };
+    Ok(TransferRequest {
+        direction,
+        token,
+        filename,
+        size_bytes,
+    })
+}
+
+pub fn parse_queue_position(frame: &Frame) -> Result<(String, u32), ProtocolError> {
+    if frame.code != PLACE_IN_QUEUE_RESPONSE_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: PLACE_IN_QUEUE_RESPONSE_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    Ok((
+        reader.read_string_lossy()?.replace('/', "\\"),
+        reader.read_u32()?,
+    ))
+}
+
+pub fn parse_filename(frame: &Frame, expected_code: u32) -> Result<String, ProtocolError> {
+    if frame.code != expected_code {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: expected_code,
+            actual: frame.code,
+        });
+    }
+    Ok(PayloadReader::new(&frame.payload)
+        .read_string_lossy()?
+        .replace('/', "\\"))
+}
+
+pub fn parse_upload_denied(frame: &Frame) -> Result<(String, String), ProtocolError> {
+    if frame.code != UPLOAD_DENIED_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: UPLOAD_DENIED_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    Ok((
+        reader.read_string_lossy()?.replace('/', "\\"),
+        reader.read_string_lossy()?,
+    ))
 }
 
 pub fn parse_search_response(frame: &Frame) -> Result<SearchResponse, ProtocolError> {
@@ -427,6 +603,13 @@ impl<'a> PayloadReader<'a> {
         ))
     }
 
+    fn read_u16(&mut self) -> Result<u16, ProtocolError> {
+        let bytes = self.read_bytes(2)?;
+        Ok(u16::from_le_bytes(
+            bytes.try_into().expect("two byte slice"),
+        ))
+    }
+
     fn read_u64(&mut self) -> Result<u64, ProtocolError> {
         let bytes = self.read_bytes(8)?;
         Ok(u64::from_le_bytes(
@@ -609,12 +792,77 @@ mod tests {
             PeerInit::Peer {
                 username: "audiophile92".to_owned(),
                 connection_type: "P".to_owned(),
+                token: 42,
             }
         );
         assert_eq!(
             parse_peer_init(0, &42_u32.to_le_bytes()).unwrap(),
             PeerInit::PierceFirewall { token: 42 }
         );
+    }
+
+    #[test]
+    fn encodes_download_queue_and_peer_connection_messages() {
+        let connection = connect_to_peer_frame(73, "deepcrate", "P");
+        assert_eq!(
+            u32::from_le_bytes(connection[4..8].try_into().unwrap()),
+            CONNECT_TO_PEER_CODE
+        );
+        assert_eq!(
+            u32::from_le_bytes(connection[8..12].try_into().unwrap()),
+            73
+        );
+        assert!(connection.windows(9).any(|bytes| bytes == b"deepcrate"));
+
+        let queue = queue_upload_frame("Music\\Track.flac");
+        assert_eq!(
+            u32::from_le_bytes(queue[4..8].try_into().unwrap()),
+            QUEUE_UPLOAD_CODE
+        );
+        assert!(queue.ends_with(b"Music\\Track.flac"));
+
+        let peer_init = peer_init_frame("SignalLevel", "P");
+        assert_eq!(peer_init[4], 1);
+        assert!(peer_init.windows(11).any(|bytes| bytes == b"SignalLevel"));
+        assert_eq!(
+            u32::from_le_bytes(peer_init[peer_init.len() - 4..].try_into().unwrap()),
+            0
+        );
+    }
+
+    #[test]
+    fn parses_peer_addresses_and_upload_requests() {
+        let mut address_payload = encoded_string("deepcrate");
+        address_payload.extend([5, 4, 3, 2]);
+        address_payload.extend(22_334_u32.to_le_bytes());
+        address_payload.extend(0_u32.to_le_bytes());
+        address_payload.extend(0_u16.to_le_bytes());
+        let address = parse_peer_address(&Frame {
+            code: GET_PEER_ADDRESS_CODE,
+            payload: address_payload,
+        })
+        .unwrap();
+        assert_eq!(address.username, "deepcrate");
+        assert_eq!(address.address, Ipv4Addr::new(2, 3, 4, 5));
+        assert_eq!(address.port, 22_334);
+
+        let mut request_payload = 1_u32.to_le_bytes().to_vec();
+        request_payload.extend(881_u32.to_le_bytes());
+        request_payload.extend(encoded_string("Music/Track.flac"));
+        request_payload.extend(98_765_u64.to_le_bytes());
+        let request = parse_transfer_request(&Frame {
+            code: TRANSFER_REQUEST_CODE,
+            payload: request_payload,
+        })
+        .unwrap();
+        assert_eq!(request.direction, 1);
+        assert_eq!(request.token, 881);
+        assert_eq!(request.filename, "Music\\Track.flac");
+        assert_eq!(request.size_bytes, Some(98_765));
+
+        let accepted = transfer_response_frame(request.token, true, None);
+        assert_eq!(accepted.len(), 13);
+        assert_eq!(accepted[12], 1);
     }
 
     #[test]

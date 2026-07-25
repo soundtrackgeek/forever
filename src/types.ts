@@ -77,14 +77,32 @@ export type Track = {
 
 export type Transfer = {
   id: string;
-  release: string;
-  track: string;
-  progress: number;
-  transferred: string;
-  total: string;
-  speed: string;
-  eta: string;
-  status: "downloading" | "queued" | "paused";
+  title: string;
+  username: string;
+  remoteFilename: string;
+  sizeBytes: number;
+  transferredBytes: number;
+  speedBytesPerSecond: number;
+  etaSeconds: number | null;
+  status:
+    | "queued"
+    | "requesting"
+    | "remotelyQueued"
+    | "connecting"
+    | "downloading"
+    | "paused"
+    | "completed"
+    | "failed";
+  queuePosition: number | null;
+  localPath: string;
+  error: string | null;
+  createdAtMs: number;
+  updatedAtMs: number;
+};
+
+export type TransferQueueSnapshot = {
+  transfers: Transfer[];
+  activeCount: number;
 };
 
 export type ConnectionState =

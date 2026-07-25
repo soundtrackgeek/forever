@@ -9,11 +9,11 @@ import { SearchWorkspace } from "./components/SearchWorkspace";
 import { TransferShelf } from "./components/TransferShelf";
 import { UpdateExperience } from "./components/UpdateExperience";
 import { WindowControls } from "./components/WindowControls";
-import { initialTransfers } from "./data/mockData";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { useSoulseekConnection } from "./hooks/useSoulseekConnection";
 import { useSoulseekSearch } from "./hooks/useSoulseekSearch";
-import type { SearchResult, Transfer } from "./types";
+import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
+import type { SearchResult } from "./types";
 
 const viewDetails = {
   home: {
@@ -28,8 +28,8 @@ const viewDetails = {
   },
   transfers: {
     icon: DownloadSimple,
-    title: "Transfers stay close",
-    copy: "The live transfer shelf below is the first version of this workspace.",
+    title: "Every file, still in sight",
+    copy: "Pause, resume, retry, or reveal a download from the live shelf below.",
   },
   library: {
     icon: Radio,
@@ -82,10 +82,10 @@ function App() {
   const [selectedResultId, setSelectedResultId] = useState<string | null>(
     "night-geometry",
   );
-  const [transfers, setTransfers] = useState<Transfer[]>(initialTransfers);
   const updater = useAppUpdater();
   const connection = useSoulseekConnection();
   const search = useSoulseekSearch();
+  const transfers = useSoulseekTransfers();
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const onboardingOpen =
     connection.ready &&
@@ -98,44 +98,7 @@ function App() {
     null;
 
   const queueDownload = (result: SearchResult) => {
-    const id = `queued-${result.id}`;
-
-    setTransfers((current) => {
-      if (current.some((transfer) => transfer.id === id)) return current;
-
-      return [
-        {
-          id,
-          release: result.title,
-          track: `${result.tracks} selected files`,
-          progress: 0,
-          transferred: "0 MB",
-          total: result.size,
-          speed: "Queued",
-          eta: "Waiting",
-          status: "queued",
-        },
-        ...current,
-      ];
-    });
-  };
-
-  const toggleTransfer = (id: string) => {
-    setTransfers((current) =>
-      current.map((transfer) =>
-        transfer.id === id
-          ? {
-              ...transfer,
-              status:
-                transfer.status === "paused" ? "downloading" : "paused",
-            }
-          : transfer,
-      ),
-    );
-  };
-
-  const cancelTransfer = (id: string) => {
-    setTransfers((current) => current.filter((transfer) => transfer.id !== id));
+    void transfers.enqueue(result).catch(() => undefined);
   };
 
   const navigate = (view: string) => {
@@ -219,9 +182,15 @@ function App() {
       </div>
 
       <TransferShelf
-        transfers={transfers}
-        onToggleTransfer={toggleTransfer}
-        onCancelTransfer={cancelTransfer}
+        transfers={transfers.snapshot.transfers}
+        activeCount={transfers.snapshot.activeCount}
+        error={transfers.error}
+        onPause={(id) => void transfers.pause(id).catch(() => undefined)}
+        onResume={(id) => void transfers.resume(id).catch(() => undefined)}
+        onCancel={(id) => void transfers.cancel(id).catch(() => undefined)}
+        onReveal={(id) => void transfers.reveal(id).catch(() => undefined)}
+        onViewAll={() => setActiveView("transfers")}
+        onDismissError={transfers.clearError}
       />
 
       <UpdateExperience {...updater} />

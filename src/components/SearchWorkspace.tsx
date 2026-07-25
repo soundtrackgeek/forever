@@ -494,11 +494,10 @@ export function SearchWorkspace({
                       type="button"
                       aria-label={
                         live
-                          ? "Downloads arrive in version 0.0.5"
+                          ? `Add ${result.title} to the download queue`
                           : `Add ${result.title} to queue`
                       }
-                      title={live ? "Downloads arrive in 0.0.5" : "Add to queue"}
-                      disabled={live}
+                      title="Add to queue"
                       onClick={() => onQueueDownload(result)}
                     >
                       <Plus size={16} />
@@ -508,11 +507,10 @@ export function SearchWorkspace({
                       className="download-icon"
                       aria-label={
                         live
-                          ? "Downloads arrive in version 0.0.5"
+                          ? `Download ${result.title} from ${result.owner}`
                           : `Download ${result.title}`
                       }
-                      title={live ? "Downloads arrive in 0.0.5" : "Download"}
-                      disabled={live}
+                      title="Download file"
                       onClick={() => onQueueDownload(result)}
                     >
                       <DownloadSimple size={17} weight="bold" />

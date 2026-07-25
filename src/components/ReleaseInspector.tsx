@@ -108,8 +108,12 @@ export function ReleaseInspector({
             </section>
           </div>
           <footer className="inspector-actions live-download-note">
-            <button type="button" className="primary-action" disabled>
-              <DownloadSimple size={18} weight="bold" /> Downloads in 0.0.5
+            <button
+              type="button"
+              className="primary-action"
+              onClick={() => onQueueDownload(result)}
+            >
+              <DownloadSimple size={18} weight="bold" /> Download file
             </button>
           </footer>
         </>

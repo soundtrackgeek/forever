@@ -1,5 +1,6 @@
 mod credentials;
 mod diagnostics;
+mod downloads;
 mod protocol;
 mod search;
 mod service;
@@ -23,10 +24,68 @@ pub fn initialize(app: &AppHandle) -> Result<ConnectionManager, String> {
     ConnectionManager::new(
         app.clone(),
         config_directory.join("connection.json"),
+        config_directory.join("transfers.json"),
         config_directory.join("logs").join("connection.log"),
         download_directory,
     )
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfers_snapshot(
+    manager: State<'_, ConnectionManager>,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    Ok(manager.current_transfers())
+}
+
+#[tauri::command]
+pub async fn transfer_enqueue(
+    manager: State<'_, ConnectionManager>,
+    request: downloads::EnqueueTransferRequest,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .enqueue_transfer(request)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_pause(
+    manager: State<'_, ConnectionManager>,
+    id: String,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .pause_transfer(&id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_resume(
+    manager: State<'_, ConnectionManager>,
+    id: String,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .resume_transfer(&id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_cancel(
+    manager: State<'_, ConnectionManager>,
+    id: String,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .cancel_transfer(&id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_reveal_path(
+    manager: State<'_, ConnectionManager>,
+    id: String,
+) -> Result<String, String> {
+    manager
+        .reveal_transfer_path(&id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

@@ -1,4 +1,4 @@
-import type { SearchResult, Track, Transfer } from "../types";
+import type { SearchResult, Track } from "../types";
 
 const availability = [
   [12, 18, 31, 25, 36, 29, 42, 47, 32, 22, 35, 49, 54, 42, 30, 38],
@@ -113,40 +113,4 @@ export const tracks: Track[] = [
   { id: 8, title: "Afterglow", duration: "04:59" },
   { id: 9, title: "Silent Constellations", duration: "04:27" },
   { id: 10, title: "Return Vector", duration: "03:58" },
-];
-
-export const initialTransfers: Transfer[] = [
-  {
-    id: "transfer-liminal",
-    release: "Liminal Structures (2019)",
-    track: "Night Geometry",
-    progress: 64,
-    transferred: "708 MB",
-    total: "1.12 GB",
-    speed: "8.2 MB/s",
-    eta: "1m 27s",
-    status: "downloading",
-  },
-  {
-    id: "transfer-signals",
-    release: "Aphelion Drift",
-    track: "Signals",
-    progress: 31,
-    transferred: "241 MB",
-    total: "463 MB",
-    speed: "6.1 MB/s",
-    eta: "37s",
-    status: "downloading",
-  },
-  {
-    id: "transfer-spheric",
-    release: "Carbon Echoes",
-    track: "Spheric Dusk",
-    progress: 18,
-    transferred: "129 MB",
-    total: "589 MB",
-    speed: "3.8 MB/s",
-    eta: "1m 48s",
-    status: "downloading",
-  },
 ];

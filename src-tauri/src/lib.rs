@@ -23,6 +23,12 @@ pub fn run() {
             connection::search_snapshot,
             connection::search_start,
             connection::search_stop,
+            connection::transfers_snapshot,
+            connection::transfer_enqueue,
+            connection::transfer_pause,
+            connection::transfer_resume,
+            connection::transfer_cancel,
+            connection::transfer_reveal_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
