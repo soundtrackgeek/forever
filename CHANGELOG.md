@@ -5,6 +5,20 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2026-07-25
+
+### Fixed
+
+- Server frame reads now run in a dedicated task so the search timer, peer
+  listener, and command branches cannot cancel a partially read message and
+  trigger a reconnect loop with an invalid message-length error.
+- Added regression coverage that delivers consecutive Soulseek frames one byte
+  at a time while competing timer events fire.
+
+### Changed
+
+- Application and updater preview metadata now identify version `0.0.5`.
+
 ## [0.0.4] - 2026-07-25
 
 ### Added

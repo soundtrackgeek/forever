@@ -5,8 +5,8 @@ use super::{
         cant_connect_to_peer_frame, file_search_frame, login_frame, parse_connect_to_peer,
         parse_login_response, parse_search_response, pierce_firewall_frame, read_frame,
         read_peer_init, server_ping_frame, set_online_frame, set_wait_port_frame,
-        shared_counts_frame, write_raw_frame, ConnectToPeer, LoginResponse, PeerInit,
-        CONNECT_TO_PEER_CODE, FILE_SEARCH_RESPONSE_CODE, RELOGGED_CODE,
+        shared_counts_frame, write_raw_frame, ConnectToPeer, Frame, LoginResponse, PeerInit,
+        ProtocolError, CONNECT_TO_PEER_CODE, FILE_SEARCH_RESPONSE_CODE, RELOGGED_CODE,
     },
     search::{SearchHub, SearchSnapshot, SearchState},
     settings::{ConnectionProfile, SettingsStore},
@@ -23,6 +23,7 @@ use std::{
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::{
+    io::AsyncRead,
     net::{TcpListener, TcpStream},
     sync::{mpsc, Semaphore},
     time::timeout,
@@ -36,6 +37,7 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
 const PEER_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const PEER_MESSAGE_TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_CONCURRENT_PEERS: usize = 32;
+const SERVER_FRAME_QUEUE_SIZE: usize = 64;
 const MAX_SEARCH_QUERY_BYTES: usize = 250;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -112,6 +114,14 @@ pub struct SaveConnectionRequest {
 struct ActiveTask {
     generation: u64,
     handle: tauri::async_runtime::JoinHandle<()>,
+}
+
+struct AbortOnDrop(tauri::async_runtime::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 enum ConnectionCommand {
@@ -538,6 +548,17 @@ impl ConnectionManager {
                 )
             })?;
 
+        // `read_frame` uses `read_exact`, which is not cancellation-safe. Keep it
+        // out of the busy select loop so timer/listener/command branches cannot
+        // discard a partially consumed server frame and desynchronize the socket.
+        let (server_reader, mut server_writer) = stream.into_split();
+        let (server_frame_sender, mut server_frame_receiver) =
+            mpsc::channel(SERVER_FRAME_QUEUE_SIZE);
+        let _server_reader_task = AbortOnDrop(tauri::async_runtime::spawn(forward_server_frames(
+            server_reader,
+            server_frame_sender,
+        )));
+
         let (command_sender, mut command_receiver) = mpsc::unbounded_channel();
         *self
             .command_sender
@@ -569,20 +590,29 @@ impl ConnectionManager {
         loop {
             tokio::select! {
                 _ = keepalive.tick() => {
-                    write_raw_frame(&mut stream, &server_ping_frame()).await.map_err(|error| {
+                    write_raw_frame(&mut server_writer, &server_ping_frame()).await.map_err(|error| {
                         ConnectionFailure::retryable(
                             format!("The Soulseek keepalive failed: {error}"),
                             "keepalive_failed",
                         )
                     })?;
                 }
-                frame = read_frame(&mut stream) => {
-                    let frame = frame.map_err(|error| {
-                        ConnectionFailure::retryable(
-                            format!("The Soulseek connection was interrupted: {error}"),
-                            "socket_interrupted",
-                        )
-                    })?;
+                frame = server_frame_receiver.recv() => {
+                    let frame = match frame {
+                        Some(Ok(frame)) => frame,
+                        Some(Err(error)) => {
+                            return Err(ConnectionFailure::retryable(
+                                format!("The Soulseek connection was interrupted: {error}"),
+                                "socket_interrupted",
+                            ));
+                        }
+                        None => {
+                            return Err(ConnectionFailure::retryable(
+                                "The Soulseek server reader stopped unexpectedly.",
+                                "socket_interrupted",
+                            ));
+                        }
+                    };
                     if frame.code == RELOGGED_CODE {
                         return Err(ConnectionFailure::fatal(
                             "This account signed in from another Soulseek client.",
@@ -612,7 +642,7 @@ impl ConnectionManager {
                 command = command_receiver.recv() => {
                     match command {
                         Some(ConnectionCommand::StartSearch { token, query }) => {
-                            write_raw_frame(&mut stream, &file_search_frame(token, &query))
+                            write_raw_frame(&mut server_writer, &file_search_frame(token, &query))
                                 .await
                                 .map_err(|error| {
                                     ConnectionFailure::retryable(
@@ -623,7 +653,7 @@ impl ConnectionManager {
                         }
                         Some(ConnectionCommand::PeerConnectionFailed { token, username }) => {
                             write_raw_frame(
-                                &mut stream,
+                                &mut server_writer,
                                 &cant_connect_to_peer_frame(token, &username),
                             )
                             .await
@@ -711,6 +741,19 @@ impl ConnectionManager {
             .is_some_and(|active| active.generation == generation)
         {
             *task = None;
+        }
+    }
+}
+
+async fn forward_server_frames<R>(mut reader: R, sender: mpsc::Sender<Result<Frame, ProtocolError>>)
+where
+    R: AsyncRead + Unpin,
+{
+    loop {
+        let frame = read_frame(&mut reader).await;
+        let terminal = frame.is_err();
+        if sender.send(frame).await.is_err() || terminal {
+            return;
         }
     }
 }
@@ -902,6 +945,7 @@ pub enum ConnectionServiceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
 
     #[test]
     fn reconnect_backoff_caps_at_thirty_seconds() {
@@ -919,5 +963,37 @@ mod tests {
 
         let invalid_username = rejection_failure("INVALIDUSERNAME", Some("Name unavailable."));
         assert_eq!(invalid_username.message, "Name unavailable.");
+    }
+
+    #[tokio::test]
+    async fn server_frame_pump_preserves_fragmented_frames_while_other_events_fire() {
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let (sender, mut receiver) = mpsc::channel(2);
+        let pump = tokio::spawn(forward_server_frames(reader, sender));
+        let first = server_ping_frame();
+        let second = set_online_frame();
+
+        let fragmented_writer = tokio::spawn(async move {
+            for byte in first.into_iter().chain(second) {
+                writer.write_all(&[byte]).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        });
+        let mut competing_tick = tokio::time::interval(Duration::from_millis(1));
+        let mut competing_events = 0;
+        let mut received = Vec::new();
+        while received.len() < 2 {
+            tokio::select! {
+                biased;
+                _ = competing_tick.tick(), if competing_events == 0 => competing_events += 1,
+                frame = receiver.recv() => received.push(frame.unwrap().unwrap()),
+            }
+        }
+
+        assert!(competing_events > 0);
+        assert_eq!(received[0].code, super::super::protocol::SERVER_PING_CODE);
+        assert_eq!(received[1].code, super::super::protocol::SET_STATUS_CODE);
+        fragmented_writer.await.unwrap();
+        pump.abort();
     }
 }

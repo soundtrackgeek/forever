@@ -3,9 +3,9 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.4` adds live, streamed Soulseek network
-> search with real file and source metadata. Downloads and the transfer shelf
-> remain staged for the next release.
+> **Status:** pre-alpha. Version `0.0.5` stabilizes the live Soulseek session
+> while retaining the streamed search and real file/source metadata introduced
+> in `0.0.4`. Downloads and the transfer shelf remain staged for a later release.
 
 ![Forever Midnight Radio interface](design/implementation/midnight-radio-0.0.4.png)
 
