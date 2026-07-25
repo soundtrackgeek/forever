@@ -3,9 +3,9 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.9` adds the complete User Shares Explorer:
-> open any search-result source, browse or search their public share list, build
-> a multi-folder selection, and send it to the resumable release queue.
+> **Status:** pre-alpha. Version `0.0.10` makes the User Shares Explorer easier
+> to navigate with folder-name search and expandable folder branches, while
+> in-app update prompts now show each release's actual changelog highlights.
 
 ![Forever Midnight Radio user shares interface](design/implementation/release-user-shares-0.0.9.png)
 
@@ -32,8 +32,9 @@ Rust, Tauri 2, React, and TypeScript.
   exchange, including public/private folder metadata, bounded parsing, a
   session-only cache, local filename/path search, format filters, and sorting
 - A three-pane User Shares Explorer with folder navigation, detailed file
-  metadata, multi-folder selection, selected-byte totals, and direct handoff to
-  the grouped transfer queue
+  metadata, folder-name and file search, expandable/collapsible hierarchy,
+  multi-folder selection, selected-byte totals, and direct handoff to the
+  grouped transfer queue
 - A polished release selector with per-file choices, Select all/Deselect all,
   selected-file counts, and aggregate download size
 - Whole-release enqueue into a collision-free local release folder, with
@@ -53,7 +54,7 @@ Rust, Tauri 2, React, and TypeScript.
 - Custom frameless Windows shell and branded application icons
 - In-app update checks at startup and every five minutes by default, with a
   persistent cadence setting, toast, release modal, progress, verification,
-  and restart flow
+  changelog-backed release highlights, and restart flow
 - GitHub CI for linting, typechecking, frontend tests, Rust formatting, Clippy,
   and Rust tests
 - Automatic GitHub Releases containing NSIS `.exe` and WiX `.msi` installers
@@ -94,11 +95,12 @@ Forever creates a safe release folder beneath the download location configured
 in Connection settings and adds the files in their displayed order. Choose the
 folder icon on any result—or **Browse shares** in the source inspector—to open
 that listener's complete shares. Source names in the transfer shelf and full
-Transfers workspace open the same explorer. Share-list search and format
-filtering run locally after the list is received; **Refresh** explicitly asks
-the peer again.
+Transfers workspace open the same explorer. Expand or collapse branches in the
+folder rail. Share-list search returns matching folders and files locally after
+the list is received; choose a folder result to open it directly. **Refresh**
+explicitly asks the peer again.
 
-Version `0.0.9` intentionally keeps one active file at a time, even when an
+Version `0.0.10` intentionally keeps one active file at a time, even when an
 entire release is queued. Multiple simultaneous downloads, uploads, library
 management, metadata/cover lookup, and playback remain outside this release.
 
@@ -142,7 +144,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.9 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.10 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

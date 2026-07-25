@@ -5,9 +5,58 @@ import {
   Sparkle,
   X,
 } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
 import type { useAppUpdater } from "../hooks/useAppUpdater";
 
 type UpdateExperienceProps = ReturnType<typeof useAppUpdater>;
+
+const plainMarkdown = (value: string) =>
+  value
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/\*\*([^*]*)\*\*/g, "$1")
+    .trim();
+
+function ReleaseNotes({ body }: { body: string }) {
+  const lines = body.split(/\r?\n/);
+  const content: ReactNode[] = [];
+  let bullets: string[] = [];
+
+  const flushBullets = () => {
+    if (!bullets.length) return;
+    content.push(
+      <ul key={`list-${content.length}`}>
+        {bullets.map((bullet, index) => <li key={`${index}-${bullet}`}>{plainMarkdown(bullet)}</li>)}
+      </ul>,
+    );
+    bullets = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushBullets();
+      continue;
+    }
+    if (/^\s{2,}\S/.test(rawLine) && bullets.length) {
+      bullets[bullets.length - 1] += ` ${line}`;
+      continue;
+    }
+    if (/^##\s+What.s new in Forever/i.test(line)) continue;
+    if (line.startsWith("- ")) {
+      bullets.push(line.slice(2));
+      continue;
+    }
+    flushBullets();
+    if (/^#{2,6}\s+/.test(line)) {
+      content.push(<h3 key={`heading-${content.length}`}>{plainMarkdown(line.replace(/^#{2,6}\s+/, ""))}</h3>);
+    } else {
+      content.push(<p key={`paragraph-${content.length}`}>{plainMarkdown(line)}</p>);
+    }
+  }
+  flushBullets();
+
+  return <div className="release-notes-content">{content}</div>;
+}
 
 export function UpdateExperience({
   status,
@@ -100,7 +149,7 @@ export function UpdateExperience({
 
                   <div className="release-notes">
                     <span>What’s new</span>
-                    <p>{details.body}</p>
+                    <ReleaseNotes body={details.body} />
                   </div>
 
                   {(status === "downloading" || status === "ready") && (

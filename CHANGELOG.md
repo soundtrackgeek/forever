@@ -5,6 +5,31 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.10] - 2026-07-25
+
+### Added
+
+- Folder-name results in user share searches, with a dedicated matching-folder
+  panel that opens the chosen remote directory directly.
+- Expandable and collapsible hierarchy for public and private shared folders,
+  including synthesized parent branches, aggregate file counts, active-folder
+  expansion, and matching ancestor context during search.
+- Changelog-backed GitHub release notes so the in-app updater can show the
+  actual additions, changes, and fixes from each release.
+- Frontend and Rust regression coverage for shared-folder search, tree
+  interaction, and updater release-note content.
+
+### Changed
+
+- The update modal presents release markdown as structured, scrollable
+  headings and bullet lists instead of unformatted text.
+- Application and updater preview metadata now identify version `0.0.10`.
+
+### Fixed
+
+- Search-result folder, add, and download actions retain equal circular
+  dimensions instead of being compressed into narrow ovals.
+
 ## [0.0.9] - 2026-07-25
 
 ### Added

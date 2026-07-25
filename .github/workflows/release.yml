@@ -67,6 +67,15 @@ jobs:
             throw "Release v$env:APP_VERSION already exists. Bump the application version."
           }
 
+      - name: Build release notes from the changelog
+        id: release_notes
+        shell: pwsh
+        run: |
+          $body = npm run --silent release:notes
+          "body<<FOREVER_RELEASE_NOTES" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $body | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "FOREVER_RELEASE_NOTES" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Run frontend quality checks
         run: npm run check
 
@@ -85,11 +94,8 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: Forever v__VERSION__
-          releaseBody: |
-            Download `Forever_*_x64-setup.exe` for the recommended Windows installer.
-
-            Every updater artifact is signed and verified by the application before installation.
-          generateReleaseNotes: true
+          releaseBody: ${{ steps.release_notes.outputs.body }}
+          generateReleaseNotes: false
           releaseDraft: false
           prerelease: false
           uploadUpdaterJson: true

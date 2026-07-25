@@ -162,6 +162,7 @@ export type ShareSearchSnapshot = {
   username: string;
   query: string;
   extension: string | null;
+  directories: ShareDirectorySummary[];
   files: ShareFile[];
   truncated: boolean;
 };

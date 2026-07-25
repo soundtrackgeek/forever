@@ -128,6 +128,41 @@ describe("Forever shell", () => {
     expect(screen.getAllByText("audiophile92 selection").length).toBeGreaterThan(0);
   });
 
+  it("searches folders and expands or collapses the share hierarchy", async () => {
+    render(<App />);
+
+    fireEvent.click(
+      screen.getAllByRole("button", {
+        name: "Browse files shared by audiophile92",
+      })[0],
+    );
+    const shares = await screen.findByRole("region", {
+      name: "audiophile92's shared files",
+    });
+    expect(within(shares).getByRole("button", { name: "Collapse Music" })).toBeInTheDocument();
+    expect(within(shares).getByRole("button", { name: "Collapse Liminal Structures" })).toBeInTheDocument();
+
+    fireEvent.click(within(shares).getByRole("button", { name: "Collapse Liminal Structures" }));
+    expect(
+      within(shares).queryByRole("button", { name: /^Night Geometry/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(shares).getByRole("button", { name: "Expand Liminal Structures" }));
+    expect(
+      within(shares).getByRole("button", { name: /^Night Geometry/ }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(within(shares).getByRole("textbox", { name: "Search this user's shares" }), {
+      target: { value: "Signal Bloom" },
+    });
+    fireEvent.click(within(shares).getByRole("button", { name: "Search" }));
+    expect(
+      within(shares).getByRole("button", {
+        name: "Open folder Music\\Electronic\\Liminal Structures\\Signal Bloom",
+      }),
+    ).toBeInTheDocument();
+    expect(within(shares).getByText("1 folder · 3 files for “Signal Bloom”")).toBeInTheDocument();
+  });
+
   it("opens the release-grouped Transfers workspace and filters completed releases", () => {
     render(<App />);
 
@@ -191,6 +226,26 @@ describe("Forever shell", () => {
     expect(
       screen.getByRole("combobox", { name: /Automatic update checks/ }),
     ).toHaveValue("15");
+  });
+
+  it("shows the release changelog in the update prompt", async () => {
+    window.history.replaceState({}, "", "/?update=available");
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Forever 0.0.10 is ready." }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Folder-name results in user share searches, with matching folders that open directly.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Search-result actions keep their intended circular shape."),
+    ).toBeInTheDocument();
   });
 
   it("guides a fresh profile through its first connection", async () => {

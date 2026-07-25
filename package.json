@@ -1,7 +1,7 @@
 {
   "name": "forever",
   "private": true,
-  "version": "0.0.9",
+  "version": "0.0.10",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
     "verify:version": "node scripts/verify-version.mjs",
+    "release:notes": "node scripts/release-notes.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

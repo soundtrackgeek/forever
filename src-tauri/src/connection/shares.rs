@@ -9,6 +9,7 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 
 const SHARE_SEARCH_LIMIT: usize = 500;
+const SHARE_FOLDER_SEARCH_LIMIT: usize = 250;
 
 #[derive(Clone, Debug)]
 pub struct SharesTicket {
@@ -72,6 +73,7 @@ pub struct ShareSearchSnapshot {
     pub username: String,
     pub query: String,
     pub extension: Option<String>,
+    pub directories: Vec<ShareDirectorySummary>,
     pub files: Vec<ShareFileSnapshot>,
     pub truncated: bool,
 }
@@ -310,6 +312,21 @@ impl SharesHub {
         let cached = cache
             .get(&cache_key(username))
             .ok_or(SharesError::NotCached)?;
+        let directories = if terms.is_empty() {
+            Vec::new()
+        } else {
+            cached
+                .overview
+                .directories
+                .iter()
+                .filter(|directory| {
+                    let path = directory.path.to_ascii_lowercase();
+                    terms.iter().all(|term| path.contains(term))
+                })
+                .take(SHARE_FOLDER_SEARCH_LIMIT)
+                .cloned()
+                .collect()
+        };
         let mut files = Vec::new();
         let mut truncated = false;
         'folders: for folder in cached.folders.values() {
@@ -341,6 +358,7 @@ impl SharesHub {
             username: cached.overview.username.clone(),
             query: query.to_owned(),
             extension,
+            directories,
             files,
             truncated,
         })
@@ -500,6 +518,11 @@ mod tests {
         );
         let search = hub.search("source", "thresholds", Some("flac")).unwrap();
         assert_eq!(search.files.len(), 1);
+        assert!(search.directories.is_empty());
         assert!(!search.truncated);
+
+        let folder_search = hub.search("source", "night geometry", None).unwrap();
+        assert_eq!(folder_search.directories.len(), 1);
+        assert_eq!(folder_search.directories[0].name, "Night Geometry");
     }
 }

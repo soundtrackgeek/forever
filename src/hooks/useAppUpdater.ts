@@ -31,8 +31,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 
 const PREVIEW_UPDATE: UpdateDetails = {
   currentVersion: "0.0.9",
-  version: "0.0.9",
-  body: "A preview release for exercising Forever’s signed update experience.",
+  version: "0.0.10",
+  body: `## What’s new in Forever 0.0.10
+
+### Added
+
+- Folder-name results in user share searches,
+  with matching folders that open directly.
+- Expandable and collapsible shared-folder trees.
+
+### Fixed
+
+- Search-result actions keep their intended circular shape.
+- Update prompts show the release’s real changelog highlights.`,
   date: "2026-07-25",
 };
 

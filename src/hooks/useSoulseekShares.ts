@@ -172,6 +172,12 @@ export function useSoulseekShares() {
           });
         } else {
           const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+          const directories = terms.length
+            ? previewOverview(username).directories.filter((directory) => {
+                const path = directory.path.toLowerCase();
+                return terms.every((term) => path.includes(term));
+              })
+            : [];
           const files = previewDirectories
             .flatMap(previewFiles)
             .filter(
@@ -179,7 +185,7 @@ export function useSoulseekShares() {
                 (!extension || file.extension === extension.toLowerCase()) &&
                 terms.every((term) => file.remoteFilename.toLowerCase().includes(term)),
             );
-          next = { username, query, extension, files, truncated: false };
+          next = { username, query, extension, directories, files, truncated: false };
         }
         setResults(next);
         return next;

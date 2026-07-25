@@ -959,7 +959,7 @@ button:disabled {
 
 .result-header {
   display: grid;
-  grid-template-columns: minmax(270px, 1.45fr) minmax(120px, 0.7fr) 108px 92px minmax(170px, 1fr) 74px;
+  grid-template-columns: minmax(270px, 1.45fr) minmax(120px, 0.7fr) 108px 92px minmax(170px, 1fr) 118px;
   align-items: center;
   padding: 0 14px;
   color: #787d90;
@@ -975,7 +975,7 @@ button:disabled {
 .result-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 74px;
+  grid-template-columns: minmax(0, 1fr) 118px;
   min-height: 59px;
   background: rgba(10, 14, 25, 0.48);
   border-bottom: 1px solid rgba(39, 44, 62, 0.85);
@@ -1136,13 +1136,16 @@ button:disabled {
 
 .result-row-actions {
   display: flex;
+  min-width: 0;
   align-items: center;
+  justify-content: flex-end;
   gap: 7px;
-  padding-right: 13px;
+  padding: 0 11px 0 5px;
 }
 
 .result-row-actions button {
   display: grid;
+  flex: 0 0 29px;
   width: 29px;
   height: 29px;
   padding: 0;
@@ -2107,7 +2110,8 @@ button:disabled {
 }
 
 .update-heading p,
-.release-notes p {
+.release-notes p,
+.release-notes li {
   margin: 0;
   color: #999cac;
   font-size: 11px;
@@ -2115,15 +2119,45 @@ button:disabled {
 }
 
 .release-notes {
+  max-height: min(265px, 38vh);
   margin: 0 22px;
   padding: 15px;
+  overflow: auto;
   background: rgba(18, 22, 37, 0.76);
   border: 1px solid #2c3247;
   border-radius: 7px;
 }
 
+.release-notes-content {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.release-notes h3 {
+  margin: 3px 0 0;
+  color: #e5e2ea;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .release-notes p {
-  margin-top: 8px;
+  margin: 0;
+  color: #b5b7c3;
+}
+
+.release-notes ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 17px;
+  color: var(--amber);
+}
+
+.release-notes li {
+  padding-left: 2px;
   color: #b5b7c3;
 }
 
@@ -2217,7 +2251,7 @@ button:disabled {
   }
 
   .result-header {
-    grid-template-columns: minmax(250px, 1.4fr) 118px 100px 82px minmax(135px, 0.9fr) 74px;
+    grid-template-columns: minmax(250px, 1.4fr) 118px 100px 82px minmax(135px, 0.9fr) 118px;
   }
 
   .result-select {
@@ -2293,7 +2327,7 @@ button:disabled {
   }
 
   .result-header {
-    grid-template-columns: minmax(240px, 1.4fr) 105px 95px 75px minmax(110px, 0.8fr) 68px;
+    grid-template-columns: minmax(240px, 1.4fr) 105px 95px 75px minmax(110px, 0.8fr) 112px;
   }
 
   .result-select {
@@ -4222,47 +4256,92 @@ form.settings-panel {
   overflow: auto;
 }
 
-.shares-tree-list button {
-  display: grid;
+.shares-tree-row {
+  display: flex;
   width: 100%;
   min-height: 35px;
-  grid-template-columns: 17px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 7px;
-  padding-right: 12px;
   color: #969bad;
   font-size: 9px;
-  text-align: left;
   background: transparent;
-  border: 0;
   border-left: 2px solid transparent;
-  cursor: pointer;
 }
 
-.shares-tree-list button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shares-tree-list button small {
-  color: #585e71;
-  font-size: 8px;
-}
-
-.shares-tree-list button:hover {
+.shares-tree-row:hover {
   color: #ddddea;
   background: rgba(255, 255, 255, 0.025);
 }
 
-.shares-tree-list button.is-active {
+.shares-tree-row.is-active {
   color: #f3eefc;
   background: linear-gradient(90deg, rgba(107, 79, 183, 0.23), rgba(89, 70, 154, 0.08));
   border-left-color: var(--violet);
 }
 
-.shares-tree-list button.is-active svg {
+.shares-tree-row.is-active .shares-tree-folder > svg {
   color: var(--amber);
+}
+
+.shares-tree-toggle {
+  display: grid;
+  width: 21px;
+  height: 35px;
+  flex: 0 0 21px;
+  padding: 0;
+  color: #696f82;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  place-items: center;
+}
+
+.shares-tree-toggle svg {
+  transition: transform 150ms ease;
+}
+
+.shares-tree-toggle svg.is-expanded {
+  transform: rotate(90deg);
+}
+
+.shares-tree-spacer {
+  width: 21px;
+  flex: 0 0 21px;
+}
+
+.shares-tree-folder {
+  display: grid;
+  min-width: 0;
+  min-height: 35px;
+  flex: 1;
+  grid-template-columns: 17px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px 0 0;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.shares-tree-folder span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shares-tree-folder small {
+  color: #585e71;
+  font-size: 8px;
+}
+
+.shares-tree-empty {
+  padding: 22px 14px;
+  color: #6f7588;
+  font-size: 9px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .shares-loading,
@@ -4282,6 +4361,97 @@ form.settings-panel {
   display: grid;
   grid-template-rows: 42px 31px minmax(0, 1fr);
   background: #0b0f1b;
+}
+
+.shares-files.has-folder-results {
+  grid-template-rows: 42px auto 31px minmax(0, 1fr);
+}
+
+.shares-folder-results {
+  max-height: 136px;
+  padding: 9px 11px;
+  overflow: auto;
+  background: rgba(15, 19, 34, 0.82);
+  border-bottom: 1px solid #252b3d;
+}
+
+.shares-folder-results > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 7px;
+  color: #777d90;
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.shares-folder-results > header small {
+  color: var(--amber);
+}
+
+.shares-folder-results > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
+  gap: 6px;
+}
+
+.shares-folder-results button {
+  display: grid;
+  min-width: 0;
+  min-height: 44px;
+  grid-template-columns: 19px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  color: #9da1b1;
+  text-align: left;
+  background: #111625;
+  border: 1px solid #2b3145;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.shares-folder-results button:hover {
+  color: white;
+  background: #151a2b;
+  border-color: #504366;
+}
+
+.shares-folder-results button > svg {
+  color: var(--amber);
+}
+
+.shares-folder-results button > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.shares-folder-results strong,
+.shares-folder-results button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shares-folder-results strong {
+  color: #d9d9e3;
+  font-size: 9px;
+  font-weight: 560;
+}
+
+.shares-folder-results button small {
+  color: #62687b;
+  font-size: 7px;
+}
+
+.shares-folder-results em {
+  color: #777d90;
+  font-size: 7px;
+  font-style: normal;
+  white-space: nowrap;
 }
 
 .shares-breadcrumb {

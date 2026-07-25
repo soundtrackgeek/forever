@@ -1,6 +1,7 @@
 import {
   ArrowClockwise,
   CaretDown,
+  CaretRight,
   Check,
   DownloadSimple,
   FileAudio,
@@ -19,10 +20,113 @@ import { useMemo, useState, type FormEvent } from "react";
 import type {
   FolderFile,
   ShareFile,
+  ShareDirectorySummary,
   ShareFolderSnapshot,
   ShareSearchSnapshot,
   UserSharesOverview,
 } from "../types";
+
+type ShareTreeNode = {
+  path: string;
+  name: string;
+  directory: ShareDirectorySummary | null;
+  children: ShareTreeNode[];
+  fileCount: number;
+  isPrivate: boolean;
+};
+
+type ShareTreeRow = {
+  node: ShareTreeNode;
+  depth: number;
+  expanded: boolean;
+};
+
+const pathKey = (path: string) => path.toLocaleLowerCase();
+
+const buildShareTree = (directories: ShareDirectorySummary[]) => {
+  const nodes = new Map<string, ShareTreeNode>();
+  const roots: ShareTreeNode[] = [];
+
+  for (const directory of directories) {
+    const segments = directory.path.split("\\").filter(Boolean);
+    let parent: ShareTreeNode | null = null;
+    for (let index = 0; index < segments.length; index += 1) {
+      const path = segments.slice(0, index + 1).join("\\");
+      const key = pathKey(path);
+      let node = nodes.get(key);
+      if (!node) {
+        node = {
+          path,
+          name: segments[index],
+          directory: null,
+          children: [],
+          fileCount: 0,
+          isPrivate: directory.isPrivate,
+        };
+        nodes.set(key, node);
+        if (parent) parent.children.push(node);
+        else roots.push(node);
+      }
+      if (index === segments.length - 1) {
+        if (!node.directory || (node.directory.isPrivate && !directory.isPrivate)) {
+          node.directory = directory;
+        }
+        node.isPrivate = node.isPrivate && directory.isPrivate;
+      }
+      parent = node;
+    }
+  }
+
+  const finish = (node: ShareTreeNode): number => {
+    node.children.sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }));
+    const childFiles = node.children.reduce((total, child) => total + finish(child), 0);
+    node.fileCount = (node.directory?.fileCount ?? 0) + childFiles;
+    if (node.children.some((child) => !child.isPrivate)) node.isPrivate = false;
+    return node.fileCount;
+  };
+  roots.sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }));
+  roots.forEach(finish);
+  return roots;
+};
+
+const flattenShareTree = (
+  roots: ShareTreeNode[],
+  activePath: string | null,
+  matchedPaths: Set<string> | null,
+  expandedPaths: Set<string>,
+  collapsedPaths: Set<string>,
+) => {
+  const rows: ShareTreeRow[] = [];
+  const activeKey = activePath ? pathKey(activePath) : null;
+  const matchingBranches = matchedPaths ? new Set<string>() : null;
+
+  const collectMatchingBranches = (node: ShareTreeNode): boolean => {
+    const key = pathKey(node.path);
+    const hasMatchingChild = node.children.some(collectMatchingBranches);
+    if (!matchedPaths?.has(key) && !hasMatchingChild) return false;
+    matchingBranches?.add(key);
+    return true;
+  };
+
+  if (matchingBranches) roots.forEach(collectMatchingBranches);
+
+  const append = (node: ShareTreeNode, depth: number) => {
+    const key = pathKey(node.path);
+    if (matchingBranches && !matchingBranches.has(key)) return;
+    const followsActivePath = Boolean(
+      activeKey && (activeKey === key || activeKey.startsWith(`${key}\\`)),
+    );
+    const expanded =
+      node.children.length > 0 &&
+      !collapsedPaths.has(key) &&
+      (Boolean(matchedPaths) || expandedPaths.has(key) || followsActivePath);
+    rows.push({ node, depth, expanded });
+    if (expanded) node.children.forEach((child) => append(child, depth + 1));
+  };
+
+  roots.forEach((root) => append(root, 0));
+  return rows;
+};
 
 type UserSharesWorkspaceProps = {
   username: string;
@@ -81,6 +185,28 @@ export function UserSharesWorkspace({
   const [extension, setExtension] = useState("all");
   const [sort, setSort] = useState<"name" | "size" | "format">("name");
   const [selection, setSelection] = useState<Map<string, ShareFile>>(new Map());
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
+
+  const shareTree = useMemo(
+    () => buildShareTree(overview?.directories ?? []),
+    [overview?.directories],
+  );
+  const matchedFolderPaths = useMemo(() => {
+    if (!results?.query.trim()) return null;
+    return new Set(results.directories.map((directory) => pathKey(directory.path)));
+  }, [results]);
+  const treeRows = useMemo(
+    () =>
+      flattenShareTree(
+        shareTree,
+        results ? null : folder?.directory ?? null,
+        matchedFolderPaths,
+        expandedPaths,
+        collapsedPaths,
+      ),
+    [collapsedPaths, expandedPaths, folder?.directory, matchedFolderPaths, results, shareTree],
+  );
 
   const visibleFiles = useMemo(() => {
     const files = [...(results?.files ?? folder?.files ?? [])];
@@ -123,6 +249,31 @@ export function UserSharesWorkspace({
       }
       return next;
     });
+  };
+
+  const toggleTreeNode = (row: ShareTreeRow) => {
+    const key = pathKey(row.node.path);
+    if (row.expanded) {
+      setExpandedPaths((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+      setCollapsedPaths((current) => new Set(current).add(key));
+    } else {
+      setCollapsedPaths((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+      setExpandedPaths((current) => new Set(current).add(key));
+    }
+  };
+
+  const openDirectory = (directory: ShareDirectorySummary) => {
+    setQuery("");
+    setExtension("all");
+    onOpenFolder(directory.path);
   };
 
   return (
@@ -189,40 +340,72 @@ export function UserSharesWorkspace({
         <aside className="shares-tree" aria-label="Shared folders">
           <div className="shares-pane-title">
             <span>Folders</span>
-            <small>{overview?.directories.length ?? 0}</small>
+            <small>{matchedFolderPaths ? results?.directories.length ?? 0 : overview?.directories.length ?? 0}</small>
           </div>
           {loading && !overview ? (
             <div className="shares-loading"><SpinnerGap className="is-spinning" size={22} /> Reading share list…</div>
           ) : (
             <div className="shares-tree-list">
-              {overview?.directories.map((directory) => (
-                <button
-                  type="button"
-                  className={folder?.directory === directory.path && !results ? "is-active" : ""}
-                  style={{ paddingLeft: `${14 + Math.min(directory.depth - 1, 4) * 11}px` }}
-                  onClick={() => {
-                    setQuery("");
-                    setExtension("all");
-                    onOpenFolder(directory.path);
-                  }}
-                  title={directory.path}
-                  key={`${directory.isPrivate}:${directory.path}`}
+              {treeRows.length === 0 ? (
+                <div className="shares-tree-empty">No folders match “{results?.query}”.</div>
+              ) : treeRows.map((row) => (
+                <div
+                  className={`shares-tree-row ${folder?.directory === row.node.directory?.path && !results ? "is-active" : ""}`}
+                  style={{ paddingLeft: `${7 + Math.min(row.depth, 5) * 12}px` }}
+                  key={row.node.path}
                 >
-                  {directory.isPrivate ? <LockSimple size={14} /> : <FolderSimple size={15} />}
-                  <span>{directory.name}</span>
-                  <small>{directory.fileCount}</small>
-                </button>
+                  {row.node.children.length ? (
+                    <button
+                      type="button"
+                      className="shares-tree-toggle"
+                      aria-label={`${row.expanded ? "Collapse" : "Expand"} ${row.node.name}`}
+                      aria-expanded={row.expanded}
+                      onClick={() => toggleTreeNode(row)}
+                    >
+                      <CaretRight className={row.expanded ? "is-expanded" : ""} size={11} weight="bold" />
+                    </button>
+                  ) : <span className="shares-tree-spacer" />}
+                  <button
+                    type="button"
+                    className="shares-tree-folder"
+                    onClick={() => row.node.directory ? openDirectory(row.node.directory) : toggleTreeNode(row)}
+                    title={row.node.path}
+                  >
+                    {row.node.isPrivate ? <LockSimple size={14} /> : <FolderSimple size={15} />}
+                    <span>{row.node.name}</span>
+                    <small>{row.node.fileCount}</small>
+                  </button>
+                </div>
               ))}
             </div>
           )}
         </aside>
 
-        <main className="shares-files">
+        <main className={`shares-files ${results?.directories.length ? "has-folder-results" : ""}`}>
           <div className="shares-breadcrumb">
             <FolderOpen size={16} />
-            <span>{results ? `Results for “${results.query || extension}”` : folder?.directory ?? "Select a folder"}</span>
+            <span>{results ? `${results.directories.length} ${results.directories.length === 1 ? "folder" : "folders"} · ${results.files.length} ${results.files.length === 1 ? "file" : "files"} for “${results.query || extension}”` : folder?.directory ?? "Select a folder"}</span>
             {results?.truncated && <small>First 500 matches</small>}
           </div>
+          {Boolean(results?.directories.length) && (
+            <div className="shares-folder-results" aria-label="Matching folders">
+              <header><span>Matching folders</span><small>{results?.directories.length}</small></header>
+              <div>
+                {results?.directories.map((directory) => (
+                  <button
+                    type="button"
+                    aria-label={`Open folder ${directory.path}`}
+                    onClick={() => openDirectory(directory)}
+                    key={`${directory.isPrivate}:${directory.path}`}
+                  >
+                    {directory.isPrivate ? <LockSimple size={16} /> : <FolderOpen size={16} />}
+                    <span><strong>{directory.name}</strong><small>{directory.path}</small></span>
+                    <em>{directory.fileCount} {directory.fileCount === 1 ? "file" : "files"}</em>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="shares-file-header" aria-hidden="true">
             <span /> <span>Name</span><span>Format</span><span>Quality</span><span>Duration</span><span>Size</span>
           </div>
@@ -230,7 +413,7 @@ export function UserSharesWorkspace({
             {loading && visibleFiles.length === 0 ? (
               <div className="shares-empty"><SpinnerGap className="is-spinning" size={25} /><p>Listening for this user’s share list…</p></div>
             ) : visibleFiles.length === 0 ? (
-              <div className="shares-empty"><FolderOpen size={28} /><p>No files match this view.</p></div>
+              <div className="shares-empty"><FolderOpen size={28} /><p>{results?.directories.length ? "No files match. Choose a folder result above." : "No files or folders match this view."}</p></div>
             ) : visibleFiles.map((file) => {
               const selected = selection.has(file.remoteFilename);
               return (
