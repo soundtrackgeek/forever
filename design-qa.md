@@ -1,12 +1,12 @@
-# Midnight Radio v0.0.2 implementation QA
+# Midnight Radio v0.0.3 implementation QA
 
 - Source visual: `design/concepts/03-midnight-radio.png`
 - Connected-shell screenshot: `design/implementation/midnight-radio-0.0.2.png`
-- First Connection screenshot: `design/implementation/first-connection-0.0.2.png`
-- Connection settings screenshot: `design/implementation/connection-settings-0.0.2.png`
+- First Connection screenshot: `design/implementation/first-connection-0.0.3.png`
+- Connection settings screenshot: `design/implementation/connection-settings-0.0.3.png`
 - Minimum-window screenshots:
-  `design/implementation/first-connection-0.0.2-minimum.png` and
-  `design/implementation/connection-settings-0.0.2-minimum.png`
+  `design/implementation/first-connection-0.0.3-minimum.png` and
+  `design/implementation/connection-settings-0.0.3-minimum.png`
 - Viewport: 1584 × 992 CSS pixels
 - Source dimensions: 1584 × 992
 - Implementation dimensions: 1584 × 992
@@ -26,7 +26,7 @@
 - Accessibility: passed — controls expose semantic names, modal semantics, image alternatives, visible focus treatment, keyboard search, and reduced-motion handling.
 - Responsiveness: passed — the exact target viewport and the Tauri minimum window size of 1024 × 680 were tested with no document overflow. Onboarding fits without internal scrolling; connection settings use one intentional vertical scroll region at minimum size.
 
-## v0.0.2 visual comparison
+## v0.0.3 visual comparison
 
 1. The 198 px navigation rail, central search workspace, 366 px release inspector,
    33 px title bar, and transfer shelf remain aligned with the accepted source.
@@ -37,9 +37,12 @@
    while table thumbnails, transfer art, and avatar remain visually coherent.
 4. Typography keeps the same compact neutral sans hierarchy, amber uppercase
    micro-labels, restrained weights, and violet metadata.
-5. The new First Connection and settings surfaces reuse the same near-black
-   indigo surfaces, shallow radii, hairline borders, amber primary action,
-   violet controls, and low-noise information density.
+5. The First Connection and settings additions keep the same near-black indigo
+   surfaces, shallow radii, hairline borders, amber guidance accent, violet
+   controls, and low-noise information density.
+6. The account-registration note aligns to the form grid instead of interrupting
+   it, and the cadence selector sits inside the existing maintenance card rather
+   than adding another competing panel.
 
 ## Comparison history
 
@@ -51,7 +54,7 @@
 
 - The reference player transport is represented by a transfer-focused shelf because playback is outside the v0.1.0 vertical slice.
 - The original concept artwork was regenerated as a production-safe asset in the same visual direction, so moon and monolith geometry are not pixel-identical.
-- The First Connection overlay and settings workspace are additive v0.0.2
+- The First Connection overlay and settings workspace are additive pre-alpha
   surfaces; neither existed in the single-screen concept.
 - Sidebar collapse and theme controls remain deferred; connection, diagnostics,
   and update affordances are functional.
@@ -64,6 +67,13 @@ radio/signal metaphor. New copy is limited to connection truth and actions:
 “First connection,” “Tune into Soulseek,” state-specific network labels,
 credential-storage explanations, reconnect diagnostics, and settings controls.
 No visual-heading copy from the accepted search screen was rewritten.
+
+The v0.0.3 copy addition is intentionally literal rather than metaphorical:
+“Why almost any login works” and “Unused usernames are registered
+automatically” explain Soulseek’s implicit account creation at the exact point
+where it can otherwise look like failed validation. The only visual deviation
+is the added amber information strip and the native cadence selector; both use
+the accepted Midnight Radio tokens and spacing.
 
 ## Final result
 

@@ -208,6 +208,10 @@ function App() {
             }}
             onLoadDiagnostics={connection.loadDiagnostics}
             onCheckForUpdates={() => void updater.checkForUpdates(true)}
+            updateCheckIntervalMinutes={updater.updateCheckIntervalMinutes}
+            onUpdateCheckIntervalChange={
+              updater.setUpdateCheckIntervalMinutes
+            }
           />
         ) : (
           <PlaceholderView

@@ -5,6 +5,30 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.3] - 2026-07-25
+
+### Added
+
+- Persistent automatic update-check intervals with a five-minute default and
+  options for one, fifteen, thirty, or sixty minutes, or startup only.
+- Explanatory account-registration guidance in First Connection and Connection
+  settings.
+- Frontend coverage for the default recurring update schedule, preference
+  persistence, and Soulseek account guidance.
+
+### Changed
+
+- First Connection now states that a valid unused Soulseek username is
+  automatically registered with the password entered.
+- Application and updater preview metadata now identify version `0.0.3`.
+
+### Fixed
+
+- Concurrent automatic, startup, and manual update checks are coalesced so
+  multiple updater requests cannot overlap.
+- Successful registration of a previously unused username is no longer
+  presented as if Forever skipped credential validation.
+
 ## [0.0.2] - 2026-07-25
 
 ### Added

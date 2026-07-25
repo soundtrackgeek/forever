@@ -8,7 +8,9 @@ import {
   Plugs,
   ShieldCheck,
   Trash,
+  UserPlus,
 } from "@phosphor-icons/react";
+import type { UpdateCheckIntervalMinutes } from "../hooks/useAppUpdater";
 import { useEffect, useState, type FormEvent } from "react";
 import type {
   ConnectionProfile,
@@ -29,6 +31,10 @@ type ConnectionSettingsProps = {
   onReset: () => Promise<unknown>;
   onLoadDiagnostics: () => Promise<DiagnosticEntry[]>;
   onCheckForUpdates: () => void;
+  updateCheckIntervalMinutes: UpdateCheckIntervalMinutes;
+  onUpdateCheckIntervalChange: (
+    interval: UpdateCheckIntervalMinutes,
+  ) => void;
 };
 
 const statusLabels: Record<ConnectionSnapshot["state"], string> = {
@@ -62,6 +68,8 @@ export function ConnectionSettings({
   onReset,
   onLoadDiagnostics,
   onCheckForUpdates,
+  updateCheckIntervalMinutes,
+  onUpdateCheckIntervalChange,
 }: ConnectionSettingsProps) {
   const [draft, setDraft] = useState(profile);
   const [password, setPassword] = useState("");
@@ -215,6 +223,17 @@ export function ConnectionSettings({
             </label>
           </div>
 
+          <div className="account-behavior-note is-compact">
+            <UserPlus size={16} weight="light" />
+            <span>
+              <strong>Unused usernames are registered automatically</strong>
+              <small>
+                Soulseek only reports a wrong password when that username
+                already belongs to someone.
+              </small>
+            </span>
+          </div>
+
           <div className="settings-toggle-grid">
             <label className="toggle-row">
               <input
@@ -321,9 +340,30 @@ export function ConnectionSettings({
           </section>
 
           <section className="settings-panel maintenance-panel">
-            <div>
-              <h2>Forever 0.0.2</h2>
+            <div className="update-preferences">
+              <h2>Forever 0.0.3</h2>
               <p>Updates install from signed GitHub Releases.</p>
+              <label className="update-interval-field">
+                <span>Automatic update checks</span>
+                <select
+                  value={updateCheckIntervalMinutes}
+                  onChange={(event) =>
+                    onUpdateCheckIntervalChange(
+                      Number(event.target.value) as UpdateCheckIntervalMinutes,
+                    )
+                  }
+                >
+                  <option value={1}>Every minute</option>
+                  <option value={5}>Every 5 minutes</option>
+                  <option value={15}>Every 15 minutes</option>
+                  <option value={30}>Every 30 minutes</option>
+                  <option value={60}>Every hour</option>
+                  <option value={0}>Only at startup</option>
+                </select>
+                <small>
+                  Default: every 5 minutes while Forever is running.
+                </small>
+              </label>
               <button
                 type="button"
                 className="secondary-text-button"

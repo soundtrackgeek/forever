@@ -19,15 +19,46 @@ export type UpdateDetails = {
   date?: string;
 };
 
+export type UpdateCheckIntervalMinutes = 0 | 1 | 5 | 15 | 30 | 60;
+
+export const DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES: UpdateCheckIntervalMinutes = 5;
+export const UPDATE_CHECK_INTERVAL_STORAGE_KEY =
+  "forever.updateCheckIntervalMinutes";
+
+const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
+  0, 1, 5, 15, 30, 60,
+];
+
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.2",
-  version: "0.0.3",
+  currentVersion: "0.0.3",
+  version: "0.0.4",
   body: "A preview release for exercising Forever’s signed update experience.",
   date: "2026-07-25",
 };
 
 const wait = (duration: number) =>
   new Promise((resolve) => window.setTimeout(resolve, duration));
+
+function readUpdateCheckInterval(): UpdateCheckIntervalMinutes {
+  try {
+    const value = window.localStorage.getItem(
+      UPDATE_CHECK_INTERVAL_STORAGE_KEY,
+    );
+    if (value === null) return DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES;
+    const stored = Number(value);
+    if (
+      SUPPORTED_UPDATE_CHECK_INTERVALS.includes(
+        stored as UpdateCheckIntervalMinutes,
+      )
+    ) {
+      return stored as UpdateCheckIntervalMinutes;
+    }
+  } catch {
+    // Fall back to the safe default if WebView storage is unavailable.
+  }
+
+  return DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES;
+}
 
 export function useAppUpdater() {
   const [status, setStatus] = useState<UpdateStatus>("idle");
@@ -36,35 +67,41 @@ export function useAppUpdater() {
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isToastDismissed, setIsToastDismissed] = useState(false);
+  const [updateCheckIntervalMinutes, setUpdateCheckIntervalState] =
+    useState<UpdateCheckIntervalMinutes>(readUpdateCheckInterval);
   const updateRef = useRef<Update | null>(null);
+  const checkInFlightRef = useRef(false);
+  const installInProgressRef = useRef(false);
 
   const checkForUpdates = useCallback(async (manual = false) => {
+    if (checkInFlightRef.current || installInProgressRef.current) return;
+    checkInFlightRef.current = true;
     setStatus("checking");
     setError(null);
     setIsToastDismissed(false);
 
-    if (!isTauri()) {
-      if (
-        import.meta.env.DEV &&
-        new URLSearchParams(window.location.search).get("update") ===
-          "available"
-      ) {
-        await wait(350);
-        setDetails(PREVIEW_UPDATE);
-        setStatus("available");
-        if (manual) setIsModalOpen(true);
+    try {
+      if (!isTauri()) {
+        if (
+          import.meta.env.DEV &&
+          new URLSearchParams(window.location.search).get("update") ===
+            "available"
+        ) {
+          await wait(350);
+          setDetails(PREVIEW_UPDATE);
+          setStatus("available");
+          if (manual) setIsModalOpen(true);
+          return;
+        }
+
+        await wait(250);
+        setStatus("current");
+        if (manual) {
+          window.setTimeout(() => setStatus("idle"), 2200);
+        }
         return;
       }
 
-      await wait(250);
-      setStatus("current");
-      if (manual) {
-        window.setTimeout(() => setStatus("idle"), 2200);
-      }
-      return;
-    }
-
-    try {
       const update = await check({ timeout: 12_000 });
 
       if (!update) {
@@ -90,6 +127,8 @@ export function useAppUpdater() {
       setError(message);
       setStatus("error");
       if (manual) setIsModalOpen(true);
+    } finally {
+      checkInFlightRef.current = false;
     }
   }, []);
 
@@ -101,7 +140,37 @@ export function useAppUpdater() {
     return () => window.clearTimeout(timeout);
   }, [checkForUpdates]);
 
+  useEffect(() => {
+    if (updateCheckIntervalMinutes === 0) return;
+
+    const interval = window.setInterval(
+      () => void checkForUpdates(false),
+      updateCheckIntervalMinutes * 60_000,
+    );
+    return () => window.clearInterval(interval);
+  }, [checkForUpdates, updateCheckIntervalMinutes]);
+
+  const setUpdateCheckIntervalMinutes = useCallback(
+    (interval: UpdateCheckIntervalMinutes) => {
+      const supported = SUPPORTED_UPDATE_CHECK_INTERVALS.includes(interval)
+        ? interval
+        : DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES;
+      setUpdateCheckIntervalState(supported);
+      try {
+        window.localStorage.setItem(
+          UPDATE_CHECK_INTERVAL_STORAGE_KEY,
+          String(supported),
+        );
+      } catch {
+        // The current session still uses the selected interval.
+      }
+    },
+    [],
+  );
+
   const installUpdate = useCallback(async () => {
+    if (installInProgressRef.current) return;
+    installInProgressRef.current = true;
     setStatus("downloading");
     setProgress(0);
     setError(null);
@@ -112,6 +181,7 @@ export function useAppUpdater() {
         setProgress(step);
       }
       setStatus("ready");
+      installInProgressRef.current = false;
       return;
     }
 
@@ -119,6 +189,7 @@ export function useAppUpdater() {
     if (!update) {
       setError("The update is no longer available. Check again and retry.");
       setStatus("error");
+      installInProgressRef.current = false;
       return;
     }
 
@@ -151,6 +222,8 @@ export function useAppUpdater() {
         cause instanceof Error ? cause.message : "The update could not install.";
       setError(message);
       setStatus("error");
+    } finally {
+      installInProgressRef.current = false;
     }
   }, []);
 
@@ -168,7 +241,9 @@ export function useAppUpdater() {
     error,
     isModalOpen,
     shouldShowToast: status === "available" && !isToastDismissed && !isModalOpen,
+    updateCheckIntervalMinutes,
     checkForUpdates,
+    setUpdateCheckIntervalMinutes,
     installUpdate,
     openModal,
     closeModal,

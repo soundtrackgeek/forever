@@ -3,17 +3,17 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.2` adds the first real Soulseek
-> connection: secure local credential storage, live login state, reconnects,
-> first-run setup, and connection settings. Search results and transfers still
-> use local development data.
+> **Status:** pre-alpha. Version `0.0.3` clarifies Soulseek’s automatic account
+> registration and adds configurable update polling. Search results and
+> transfers still use local development data.
 
 ![Forever Midnight Radio interface](design/implementation/midnight-radio-0.0.2.png)
 
 ## Current foundation
 
 - Faithful Midnight Radio desktop interface
-- First-run Soulseek account setup with native download-folder selection
+- First-run Soulseek account setup with native download-folder selection and
+  a clear explanation of automatic username registration
 - Live TCP login to the Soulseek server with explicit connecting,
   authenticating, online, reconnecting, offline, and error states
 - Automatic reconnect with bounded exponential backoff and optional connection
@@ -24,8 +24,9 @@ Rust, Tauri 2, React, and TypeScript.
 - Search, selection, filtering, inspector, and transfer interactions using local
   development data
 - Custom frameless Windows shell and branded application icons
-- In-app update checks with a toast, release modal, progress, verification, and
-  restart flow
+- In-app update checks at startup and every five minutes by default, with a
+  persistent cadence setting, toast, release modal, progress, verification,
+  and restart flow
 - GitHub CI for linting, typechecking, frontend tests, Rust formatting, Clippy,
   and Rust tests
 - Automatic GitHub Releases containing NSIS `.exe` and WiX `.msi` installers
@@ -58,6 +59,16 @@ Use `http://localhost:1420/?onboarding=1` to preview the fresh-install
 connection flow. The browser preview simulates connection state; run
 `npm run tauri dev` to exercise the native credential vault and live Soulseek
 login.
+
+Soulseek does not have a separate sign-up step. Connecting with a valid unused
+username creates that account using the password you enter; only an existing
+username can return a wrong-password error. Forever explains this in onboarding
+and Connection settings rather than treating a successful registration as an
+authentication failure.
+
+Automatic update checks run every five minutes while Forever is open. Change
+the cadence—or limit automatic checks to startup—in **Settings → Connection →
+Automatic update checks**.
 
 ## Connection data and privacy
 

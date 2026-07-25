@@ -7,6 +7,7 @@ import {
   LockKey,
   Radio,
   ShieldCheck,
+  UserPlus,
   Waveform,
 } from "@phosphor-icons/react";
 import { useEffect, useState, type FormEvent } from "react";
@@ -106,8 +107,8 @@ export function ConnectionOnboarding({
             <span className="eyebrow">First connection</span>
             <h1>Tune into Soulseek</h1>
             <p>
-              Use an existing account, or choose a new username and Soulseek
-              will create it when you connect.
+              These are Soulseek credentials, not a separate Forever account.
+              Soulseek automatically creates any valid unused username.
             </p>
           </div>
 
@@ -164,6 +165,18 @@ export function ConnectionOnboarding({
                 </button>
               </span>
             </label>
+          </div>
+
+          <div className="account-behavior-note">
+            <UserPlus size={16} weight="light" />
+            <span>
+              <strong>Why almost any login works</strong>
+              <small>
+                An unused name becomes a new account with the password you
+                enter. Only an existing username can reject an incorrect
+                password.
+              </small>
+            </span>
           </div>
 
           <div className="connection-toggles">

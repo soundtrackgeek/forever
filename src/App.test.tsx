@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { UPDATE_CHECK_INTERVAL_STORAGE_KEY } from "./hooks/useAppUpdater";
 
 describe("Forever shell", () => {
   it("renders the Midnight Radio search workspace", () => {
@@ -55,6 +56,30 @@ describe("Forever shell", () => {
     expect(screen.getByDisplayValue("SignalLevel")).toBeInTheDocument();
   });
 
+  it("checks for updates every five minutes by default and saves a new cadence", () => {
+    const intervalSpy = vi.spyOn(window, "setInterval");
+    const view = render(<App />);
+
+    expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 300_000);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const interval = screen.getByRole("combobox", {
+      name: /Automatic update checks/,
+    });
+    expect(interval).toHaveValue("5");
+    fireEvent.change(interval, { target: { value: "15" } });
+    expect(window.localStorage.getItem(UPDATE_CHECK_INTERVAL_STORAGE_KEY)).toBe(
+      "15",
+    );
+
+    view.unmount();
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(
+      screen.getByRole("combobox", { name: /Automatic update checks/ }),
+    ).toHaveValue("15");
+  });
+
   it("guides a fresh profile through its first connection", async () => {
     window.history.replaceState({}, "", "/?onboarding=1");
     render(<App />);
@@ -62,6 +87,7 @@ describe("Forever shell", () => {
     expect(
       screen.getByRole("heading", { name: "Tune into Soulseek" }),
     ).toBeInTheDocument();
+    expect(screen.getByText("Why almost any login works")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Username"), {
       target: { value: "MidnightListener" },
