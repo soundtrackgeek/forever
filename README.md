@@ -3,10 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.6` completes the first search-to-download
-> journey: a live Soulseek result can now become a safe, resumable local file.
+> **Status:** pre-alpha. Version `0.0.7` expands the first download into a
+> release workflow: inspect a source folder, choose its files, and keep the
+> entire release organized and resumable.
 
-![Forever Midnight Radio first-download interface](design/implementation/first-download-0.0.6.png)
+![Forever Midnight Radio release transfers interface](design/implementation/release-transfers-0.0.7.png)
 
 ## Current foundation
 
@@ -24,8 +25,19 @@ Rust, Tauri 2, React, and TypeScript.
   and a live file inspector with source speed, queue, and share visibility
 - Real single-file downloads from live results using direct and indirect peer
   connections, with one active file at a time
+- Live source-folder inspection using Soulseek Folder Contents requests, with
+  complete subfolder results, file sizes, formats, and available audio quality
+  attributes
+- A polished release selector with per-file choices, Select all/Deselect all,
+  selected-file counts, and aggregate download size
+- Whole-release enqueue into a collision-free local release folder, with
+  persisted file order and resume state across restarts
 - Persistent transfers with source-queue position, byte progress, speed, ETA,
   pause, resume, retry, cancel, completion, and Show in folder controls
+- A full release-grouped Transfers workspace with All, Active, Queued,
+  Completed, and Failed filters, transfer search, aggregate and per-file
+  progress, release-level controls, Clear completed, and native completion
+  notifications
 - Safe `.part` files, resumable offsets, exact-size checks, sanitized local
   names, collision-free destinations, and no overwrite of existing files
 - Passwords stored in Windows Credential Manager, or held only in memory when
@@ -67,15 +79,17 @@ preview the update toast and modal without publishing a release.
 Use `http://localhost:1420/?onboarding=1` to preview the fresh-install
 connection flow. The browser preview simulates connection state; run
 `npm run tauri dev` to exercise the native credential vault and live Soulseek
-login and network search. Search for an artist, album, track, or filename while
-connected; results stream into the table as peers respond. Each search listens
-for responses for 15 seconds and can be stopped early. Select a live file and
-choose **Download file**; Forever queues the exact remote filename in the shelf
-and writes it to the download folder configured in Connection settings.
+login, network search, folder browsing, and downloads. Search for an artist,
+album, track, or filename while connected; results stream into the table as
+peers respond. Each search listens for responses for 15 seconds and can be
+stopped early. Select a live file and choose **Browse folder** to request its
+complete source folder. Choose the files you want, then select **Download**;
+Forever creates a safe release folder beneath the download location configured
+in Connection settings and adds the files in their displayed order.
 
-Version `0.0.6` intentionally downloads one file at a time. Album/folder
-downloads, uploads, library management, and playback remain outside this first
-download release.
+Version `0.0.7` intentionally keeps one active file at a time, even when an
+entire release is queued. Multiple simultaneous downloads, uploads, library
+management, metadata/cover lookup, and playback remain outside this release.
 
 Soulseek does not have a separate sign-up step. Connecting with a valid unused
 username creates that account using the password you enter; only an existing
@@ -91,9 +105,10 @@ Automatic update checks**.
 
 Forever writes non-secret account preferences to the Tauri application
 configuration directory and connection events to
-`logs/connection.log`. Transfer metadata is stored in `transfers.json` in the
-same configuration directory; peer IP addresses and credentials are excluded.
-Passwords are excluded from both. With “Remember
+`logs/connection.log`. Release grouping, file order, and transfer metadata are
+stored in `transfers.json` in the same configuration directory; peer IP
+addresses, temporary folder listings, and credentials are excluded. Passwords
+are excluded from both. With “Remember
 password” enabled, Windows Credential Manager stores the password; otherwise it
 exists only for the current app session.
 
@@ -111,9 +126,10 @@ interface or written to diagnostics.
 
 Incomplete files use a `.part` suffix and remain resumable. Forever accepts a
 file stream only when its username, exact remote filename, transfer token, and
-announced size match the active queue item. The Soulseek protocol does not
-provide chunk hashes, so v0.0.6 verifies the expected byte count but cannot
-cryptographically verify file contents.
+announced size match the active queue item. Folder responses must also match
+the requesting user, request token, and exact requested folder. The Soulseek
+protocol does not provide chunk hashes, so v0.0.7 verifies the expected byte
+count but cannot cryptographically verify file contents.
 
 ## Quality checks
 

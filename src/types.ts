@@ -77,6 +77,11 @@ export type Track = {
 
 export type Transfer = {
   id: string;
+  releaseId?: string | null;
+  releaseTitle?: string | null;
+  releaseFolder?: string | null;
+  fileIndex?: number | null;
+  fileCount?: number | null;
   title: string;
   username: string;
   remoteFilename: string;
@@ -98,6 +103,27 @@ export type Transfer = {
   error: string | null;
   createdAtMs: number;
   updatedAtMs: number;
+};
+
+export type FolderFile = {
+  remoteFilename: string;
+  directory: string;
+  filename: string;
+  sizeBytes: number;
+  extension: string;
+  bitrate: number | null;
+  durationSeconds: number | null;
+  vbr: boolean | null;
+  sampleRate: number | null;
+  bitDepth: number | null;
+};
+
+export type FolderInspection = {
+  token: number;
+  username: string;
+  requestedFolder: string;
+  files: FolderFile[];
+  receivedAtMs: number;
 };
 
 export type TransferQueueSnapshot = {

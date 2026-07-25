@@ -5,6 +5,43 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-07-25
+
+### Added
+
+- Live Soulseek source-folder inspection using the standard Folder Contents
+  request and compressed response flow over direct and indirect peer links.
+- A Midnight Radio release selector with complete folder contents, per-file
+  choices, Select all/Deselect all, file counts, formats, quality, and total
+  selected size.
+- Atomic whole-release enqueue into safe collision-free release folders while
+  preserving source order and the existing one-active-file transfer policy.
+- Persisted release IDs, titles, folders, and file order, including automatic
+  queue recovery and partial-file resume after restarting Forever.
+- Release-level pause, resume, retry, cancel, reveal, and completed-history
+  cleanup commands alongside the existing per-file controls.
+- A complete Transfers workspace with release cards, aggregate and per-file
+  progress, expandable file tables, transfer search, All/Active/Queued/
+  Completed/Failed filters, and Clear completed.
+- Native desktop notifications when a file or complete release finishes, plus
+  frontend and Rust coverage for folder parsing, safe grouping, selection,
+  filtering, and release controls.
+
+### Changed
+
+- The compact transfer shelf now groups related files into releases and shows
+  aggregate bytes, progress, speed, status, and release-level actions.
+- The selected-result inspector now offers source-folder browsing and keeps
+  exact single-file download as a secondary action for live results.
+- Application and updater preview metadata now identify version `0.0.7`.
+
+### Fixed
+
+- Compact sidebar navigation retains accessible names when labels collapse at
+  the minimum supported window width.
+- Folder responses are accepted only when the source username, request token,
+  and requested path all match the outstanding inspection.
+
 ## [0.0.6] - 2026-07-25
 
 ### Added

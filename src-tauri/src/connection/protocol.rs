@@ -15,6 +15,8 @@ pub const SHARED_COUNTS_CODE: u32 = 35;
 pub const RELOGGED_CODE: u32 = 41;
 pub const CANT_CONNECT_TO_PEER_CODE: u32 = 1001;
 pub const FILE_SEARCH_RESPONSE_CODE: u32 = 9;
+pub const FOLDER_CONTENTS_REQUEST_CODE: u32 = 36;
+pub const FOLDER_CONTENTS_RESPONSE_CODE: u32 = 37;
 pub const TRANSFER_REQUEST_CODE: u32 = 40;
 pub const TRANSFER_RESPONSE_CODE: u32 = 41;
 pub const QUEUE_UPLOAD_CODE: u32 = 43;
@@ -27,7 +29,11 @@ pub const FOREVER_MINOR_VERSION: u32 = 3;
 const MAX_MESSAGE_LENGTH: usize = 16 * 1024 * 1024;
 const MAX_PEER_INIT_LENGTH: usize = 64 * 1024;
 const MAX_DECOMPRESSED_SEARCH_LENGTH: usize = 64 * 1024 * 1024;
+const MAX_DECOMPRESSED_FOLDER_LENGTH: usize = 64 * 1024 * 1024;
 const MAX_RESULTS_PER_RESPONSE: usize = 20_000;
+const MAX_FOLDERS_PER_RESPONSE: usize = 5_000;
+const MAX_FILES_PER_FOLDER: usize = 20_000;
+const MAX_FOLDER_FILES_TOTAL: usize = 50_000;
 const MAX_FILE_ATTRIBUTES: usize = 64;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -107,6 +113,31 @@ pub struct SearchResponse {
     pub queue_length: u32,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderFile {
+    pub filename: String,
+    pub size_bytes: u64,
+    pub extension: String,
+    pub bitrate: Option<u32>,
+    pub duration_seconds: Option<u32>,
+    pub vbr: Option<bool>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderListing {
+    pub directory: String,
+    pub files: Vec<FolderFile>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderContentsResponse {
+    pub token: u32,
+    pub requested_folder: String,
+    pub folders: Vec<FolderListing>,
+}
+
 pub fn login_frame(username: &str, password: &str) -> Vec<u8> {
     let mut payload = Vec::new();
     push_string(&mut payload, username);
@@ -130,6 +161,13 @@ pub fn file_search_frame(token: u32, query: &str) -> Vec<u8> {
     push_u32(&mut payload, token);
     push_string(&mut payload, query);
     encode_message(FILE_SEARCH_CODE, &payload)
+}
+
+pub fn folder_contents_request_frame(token: u32, folder: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(folder.len() + 8);
+    push_u32(&mut payload, token);
+    push_string(&mut payload, folder);
+    encode_message(FOLDER_CONTENTS_REQUEST_CODE, &payload)
 }
 
 pub fn get_peer_address_frame(username: &str) -> Vec<u8> {
@@ -434,6 +472,116 @@ pub fn parse_search_response(frame: &Frame) -> Result<SearchResponse, ProtocolEr
     })
 }
 
+pub fn parse_folder_contents_response(
+    frame: &Frame,
+) -> Result<FolderContentsResponse, ProtocolError> {
+    if frame.code != FOLDER_CONTENTS_RESPONSE_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: FOLDER_CONTENTS_RESPONSE_CODE,
+            actual: frame.code,
+        });
+    }
+
+    let decoder = ZlibDecoder::new(frame.payload.as_slice());
+    let mut payload = Vec::new();
+    decoder
+        .take((MAX_DECOMPRESSED_FOLDER_LENGTH + 1) as u64)
+        .read_to_end(&mut payload)?;
+    if payload.len() > MAX_DECOMPRESSED_FOLDER_LENGTH {
+        return Err(ProtocolError::DecompressedPayloadTooLarge);
+    }
+
+    let mut reader = PayloadReader::new(&payload);
+    let token = reader.read_u32()?;
+    let requested_folder = reader.read_string_lossy()?.replace('/', "\\");
+    let folder_count = reader.read_u32()? as usize;
+    if folder_count > MAX_FOLDERS_PER_RESPONSE {
+        return Err(ProtocolError::InvalidCount {
+            kind: "folders",
+            count: folder_count,
+        });
+    }
+
+    let mut total_files = 0_usize;
+    let mut folders = Vec::with_capacity(folder_count);
+    for _ in 0..folder_count {
+        let directory = reader.read_string_lossy()?.replace('/', "\\");
+        let file_count = reader.read_u32()? as usize;
+        if file_count > MAX_FILES_PER_FOLDER {
+            return Err(ProtocolError::InvalidCount {
+                kind: "folder files",
+                count: file_count,
+            });
+        }
+        total_files = total_files.saturating_add(file_count);
+        if total_files > MAX_FOLDER_FILES_TOTAL {
+            return Err(ProtocolError::InvalidCount {
+                kind: "folder files",
+                count: total_files,
+            });
+        }
+
+        let mut files = Vec::with_capacity(file_count);
+        for _ in 0..file_count {
+            let _code = reader.read_u8()?;
+            let filename = reader.read_string_lossy()?.replace('/', "\\");
+            let size_bytes = reader.read_u64()?;
+            let supplied_extension = reader.read_string_lossy()?;
+            let attribute_count = reader.read_u32()? as usize;
+            if attribute_count > MAX_FILE_ATTRIBUTES {
+                return Err(ProtocolError::InvalidCount {
+                    kind: "file attributes",
+                    count: attribute_count,
+                });
+            }
+
+            let mut bitrate = None;
+            let mut duration_seconds = None;
+            let mut vbr = None;
+            let mut sample_rate = None;
+            let mut bit_depth = None;
+            for _ in 0..attribute_count {
+                let attribute = reader.read_u32()?;
+                let value = reader.read_u32()?;
+                match attribute {
+                    0 => bitrate = Some(value),
+                    1 => duration_seconds = Some(value),
+                    2 => vbr = Some(value != 0),
+                    4 => sample_rate = Some(value),
+                    5 => bit_depth = Some(value),
+                    _ => {}
+                }
+            }
+
+            let extension = if supplied_extension.is_empty() {
+                filename
+                    .rsplit_once('.')
+                    .map(|(_, extension)| extension.to_ascii_lowercase())
+                    .unwrap_or_default()
+            } else {
+                supplied_extension.to_ascii_lowercase()
+            };
+            files.push(FolderFile {
+                filename,
+                size_bytes,
+                extension,
+                bitrate,
+                duration_seconds,
+                vbr,
+                sample_rate,
+                bit_depth,
+            });
+        }
+        folders.push(FolderListing { directory, files });
+    }
+
+    Ok(FolderContentsResponse {
+        token,
+        requested_folder,
+        folders,
+    })
+}
+
 fn read_search_files(
     reader: &mut PayloadReader<'_>,
     is_private: bool,
@@ -659,7 +807,7 @@ pub enum ProtocolError {
     UnexpectedPeerInitCode(u8),
     #[error("Soulseek {kind} count {count} exceeds the safety limit")]
     InvalidCount { kind: &'static str, count: usize },
-    #[error("Decompressed Soulseek search payload exceeds the safety limit")]
+    #[error("Decompressed Soulseek payload exceeds the safety limit")]
     DecompressedPayloadTooLarge,
     #[error("Soulseek message text is not valid UTF-8: {0}")]
     InvalidUtf8(#[from] FromUtf8Error),
@@ -904,6 +1052,48 @@ mod tests {
         assert_eq!(response.files[0].bitrate, Some(2_304));
         assert_eq!(response.files[0].duration_seconds, Some(321));
         assert_eq!(response.files[0].sample_rate, Some(96_000));
+    }
+
+    #[test]
+    fn encodes_folder_requests_and_parses_compressed_folder_contents() {
+        let request = folder_contents_request_frame(812, "Music\\Night Geometry");
+        assert_eq!(
+            u32::from_le_bytes(request[4..8].try_into().unwrap()),
+            FOLDER_CONTENTS_REQUEST_CODE
+        );
+        assert_eq!(u32::from_le_bytes(request[8..12].try_into().unwrap()), 812);
+        assert!(request.ends_with(b"Music\\Night Geometry"));
+
+        let mut payload = 812_u32.to_le_bytes().to_vec();
+        payload.extend(encoded_string("Music\\Night Geometry"));
+        payload.extend(1_u32.to_le_bytes());
+        payload.extend(encoded_string("Music\\Night Geometry"));
+        payload.extend(1_u32.to_le_bytes());
+        payload.push(1);
+        payload.extend(encoded_string("01 - Thresholds.flac"));
+        payload.extend(112_400_000_u64.to_le_bytes());
+        payload.extend(encoded_string(""));
+        payload.extend(3_u32.to_le_bytes());
+        payload.extend(0_u32.to_le_bytes());
+        payload.extend(2_304_u32.to_le_bytes());
+        payload.extend(4_u32.to_le_bytes());
+        payload.extend(96_000_u32.to_le_bytes());
+        payload.extend(5_u32.to_le_bytes());
+        payload.extend(24_u32.to_le_bytes());
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&payload).unwrap();
+        let response = parse_folder_contents_response(&Frame {
+            code: FOLDER_CONTENTS_RESPONSE_CODE,
+            payload: encoder.finish().unwrap(),
+        })
+        .unwrap();
+        assert_eq!(response.token, 812);
+        assert_eq!(response.requested_folder, "Music\\Night Geometry");
+        assert_eq!(response.folders.len(), 1);
+        assert_eq!(response.folders[0].files.len(), 1);
+        assert_eq!(response.folders[0].files[0].extension, "flac");
+        assert_eq!(response.folders[0].files[0].bit_depth, Some(24));
     }
 
     #[tokio::test]

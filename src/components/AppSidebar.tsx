@@ -68,6 +68,7 @@ export function AppSidebar({
             <button
               type="button"
               className={`nav-item ${isActive ? "is-active" : ""}`}
+              aria-label={item.label}
               aria-current={isActive ? "page" : undefined}
               onClick={() => onNavigate(item.id)}
               key={item.id}

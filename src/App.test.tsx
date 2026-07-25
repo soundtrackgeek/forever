@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { UPDATE_CHECK_INTERVAL_STORAGE_KEY } from "./hooks/useAppUpdater";
@@ -64,24 +64,56 @@ describe("Forever shell", () => {
     expect(screen.getByText("320 kbps")).toBeInTheDocument();
   });
 
-  it("queues a first file and exposes pause and resume controls", async () => {
+  it("browses a folder, selects files, and queues a complete release", async () => {
     render(<App />);
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Pause 01 - Thresholds.flac" }),
+      screen.getByRole("button", { name: "Pause Night Geometry" }),
     );
     expect(
-      screen.getByRole("button", { name: "Resume 01 - Thresholds.flac" }),
+      screen.getByRole("button", { name: "Resume Night Geometry" }),
     ).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Resume 01 - Thresholds.flac" }),
+      screen.getByRole("button", { name: "Resume Night Geometry" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Get files" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browse folder" }));
 
     await waitFor(() =>
-      expect(screen.getByText("Night Geometry.flac")).toBeInTheDocument(),
+      expect(
+        screen.getByRole("button", { name: "Download 10 files" }),
+      ).toBeInTheDocument(),
     );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Deselect 01 - Thresholds.flac" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Download 9 files" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download 9 files" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Transfers" }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getAllByText("Night Geometry").length).toBeGreaterThan(0);
+  });
+
+  it("opens the release-grouped Transfers workspace and filters completed releases", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
+    const workspace = screen
+      .getByRole("heading", { name: "Transfers" })
+      .closest("section") as HTMLElement;
+    expect(
+      screen.getByRole("button", { name: "Pause 04 - Night Geometry.flac" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Completed 1" }));
+    expect(within(workspace).getByText("Apex Horizon (Deluxe)")).toBeInTheDocument();
+    expect(within(workspace).queryByText("Spheric Dusk")).not.toBeInTheDocument();
   });
 
   it("opens the live connection settings from the sidebar", () => {

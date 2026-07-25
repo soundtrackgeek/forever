@@ -1,6 +1,6 @@
 [package]
 name = "forever"
-version = "0.0.6"
+version = "0.0.7"
 description = "A polished, modern desktop client for the Soulseek network."
 authors = ["soundtrackgeek"]
 edition = "2021"
@@ -22,6 +22,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
+tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
 keyring = "4.1"
 flate2 = "1"

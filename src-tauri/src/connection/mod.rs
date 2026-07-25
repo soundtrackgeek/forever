@@ -1,6 +1,7 @@
 mod credentials;
 mod diagnostics;
 mod downloads;
+mod folders;
 mod protocol;
 mod search;
 mod service;
@@ -49,6 +50,16 @@ pub async fn transfer_enqueue(
 }
 
 #[tauri::command]
+pub async fn transfer_enqueue_release(
+    manager: State<'_, ConnectionManager>,
+    request: downloads::EnqueueReleaseRequest,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .enqueue_release(request)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn transfer_pause(
     manager: State<'_, ConnectionManager>,
     id: String,
@@ -85,6 +96,67 @@ pub async fn transfer_reveal_path(
 ) -> Result<String, String> {
     manager
         .reveal_transfer_path(&id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_pause_release(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .pause_release(&release_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_resume_release(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .resume_release(&release_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_cancel_release(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .cancel_release(&release_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_clear_completed(
+    manager: State<'_, ConnectionManager>,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .clear_completed_transfers()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_reveal_release_path(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+) -> Result<String, String> {
+    manager
+        .reveal_release_path(&release_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn folder_inspect(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+    folder: String,
+) -> Result<folders::FolderInspection, String> {
+    manager
+        .inspect_folder(username, folder)
+        .await
         .map_err(|error| error.to_string())
 }
 

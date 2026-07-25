@@ -7,10 +7,12 @@ import { ConnectionSettings } from "./components/ConnectionSettings";
 import { ReleaseInspector } from "./components/ReleaseInspector";
 import { SearchWorkspace } from "./components/SearchWorkspace";
 import { TransferShelf } from "./components/TransferShelf";
+import { TransfersWorkspace } from "./components/TransfersWorkspace";
 import { UpdateExperience } from "./components/UpdateExperience";
 import { WindowControls } from "./components/WindowControls";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { useSoulseekConnection } from "./hooks/useSoulseekConnection";
+import { useSoulseekFolders } from "./hooks/useSoulseekFolders";
 import { useSoulseekSearch } from "./hooks/useSoulseekSearch";
 import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
 import type { SearchResult } from "./types";
@@ -86,6 +88,7 @@ function App() {
   const connection = useSoulseekConnection();
   const search = useSoulseekSearch();
   const transfers = useSoulseekTransfers();
+  const folders = useSoulseekFolders();
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const onboardingOpen =
     connection.ready &&
@@ -142,14 +145,49 @@ function App() {
                 void search.startSearch(normalizedQuery).catch(() => undefined);
               }}
               onStopSearch={() => void search.stopSearch()}
-              onSelectResult={(result) => setSelectedResultId(result.id)}
+              onSelectResult={(result) => {
+                setSelectedResultId(result.id);
+                folders.clear();
+              }}
               onQueueDownload={queueDownload}
             />
             <ReleaseInspector
               result={selectedResult}
+              inspection={folders.inspection}
+              folderLoading={folders.loading}
+              folderError={folders.error}
+              onInspectFolder={(result) => {
+                void folders.inspect(result).catch(() => undefined);
+              }}
               onQueueDownload={queueDownload}
+              onQueueRelease={(result, title, inspection, files) => {
+                void transfers
+                  .enqueueRelease({
+                    title,
+                    username: result.owner,
+                    remoteFolder: inspection.requestedFolder,
+                    files,
+                  })
+                  .then(() => setActiveView("transfers"))
+                  .catch(() => undefined);
+              }}
             />
           </>
+        ) : activeView === "transfers" ? (
+          <TransfersWorkspace
+            transfers={transfers.snapshot.transfers}
+            error={transfers.error}
+            onPause={(id) => void transfers.pause(id).catch(() => undefined)}
+            onResume={(id) => void transfers.resume(id).catch(() => undefined)}
+            onCancel={(id) => void transfers.cancel(id).catch(() => undefined)}
+            onReveal={(id) => void transfers.reveal(id).catch(() => undefined)}
+            onPauseRelease={(id) => void transfers.pauseRelease(id).catch(() => undefined)}
+            onResumeRelease={(id) => void transfers.resumeRelease(id).catch(() => undefined)}
+            onCancelRelease={(id) => void transfers.cancelRelease(id).catch(() => undefined)}
+            onRevealRelease={(id) => void transfers.revealRelease(id).catch(() => undefined)}
+            onClearCompleted={() => void transfers.clearCompleted().catch(() => undefined)}
+            onDismissError={transfers.clearError}
+          />
         ) : activeView === "settings" && connection.profile ? (
           <ConnectionSettings
             profile={connection.profile}
@@ -189,6 +227,10 @@ function App() {
         onResume={(id) => void transfers.resume(id).catch(() => undefined)}
         onCancel={(id) => void transfers.cancel(id).catch(() => undefined)}
         onReveal={(id) => void transfers.reveal(id).catch(() => undefined)}
+        onPauseRelease={(id) => void transfers.pauseRelease(id).catch(() => undefined)}
+        onResumeRelease={(id) => void transfers.resumeRelease(id).catch(() => undefined)}
+        onCancelRelease={(id) => void transfers.cancelRelease(id).catch(() => undefined)}
+        onRevealRelease={(id) => void transfers.revealRelease(id).catch(() => undefined)}
         onViewAll={() => setActiveView("transfers")}
         onDismissError={transfers.clearError}
       />

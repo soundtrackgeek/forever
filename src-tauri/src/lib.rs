@@ -10,6 +10,7 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -25,10 +26,17 @@ pub fn run() {
             connection::search_stop,
             connection::transfers_snapshot,
             connection::transfer_enqueue,
+            connection::transfer_enqueue_release,
             connection::transfer_pause,
             connection::transfer_resume,
             connection::transfer_cancel,
             connection::transfer_reveal_path,
+            connection::transfer_pause_release,
+            connection::transfer_resume_release,
+            connection::transfer_cancel_release,
+            connection::transfer_clear_completed,
+            connection::transfer_reveal_release_path,
+            connection::folder_inspect,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

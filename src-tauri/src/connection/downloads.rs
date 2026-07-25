@@ -41,6 +41,16 @@ impl TransferStatus {
 #[serde(rename_all = "camelCase")]
 pub struct TransferSnapshot {
     pub id: String,
+    #[serde(default)]
+    pub release_id: Option<String>,
+    #[serde(default)]
+    pub release_title: Option<String>,
+    #[serde(default)]
+    pub release_folder: Option<String>,
+    #[serde(default)]
+    pub file_index: Option<u32>,
+    #[serde(default)]
+    pub file_count: Option<u32>,
     pub title: String,
     pub username: String,
     pub remote_filename: String,
@@ -74,6 +84,23 @@ pub struct EnqueueTransferRequest {
     pub username: String,
     pub remote_filename: String,
     pub size_bytes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnqueueReleaseFileRequest {
+    pub title: String,
+    pub remote_filename: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnqueueReleaseRequest {
+    pub title: String,
+    pub username: String,
+    pub remote_folder: String,
+    pub files: Vec<EnqueueReleaseFileRequest>,
 }
 
 #[derive(Clone, Debug)]
@@ -169,6 +196,11 @@ impl TransferHub {
         let id_number = self.next_id.fetch_add(1, Ordering::SeqCst);
         let transfer = TransferSnapshot {
             id: format!("download-{now}-{id_number}"),
+            release_id: None,
+            release_title: None,
+            release_folder: None,
+            file_index: None,
+            file_count: None,
             title: request.title.trim().to_owned(),
             username: request.username,
             remote_filename: normalize_remote_filename(&request.remote_filename),
@@ -186,6 +218,74 @@ impl TransferHub {
             transfer_token: None,
         };
         self.mutate(|transfers| transfers.push(transfer))?;
+        Ok(self.snapshot())
+    }
+
+    pub fn enqueue_release(
+        &self,
+        request: EnqueueReleaseRequest,
+        download_directory: &Path,
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        validate_release_request(&request)?;
+        fs::create_dir_all(download_directory)?;
+
+        let now = timestamp_ms();
+        let id_number = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let release_id = format!("release-{now}-{id_number}");
+        let release_title = request.title.trim().to_owned();
+        let release_directory = unique_release_directory(
+            download_directory,
+            &release_title,
+            &self
+                .transfers
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
+        fs::create_dir_all(&release_directory)?;
+
+        let file_count = u32::try_from(request.files.len()).unwrap_or(u32::MAX);
+        let mut release_transfers = Vec::with_capacity(request.files.len());
+        let existing = self
+            .transfers
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        for (index, file) in request.files.into_iter().enumerate() {
+            let local_path = unique_target_path(
+                &release_directory,
+                &file.remote_filename,
+                &existing
+                    .iter()
+                    .chain(release_transfers.iter())
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            );
+            let file_id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            release_transfers.push(TransferSnapshot {
+                id: format!("download-{now}-{file_id}"),
+                release_id: Some(release_id.clone()),
+                release_title: Some(release_title.clone()),
+                release_folder: Some(release_directory.to_string_lossy().into_owned()),
+                file_index: Some(u32::try_from(index + 1).unwrap_or(u32::MAX)),
+                file_count: Some(file_count),
+                title: file.title.trim().to_owned(),
+                username: request.username.clone(),
+                remote_filename: normalize_remote_filename(&file.remote_filename),
+                size_bytes: file.size_bytes,
+                transferred_bytes: 0,
+                speed_bytes_per_second: 0,
+                eta_seconds: None,
+                status: TransferStatus::Queued,
+                queue_position: None,
+                local_path: local_path.to_string_lossy().into_owned(),
+                error: None,
+                created_at_ms: now.saturating_add(index as u64),
+                updated_at_ms: now,
+                connection_token: None,
+                transfer_token: None,
+            });
+        }
+        self.mutate(|transfers| transfers.extend(release_transfers))?;
         Ok(self.snapshot())
     }
 
@@ -258,6 +358,97 @@ impl TransferHub {
         Ok(self.snapshot())
     }
 
+    pub fn pause_release(&self, release_id: &str) -> Result<TransferQueueSnapshot, TransferError> {
+        self.mutate_release(release_id, |transfer| {
+            if transfer.status != TransferStatus::Completed {
+                transfer.status = TransferStatus::Paused;
+                reset_runtime_state(transfer);
+            }
+        })
+    }
+
+    pub fn resume_release(&self, release_id: &str) -> Result<TransferQueueSnapshot, TransferError> {
+        self.mutate_release(release_id, |transfer| {
+            if matches!(
+                transfer.status,
+                TransferStatus::Paused | TransferStatus::Failed
+            ) {
+                refresh_partial_size(transfer);
+                transfer.status = TransferStatus::Queued;
+                transfer.error = None;
+                reset_runtime_state(transfer);
+            }
+        })
+    }
+
+    pub fn cancel_release(&self, release_id: &str) -> Result<TransferQueueSnapshot, TransferError> {
+        let ids: Vec<String> = self
+            .transfers
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .filter(|transfer| transfer.release_id.as_deref() == Some(release_id))
+            .map(|transfer| transfer.id.clone())
+            .collect();
+        if ids.is_empty() {
+            return Err(TransferError::ReleaseNotFound);
+        }
+        for id in &ids {
+            self.abort(id);
+        }
+        let removed = {
+            let mut transfers = self
+                .transfers
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut removed = Vec::new();
+            transfers.retain(|transfer| {
+                if transfer.release_id.as_deref() == Some(release_id) {
+                    removed.push(transfer.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            removed
+        };
+        for transfer in removed {
+            if transfer.status != TransferStatus::Completed {
+                schedule_partial_cleanup(partial_path(Path::new(&transfer.local_path)));
+            }
+        }
+        self.persist_and_publish()?;
+        Ok(self.snapshot())
+    }
+
+    pub fn clear_completed(&self) -> Result<TransferQueueSnapshot, TransferError> {
+        self.mutate(|transfers| {
+            let completed_release_ids: Vec<String> = transfers
+                .iter()
+                .filter_map(|transfer| transfer.release_id.clone())
+                .filter(|release_id| {
+                    transfers
+                        .iter()
+                        .filter(|transfer| {
+                            transfer.release_id.as_deref() == Some(release_id.as_str())
+                        })
+                        .all(|transfer| transfer.status == TransferStatus::Completed)
+                })
+                .collect();
+            transfers.retain(|transfer| {
+                if transfer.release_id.is_none() {
+                    return transfer.status != TransferStatus::Completed;
+                }
+                !transfer.release_id.as_ref().is_some_and(|release_id| {
+                    completed_release_ids
+                        .iter()
+                        .any(|completed| completed == release_id)
+                })
+            });
+        })?;
+        Ok(self.snapshot())
+    }
+
     pub fn reveal_path(&self, id: &str) -> Result<String, TransferError> {
         self.transfers
             .read()
@@ -266,6 +457,22 @@ impl TransferHub {
             .find(|transfer| transfer.id == id)
             .map(|transfer| transfer.local_path.clone())
             .ok_or(TransferError::NotFound)
+    }
+
+    pub fn reveal_release_path(&self, release_id: &str) -> Result<String, TransferError> {
+        self.transfers
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .find(|transfer| transfer.release_id.as_deref() == Some(release_id))
+            .and_then(|transfer| {
+                transfer.release_folder.clone().or_else(|| {
+                    Path::new(&transfer.local_path)
+                        .parent()
+                        .map(|path| path.to_string_lossy().into_owned())
+                })
+            })
+            .ok_or(TransferError::ReleaseNotFound)
     }
 
     pub fn activate_next(&self, connection_token: u32) -> Option<TransferTicket> {
@@ -548,6 +755,37 @@ impl TransferHub {
         }
     }
 
+    fn mutate_release(
+        &self,
+        release_id: &str,
+        mut mutation: impl FnMut(&mut TransferSnapshot),
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        let ids: Vec<String> = self
+            .transfers
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .filter(|transfer| transfer.release_id.as_deref() == Some(release_id))
+            .map(|transfer| transfer.id.clone())
+            .collect();
+        if ids.is_empty() {
+            return Err(TransferError::ReleaseNotFound);
+        }
+        for id in ids {
+            self.abort(&id);
+        }
+        self.mutate(|transfers| {
+            for transfer in transfers
+                .iter_mut()
+                .filter(|transfer| transfer.release_id.as_deref() == Some(release_id))
+            {
+                mutation(transfer);
+                transfer.updated_at_ms = timestamp_ms();
+            }
+        })?;
+        Ok(self.snapshot())
+    }
+
     fn fail_matching(&self, message: String, matches: impl Fn(&TransferSnapshot) -> bool) -> bool {
         let mut changed = false;
         let _ = self.mutate(|transfers| {
@@ -637,6 +875,31 @@ fn validate_request(request: &EnqueueTransferRequest) -> Result<(), TransferErro
     Ok(())
 }
 
+fn validate_release_request(request: &EnqueueReleaseRequest) -> Result<(), TransferError> {
+    if request.title.trim().is_empty()
+        || request.username.trim().is_empty()
+        || request.remote_folder.trim().is_empty()
+        || request.files.is_empty()
+        || request.files.len() > 5_000
+        || request.files.iter().any(|file| {
+            file.title.trim().is_empty()
+                || file.remote_filename.trim().is_empty()
+                || file.size_bytes == 0
+        })
+    {
+        return Err(TransferError::InvalidReleaseRequest);
+    }
+    Ok(())
+}
+
+fn reset_runtime_state(transfer: &mut TransferSnapshot) {
+    transfer.speed_bytes_per_second = 0;
+    transfer.eta_seconds = None;
+    transfer.queue_position = None;
+    transfer.connection_token = None;
+    transfer.transfer_token = None;
+}
+
 fn load_store(path: &Path) -> Result<Vec<TransferSnapshot>, TransferError> {
     if !path.exists() {
         return Ok(Vec::new());
@@ -694,6 +957,34 @@ fn unique_target_path(
     directory.join(format!("download-{}.bin", timestamp_ms()))
 }
 
+fn unique_release_directory(
+    directory: &Path,
+    title: &str,
+    transfers: &[TransferSnapshot],
+) -> PathBuf {
+    let safe_title = safe_path_segment(title);
+    for index in 1..10_000 {
+        let name = if index == 1 {
+            safe_title.clone()
+        } else {
+            format!("{safe_title} ({index})")
+        };
+        let candidate = directory.join(name);
+        let used = candidate.exists()
+            || transfers.iter().any(|transfer| {
+                transfer.release_folder.as_ref().is_some_and(|folder| {
+                    Path::new(folder)
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case(&candidate.to_string_lossy())
+                })
+            });
+        if !used {
+            return candidate;
+        }
+    }
+    directory.join(format!("release-{}", timestamp_ms()))
+}
+
 fn path_available(candidate: &Path, transfers: &[TransferSnapshot]) -> bool {
     !candidate.exists()
         && !partial_path(candidate).exists()
@@ -748,6 +1039,26 @@ fn safe_basename(remote_filename: &str) -> String {
     name
 }
 
+fn safe_path_segment(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|character| {
+            if character.is_control() || "<>:\"/\\|?*".contains(character) {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    let sanitized = sanitized.trim().trim_end_matches(['.', ' ']);
+    let sanitized = if sanitized.is_empty() {
+        "Release"
+    } else {
+        sanitized
+    };
+    sanitized.chars().take(120).collect()
+}
+
 fn timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -765,6 +1076,10 @@ pub enum TransferError {
     InvalidSize,
     #[error("That transfer is no longer in the queue.")]
     NotFound,
+    #[error("That release is no longer in the queue.")]
+    ReleaseNotFound,
+    #[error("Choose at least one valid file before downloading the release.")]
+    InvalidReleaseRequest,
     #[error("The incoming Soulseek file connection did not match the active download.")]
     UnexpectedFileConnection,
     #[error(
@@ -797,6 +1112,11 @@ mod tests {
         fs::write(directory.path().join("Track.flac"), b"existing").unwrap();
         let transfers = vec![TransferSnapshot {
             id: "one".to_owned(),
+            release_id: None,
+            release_title: None,
+            release_folder: None,
+            file_index: None,
+            file_count: None,
             title: "Track".to_owned(),
             username: "peer".to_owned(),
             remote_filename: "Track.flac".to_owned(),
@@ -831,6 +1151,11 @@ mod tests {
         fs::write(partial_path(&final_path), vec![7_u8; 37]).unwrap();
         let mut transfer = TransferSnapshot {
             id: "resume-me".to_owned(),
+            release_id: None,
+            release_title: None,
+            release_folder: None,
+            file_index: None,
+            file_count: None,
             title: "Track.flac".to_owned(),
             username: "peer".to_owned(),
             remote_filename: "Music\\Track.flac".to_owned(),
@@ -861,5 +1186,27 @@ mod tests {
         assert!(!raw.contains("connectionToken"));
         assert!(!raw.contains("transferToken"));
         assert_eq!(load_store(&store_path).unwrap()[0].transferred_bytes, 37);
+    }
+
+    #[test]
+    fn release_requests_validate_every_file_and_use_safe_unique_folders() {
+        let request = EnqueueReleaseRequest {
+            title: "Night: Geometry".to_owned(),
+            username: "source".to_owned(),
+            remote_folder: "Music\\Night Geometry".to_owned(),
+            files: vec![EnqueueReleaseFileRequest {
+                title: "01 - Thresholds.flac".to_owned(),
+                remote_filename: "Music\\Night Geometry\\01 - Thresholds.flac".to_owned(),
+                size_bytes: 112_400_000,
+            }],
+        };
+        assert!(validate_release_request(&request).is_ok());
+
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir(directory.path().join("Night_ Geometry")).unwrap();
+        assert_eq!(
+            unique_release_directory(directory.path(), &request.title, &[]),
+            directory.path().join("Night_ Geometry (2)")
+        );
     }
 }
