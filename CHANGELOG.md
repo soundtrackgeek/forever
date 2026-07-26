@@ -32,6 +32,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   split from the main interface bundle to keep startup work bounded.
 - Application and updater preview metadata now identify version `0.0.13`.
 
+### Fixed
+
+- First-run onboarding now remains visible throughout authentication and only
+  closes after the connection reaches its confirmed online state.
+
 ### Security
 
 - Profile frames, descriptions, pictures, interest counts, interest lengths,

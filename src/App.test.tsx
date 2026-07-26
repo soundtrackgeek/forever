@@ -325,6 +325,15 @@ describe("Forever shell", () => {
       screen.getByRole("button", { name: "Connect to Soulseek" }),
     );
 
+    await screen.findByRole(
+      "button",
+      { name: "Connecting to the Soulseek network…" },
+      { timeout: 2_000 },
+    );
+    expect(
+      screen.getByRole("heading", { name: "Tune into Soulseek" }),
+    ).toBeInTheDocument();
+
     await waitFor(
       () =>
         expect(
@@ -332,12 +341,10 @@ describe("Forever shell", () => {
         ).not.toBeInTheDocument(),
       { timeout: 3_000 },
     );
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", {
-          name: "MidnightListener profile. Online. Open connection settings.",
-        }),
-      ).toBeInTheDocument(),
-    );
+    expect(
+      screen.getByRole("button", {
+        name: "MidnightListener profile. Online. Open connection settings.",
+      }),
+    ).toBeInTheDocument();
   });
 });

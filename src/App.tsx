@@ -100,9 +100,11 @@ function App() {
   const [sharesUsername, setSharesUsername] = useState("audiophile92");
   const [selectedUsername, setSelectedUsername] = useState<string | null>("audiophile92");
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [onboardingInProgress, setOnboardingInProgress] = useState(false);
+  const needsOnboarding = !connection.profile || !connection.hasPassword;
   const onboardingOpen =
     connection.ready &&
-    (!connection.profile || !connection.hasPassword) &&
+    (needsOnboarding || onboardingInProgress) &&
     !onboardingDismissed;
 
   const selectedResult =
@@ -334,10 +336,19 @@ function App() {
           hasPassword={connection.hasPassword}
           snapshot={connection.snapshot}
           error={connection.error}
-          onSave={connection.saveProfile}
+          onSave={(profile, password) => {
+            setOnboardingInProgress(true);
+            return connection.saveProfile(profile, password);
+          }}
           onConnect={connection.connect}
-          onComplete={() => setOnboardingDismissed(true)}
-          onExploreOffline={() => setOnboardingDismissed(true)}
+          onComplete={() => {
+            setOnboardingInProgress(false);
+            setOnboardingDismissed(true);
+          }}
+          onExploreOffline={() => {
+            setOnboardingInProgress(false);
+            setOnboardingDismissed(true);
+          }}
         />
       )}
     </div>
