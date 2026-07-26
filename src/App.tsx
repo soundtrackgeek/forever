@@ -37,6 +37,15 @@ import type {
 
 const emptyAlbumCatalog: AlbumReleaseGroup[] = [];
 
+const albumDownloadTitle = (
+  context: AlbumSearchContext | null,
+  fallback: string,
+) => {
+  if (!context) return fallback;
+  const year = context.firstReleaseDate?.match(/^\d{4}/)?.[0];
+  return `${context.artist} - ${context.title}${year ? ` (${year})` : ""}`;
+};
+
 const viewDetails = {
   home: {
     icon: Radio,
@@ -140,12 +149,11 @@ function App() {
   const queueAlbumSource = async (source: AlbumSource) => {
     const inspection = await folders.inspect(source.representative);
     await transfers.enqueueRelease({
-      title: albumContext?.title ?? source.folderName,
+      title: albumDownloadTitle(albumContext, source.folderName),
       username: source.owner,
       remoteFolder: inspection.requestedFolder,
       files: inspection.files,
     });
-    navigate("transfers");
   };
 
   const navigate = (view: string) => {
@@ -229,6 +237,7 @@ function App() {
               }
               query={query}
               results={search.results}
+              transfers={transfers.snapshot.transfers}
               selectedResult={selectedResult}
               search={search.snapshot}
               searchError={search.error}

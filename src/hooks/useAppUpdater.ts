@@ -30,24 +30,23 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.20",
-  version: "0.0.21",
-  body: `## What’s new in Forever 0.0.21
+  currentVersion: "0.0.21",
+  version: "0.0.22",
+  body: `## What’s new in Forever 0.0.22
 
 ### Added
 
-- Archive connects to the existing Music Library SQLite database as a strictly read-only source of truth.
-- MusicBrainz album cards and Soulseek album-source reports now show Owned or Don’t own.
-- The Archive workspace reports its source path, latest import, and album and track totals.
+- Album rows now show live Downloading and Queued states while you keep choosing more sources.
+- Release headers show an Album ETA based on every remaining file, not only the current track.
 
 ### Changed
 
-- The former Library destination is now Archive and never adopts Forever downloads.
-- Ownership checks are batched per artist and use Music Library’s normalized album inventory.
+- Download album keeps you in Search instead of opening Transfers automatically.
+- MusicBrainz-guided downloads use Artist - Album (Year) for their destination folder when the metadata is available.
 
-### Safety
+### Fixed
 
-- SQLite read-only flags, query-only mode, and regression tests prevent Archive writes.`,
+- Queue status buttons stay synchronized with the real release transfer state.`,
   date: "2026-07-26",
 };
 

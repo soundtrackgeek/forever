@@ -68,6 +68,15 @@ export const groupTransfers = (transfers: Transfer[]): TransferGroup[] => {
       const active = ordered.find((transfer) =>
         activeStatuses.includes(transfer.status as (typeof activeStatuses)[number]),
       );
+      const speedBytesPerSecond = ordered.reduce(
+        (total, transfer) => total + transfer.speedBytesPerSecond,
+        0,
+      );
+      const remainingBytes = ordered.reduce(
+        (total, transfer) =>
+          total + Math.max(0, transfer.sizeBytes - transfer.transferredBytes),
+        0,
+      );
       return {
         id,
         releaseId: ordered[0].releaseId ?? null,
@@ -80,11 +89,11 @@ export const groupTransfers = (transfers: Transfer[]): TransferGroup[] => {
           (total, transfer) => total + transfer.transferredBytes,
           0,
         ),
-        speedBytesPerSecond: ordered.reduce(
-          (total, transfer) => total + transfer.speedBytesPerSecond,
-          0,
-        ),
-        etaSeconds: active?.etaSeconds ?? null,
+        speedBytesPerSecond,
+        etaSeconds:
+          active && speedBytesPerSecond > 0
+            ? Math.ceil(remainingBytes / speedBytesPerSecond)
+            : null,
         status: statusFor(ordered),
         createdAtMs: Math.min(...ordered.map((transfer) => transfer.createdAtMs)),
         updatedAtMs: Math.max(...ordered.map((transfer) => transfer.updatedAtMs)),

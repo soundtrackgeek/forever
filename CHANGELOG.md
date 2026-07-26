@@ -5,6 +5,35 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.22] - 2026-07-26
+
+### Added
+
+- Live album-source action states that follow the real release queue: the
+  active album is green and reads **Downloading**, while later selections are
+  blue and read **Queued**.
+- A whole-album ETA in the full Transfers workspace and compact transfer
+  drawer, calculated from every remaining byte at the current release speed.
+- Regression coverage for in-place multi-album queueing, metadata-rich release
+  names, and release-wide ETA presentation.
+
+### Changed
+
+- **Download album** now keeps the album-source results open so several albums
+  can be queued without repeatedly navigating back from Transfers.
+- MusicBrainz-guided downloads now use `Artist - Album (Year)` for their local
+  release folder and transfer title when a release year is available, falling
+  back gracefully when catalog metadata is incomplete.
+- Application, MusicBrainz User-Agent, and updater preview metadata now
+  identify version `0.0.22` and describe the in-place album queue release.
+
+### Fixed
+
+- The ETA shown at release level no longer reflects only the currently active
+  track; it now includes queued files in the same album.
+- Album action buttons remain synchronized with queue, pause, failure, and
+  completion changes instead of reverting after their initial enqueue.
+
 ## [0.0.21] - 2026-07-26
 
 ### Added

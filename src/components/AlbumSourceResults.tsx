@@ -1,24 +1,50 @@
 import {
+  CheckCircle,
   CircleNotch,
   DownloadSimple,
   Eye,
   FolderOpen,
+  Pause,
   UserCircle,
+  WarningCircle,
 } from "@phosphor-icons/react";
-import { useId, useState, type FocusEvent, type MouseEvent } from "react";
+import { useId, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import type { AlbumSource, PersonProfile } from "../types";
+import type { AlbumSource, PersonProfile, Transfer } from "../types";
+import {
+  albumDownloadStates,
+  type AlbumDownloadState,
+} from "../utils/albumDownloadState";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { CountryFlag } from "./CountryFlag";
 
 type AlbumSourceResultsProps = {
   sources: AlbumSource[];
+  transfers: Transfer[];
   searching: boolean;
   onQueueAlbumSource: (source: AlbumSource) => Promise<void>;
   onBrowseUser: (username: string) => void;
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
 };
+
+const downloadLabel: Record<AlbumDownloadState, string> = {
+  downloading: "Downloading",
+  queued: "Queued",
+  paused: "Paused",
+  downloaded: "Downloaded",
+  failed: "Needs attention",
+};
+
+function DownloadStateIcon({ state }: { state: AlbumDownloadState }) {
+  if (state === "downloading") {
+    return <CircleNotch className="search-spinner" size={16} />;
+  }
+  if (state === "downloaded") return <CheckCircle size={16} weight="fill" />;
+  if (state === "paused") return <Pause size={16} weight="fill" />;
+  if (state === "failed") return <WarningCircle size={16} weight="fill" />;
+  return <DownloadSimple size={16} weight="bold" />;
+}
 
 const filename = (path: string) =>
   path.split(/[\\/]/).filter(Boolean).slice(-1)[0] ?? path;
@@ -119,6 +145,7 @@ function TrackPreview({ source }: { source: AlbumSource }) {
 
 export function AlbumSourceResults({
   sources,
+  transfers,
   searching,
   onQueueAlbumSource,
   onBrowseUser,
@@ -127,6 +154,10 @@ export function AlbumSourceResults({
 }: AlbumSourceResultsProps) {
   const [preparingSourceId, setPreparingSourceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const sourceDownloadStates = useMemo(
+    () => albumDownloadStates(sources, transfers),
+    [sources, transfers],
+  );
 
   const queueAlbum = async (source: AlbumSource) => {
     setPreparingSourceId(source.id);
@@ -177,7 +208,13 @@ export function AlbumSourceResults({
             sources.map((source) => {
               const person = personByUsername(source.owner);
               const preparing = preparingSourceId === source.id;
+              const queuedState = sourceDownloadStates.get(source.id);
               const downloadable = Boolean(source.representative.folder);
+              const buttonLabel = queuedState
+                ? downloadLabel[queuedState]
+                : preparing
+                  ? "Preparing…"
+                  : "Download album";
               return (
                 <article className="album-source-row" key={source.id}>
                   <button
@@ -222,13 +259,13 @@ export function AlbumSourceResults({
                     </button>
                     <button
                       type="button"
-                      className="album-source-download"
-                      disabled={!downloadable || preparingSourceId !== null}
-                      title={downloadable ? "Inspect the folder and download every file" : "This result has no source folder"}
+                      className={`album-source-download${queuedState ? ` is-${queuedState}` : ""}`}
+                      disabled={!downloadable || preparingSourceId !== null || Boolean(queuedState)}
+                      title={queuedState ? `${buttonLabel}. Manage this album in Transfers.` : downloadable ? "Inspect the folder and download every file" : "This result has no source folder"}
                       onClick={() => void queueAlbum(source)}
                     >
-                      {preparing ? <CircleNotch className="search-spinner" size={16} /> : <DownloadSimple size={16} weight="bold" />}
-                      {preparing ? "Preparing…" : "Download album"}
+                      {queuedState ? <DownloadStateIcon state={queuedState} /> : preparing ? <CircleNotch className="search-spinner" size={16} /> : <DownloadSimple size={16} weight="bold" />}
+                      {buttonLabel}
                     </button>
                   </span>
                 </article>

@@ -162,11 +162,45 @@ describe("Forever shell", () => {
     expect(within(trackPreview).getByText("12")).toBeInTheDocument();
     fireEvent.mouseLeave(previewTracks);
 
+    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Night Geometry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Spheric Dusk" }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Cancel Night Geometry" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Cancel Spheric Dusk" }),
+      ).not.toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
     fireEvent.click(screen.getAllByRole("button", { name: "Download album" })[0]);
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument(),
+    const downloading = await screen.findByRole(
+      "button",
+      { name: "Downloading" },
+      { timeout: 1_500 },
     );
-    expect(screen.getAllByText("Hysteria").length).toBeGreaterThan(0);
+    expect(downloading).toHaveClass("is-downloading");
+    expect(
+      screen.getByRole("heading", { name: "Hysteria — Def Leppard" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Transfers" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Download album" })[0]);
+    const queued = await screen.findByRole(
+      "button",
+      { name: "Queued" },
+      { timeout: 1_500 },
+    );
+    expect(queued).toHaveClass("is-queued");
+
+    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
+    expect(
+      screen.getAllByText("Def Leppard - Hysteria (1987)").length,
+    ).toBeGreaterThan(0);
   });
 
   it("uses Music Library as a read-only Archive without adopting downloads", async () => {
@@ -326,6 +360,7 @@ describe("Forever shell", () => {
     expect(
       screen.getByRole("button", { name: "Pause 04 - Night Geometry.flac" }),
     ).toBeInTheDocument();
+    expect(screen.getAllByText(/Album ETA 1m 24s/).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("tab", { name: "Completed 1" }));
     expect(within(workspace).getByText("Apex Horizon (Deluxe)")).toBeInTheDocument();
@@ -499,16 +534,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.21 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.22 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Archive connects to the existing Music Library SQLite database as a strictly read-only source of truth.",
+        "Album rows now show live Downloading and Queued states while you keep choosing more sources.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "SQLite read-only flags, query-only mode, and regression tests prevent Archive writes.",
+        "MusicBrainz-guided downloads use Artist - Album (Year) for their destination folder when the metadata is available.",
       ),
     ).toBeInTheDocument();
   });

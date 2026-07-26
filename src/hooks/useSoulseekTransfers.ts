@@ -343,28 +343,43 @@ export function useSoulseekTransfers() {
       const created = Date.now();
       const releaseId = `preview-release-${created}`;
       const folderName = release.title.replace(/[<>:"/\\|?*]/g, "_");
+      const queueBusy = snapshot.transfers.some((transfer) =>
+        [
+          "queued",
+          "requesting",
+          "remotelyQueued",
+          "connecting",
+          "downloading",
+        ].includes(transfer.status),
+      );
+      const previewSpeed = 4_800_000;
       const preview = release.files.map(
-        (file, index): Transfer => ({
-          id: `${releaseId}-${index}`,
-          releaseId,
-          releaseTitle: release.title,
-          releaseFolder: `C:\\Users\\Music\\Forever\\${folderName}`,
-          fileIndex: index + 1,
-          fileCount: release.files.length,
-          title: file.filename,
-          username: release.username,
-          remoteFilename: file.remoteFilename,
-          sizeBytes: file.sizeBytes,
-          transferredBytes: 0,
-          speedBytesPerSecond: 0,
-          etaSeconds: null,
-          status: "queued",
-          queuePosition: null,
-          localPath: `C:\\Users\\Music\\Forever\\${folderName}\\${file.filename}`,
-          error: null,
-          createdAtMs: created + index,
-          updatedAtMs: created,
-        }),
+        (file, index): Transfer => {
+          const startsNow = !queueBusy && index === 0;
+          return {
+            id: `${releaseId}-${index}`,
+            releaseId,
+            releaseTitle: release.title,
+            releaseFolder: `C:\\Users\\Music\\Forever\\${folderName}`,
+            fileIndex: index + 1,
+            fileCount: release.files.length,
+            title: file.filename,
+            username: release.username,
+            remoteFilename: file.remoteFilename,
+            sizeBytes: file.sizeBytes,
+            transferredBytes: 0,
+            speedBytesPerSecond: startsNow ? previewSpeed : 0,
+            etaSeconds: startsNow
+              ? Math.ceil(file.sizeBytes / previewSpeed)
+              : null,
+            status: startsNow ? "downloading" : "queued",
+            queuePosition: null,
+            localPath: `C:\\Users\\Music\\Forever\\${folderName}\\${file.filename}`,
+            error: null,
+            createdAtMs: created + index,
+            updatedAtMs: created,
+          };
+        },
       );
       const next = withCount([...snapshot.transfers, ...preview]);
       setSnapshot(next);

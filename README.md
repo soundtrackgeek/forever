@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.21` adds a read-only Archive backed by the
-> existing Music Library database, with ownership markers throughout album
-> discovery and search while keeping Forever downloads separate.
+> **Status:** pre-alpha. Version `0.0.22` keeps album downloads in Search with
+> live queue states, names their folders from catalog metadata, and reports a
+> true whole-album ETA in Transfers.
 
-If `0.0.16` is installed, download and run the latest `0.0.21` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.22` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -33,7 +33,8 @@ configuration and transfers.
   artwork, and one-click artist-plus-album handoff to grouped Soulseek sources
 - Album-source results grouped by listener and remote folder, with track count,
   formats, aggregate search size, readiness and speed, hover/focus track-list
-  previews, an individual-file fallback, and complete-folder download
+  previews, an individual-file fallback, complete-folder download, and live
+  **Downloading** or **Queued** actions that keep Search in place
 - A dedicated Archive workspace that opens Music Library's
   `music-library.sqlite3` database with SQLite read-only and query-only
   enforcement, reports its latest import and inventory totals, and never adds
@@ -72,12 +73,13 @@ configuration and transfers.
 - A polished release selector with per-file choices, Select all/Deselect all,
   selected-file counts, and aggregate download size
 - Whole-release enqueue into a collision-free local release folder, with
-  persisted file order and resume state across restarts
+  MusicBrainz-guided `Artist - Album (Year)` naming plus persisted file order
+  and resume state across restarts
 - Persistent transfers with source-queue position, byte progress, speed, ETA,
   pause, resume, retry, cancel, completion, and Show in folder controls
 - A full release-grouped Transfers workspace with All, Active, Queued,
   Completed, and Failed filters, transfer search, aggregate and per-file
-  progress, release-level controls, Clear completed, and native completion
+  progress, whole-album ETA, release-level controls, Clear completed, and native completion
   notifications, plus a collapsed-by-default bottom drawer for quick status and
   controls without sacrificing workspace height
 - Persistent local shared-folder configuration with native selection,
@@ -163,7 +165,11 @@ search opens in **Album sources**, grouping returned files by listener and
 folder. Hover or focus the eye control to preview that source's tracks; switch
 to **Individual files** for the original file-by-file results. **Download
 album** inspects the chosen folder and queues every file in it, including cover
-art, lyrics, cue sheets, and other companion files.
+art, lyrics, cue sheets, and other companion files. Search stays open so more
+albums can be added: the active source turns green and reads **Downloading**,
+while later sources turn blue and read **Queued**. When MusicBrainz supplied
+the catalog context, the destination is named `Artist - Album (Year)`; without
+that context Forever falls back to the shared folder name.
 
 Open **Archive** to inspect the external Music Library source. On Windows,
 Forever discovers it at
@@ -201,7 +207,7 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.21` intentionally keeps one active download at a time, even when an
+Version `0.0.22` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
 three. Edition/pressing lookup, playback, rooms, and public
 chat remain outside this release.
@@ -271,7 +277,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.21 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.22 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

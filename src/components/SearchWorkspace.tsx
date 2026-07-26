@@ -30,6 +30,7 @@ import type {
   SearchResult,
   SearchSnapshot,
   PersonProfile,
+  Transfer,
 } from "../types";
 import { groupAlbumSources } from "../utils/albumSources";
 import { AlbumSourceResults } from "./AlbumSourceResults";
@@ -50,6 +51,7 @@ type SearchWorkspaceProps = {
   archiveMatch?: ArchiveAlbumMatch;
   query: string;
   results: SearchResult[];
+  transfers: Transfer[];
   selectedResult: SearchResult | null;
   search: SearchSnapshot;
   searchError: string | null;
@@ -134,6 +136,7 @@ export function SearchWorkspace({
   archiveMatch,
   query,
   results,
+  transfers,
   selectedResult,
   search,
   searchError,
@@ -572,6 +575,7 @@ export function SearchWorkspace({
       {showingAlbumSources ? (
         <AlbumSourceResults
           sources={visibleAlbumSources}
+          transfers={transfers}
           searching={searching}
           onQueueAlbumSource={onQueueAlbumSource}
           onBrowseUser={onBrowseUser}

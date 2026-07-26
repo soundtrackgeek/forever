@@ -287,7 +287,7 @@ export function TransfersWorkspace({
                   <strong>{completed ? "Completed" : `${formatBytes(group.transferredBytes)} / ${formatBytes(group.sizeBytes)} (${Math.round(progress)}%)`}</strong>
                   <i><b style={{ width: `${progress}%` }} /></i>
                   <small>
-                    {group.status === "active" ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · ETA ${formatEta(group.etaSeconds)}` : ""}` : group.status === "queued" ? "Waiting for slot…" : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : "Ready in your download folder"}
+                    {group.status === "active" ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : group.status === "queued" ? "Waiting for slot…" : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : "Ready in your download folder"}
                   </small>
                 </span>
                 <span className="release-transfer-actions">

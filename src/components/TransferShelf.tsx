@@ -46,9 +46,14 @@ const formatBytes = (bytes: number) => {
   return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${unit}`;
 };
 
+const formatEta = (seconds: number) => {
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+};
+
 const groupStatus = (group: TransferGroup) => {
   if (group.status === "active") {
-    return `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds ? ` · ${group.etaSeconds}s` : ""}`;
+    return `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}`;
   }
   if (group.status === "queued") return "Waiting";
   if (group.status === "paused") return "Paused";

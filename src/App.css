@@ -3360,6 +3360,36 @@ button:disabled {
   filter: none;
 }
 
+.album-source-actions > .album-source-download.is-downloading:disabled {
+  color: #07160d;
+  background: linear-gradient(180deg, #78d696, #4caf70);
+  border-color: #8ce1a6;
+}
+
+.album-source-actions > .album-source-download.is-queued:disabled {
+  color: #f4f7ff;
+  background: linear-gradient(180deg, #5277c9, #38599d);
+  border-color: #6e91df;
+}
+
+.album-source-actions > .album-source-download.is-downloaded:disabled {
+  color: #9be8b4;
+  background: rgba(52, 135, 81, 0.2);
+  border-color: #3e9d61;
+}
+
+.album-source-actions > .album-source-download.is-paused:disabled {
+  color: #d9c4fa;
+  background: rgba(116, 82, 168, 0.22);
+  border-color: #6d5494;
+}
+
+.album-source-actions > .album-source-download.is-failed:disabled {
+  color: #f3a4aa;
+  background: rgba(157, 51, 62, 0.18);
+  border-color: #8e404b;
+}
+
 .album-track-popover {
   position: fixed;
   z-index: 1000;
