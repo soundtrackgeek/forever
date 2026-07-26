@@ -3,9 +3,9 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.13` adds People and Presence: live
-> listener profiles, country identity, favorites, blocked/recent people, and
-> profile entry points throughout the download journey.
+> **Status:** pre-alpha. Version `0.0.14` adds native private messaging,
+> persistent unread conversations, separate ignore and ban controls, reliable
+> packaged flags/profile images, and complete upload-slot statistics.
 
 ![Forever Midnight Radio user shares interface](design/implementation/release-user-shares-0.0.9.png)
 
@@ -25,9 +25,14 @@ Rust, Tauri 2, React, and TypeScript.
   and a live file inspector with source speed, queue, and share visibility
 - A dedicated People workspace with live online/away/offline presence,
   country flags, profile descriptions and images, interests, share/upload
-  statistics, persistent favorites and blocked listeners, and recent sources
+  statistics, persistent favorites, ignored and banned listeners, and recent
+  sources
 - Profile entry points and country flags in Search, User Shares, Transfers,
-  uploads, and the transfer shelf, plus an initial private-conversation shell
+  uploads, and the transfer shelf
+- Native Soulseek private messages with persistent per-user history, unread
+  badges, incoming acknowledgements, and an online-aware composer
+- Separate Ignore User filtering for messages/search activity and Ban User
+  protection for local share browsing, queues, and downloads
 - Real single-file downloads from live results using direct and indirect peer
   connections, with one active file at a time
 - Live source-folder inspection using Soulseek Folder Contents requests, with
@@ -124,8 +129,11 @@ explicitly asks the peer again.
 Open **People** to revisit recent sources and favorites, see their live
 presence and country, inspect profile notes and interests, or browse everything
 they share. Listener names in Search and Transfers open the same profile. The
-Message action currently opens the conversation shell; sending and receiving
-private messages arrives in a later release.
+**Message** action opens the persistent private conversation, where unread
+messages can be read and new messages sent while connected. **Ignore User**
+hides that listener's new private messages and search activity on this device.
+**Ban User** prevents that listener from browsing, queuing, or downloading your
+shares until the ban is removed.
 
 Add music under **Settings → Your shared music**. Forever gives each selected
 root a virtual alias, indexes supported audio in the background, and announces
@@ -136,10 +144,10 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.13` intentionally keeps one active download at a time, even when an
+Version `0.0.14` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
-three. Library management, metadata/cover lookup, playback, rooms, and chat
-remain outside this release.
+three. Library management, metadata/cover lookup, playback, rooms, and public
+chat remain outside this release.
 
 Soulseek does not have a separate sign-up step. Connecting with a valid unused
 username creates that account using the password you enter; only an existing
@@ -157,9 +165,10 @@ Forever writes non-secret account preferences to the Tauri application
 configuration directory and connection events to
 `logs/connection.log`. Release grouping, file order, and transfer metadata are
 stored in `transfers.json` in the same configuration directory. Favorites,
-blocked listeners, and recent source usernames are stored in `people.json`;
-profile notes, profile images, interests, country, presence, and statistics
-remain in memory for the current session. Shared-root
+ignored listeners, banned listeners, and recent source usernames are stored in
+`people.json`. Bounded private-message history and unread state are stored in
+`messages.json`; profile notes, profile images, interests, country, presence,
+and statistics remain in memory for the current session. Shared-root
 configuration and upload-slot count are stored separately in `sharing.json`;
 the file contains local folder paths because Forever must reopen those roots,
 but it never leaves the device. Peer IP
@@ -187,7 +196,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.13 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.14 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

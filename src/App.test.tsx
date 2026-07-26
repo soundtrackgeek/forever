@@ -222,14 +222,18 @@ describe("Forever shell", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 
-  it("opens the private conversation shell from a person profile", () => {
+  it("opens the private conversation shell from a person profile", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "People" }));
     fireEvent.click(screen.getByRole("button", { name: "Message" }));
 
     const conversation = screen.getByRole("dialog", { name: "audiophile92" });
-    expect(within(conversation).getByText("A quiet line is ready")).toBeInTheDocument();
-    expect(within(conversation).getByRole("textbox", { name: "Private messages are not available yet" })).toBeDisabled();
+    expect(within(conversation).getByText(/late-night radio session/)).toBeInTheDocument();
+    const composer = within(conversation).getByRole("textbox", { name: "Message audiophile92" });
+    expect(composer).toBeEnabled();
+    fireEvent.change(composer, { target: { value: "That would be wonderful." } });
+    fireEvent.click(within(conversation).getByRole("button", { name: "Send" }));
+    expect(await within(conversation).findByText("That would be wonderful.")).toBeInTheDocument();
   });
 
   it("opens a user profile directly from a search result", () => {
@@ -294,15 +298,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.13 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.14 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "A dedicated People workspace with live online, away, and offline presence.",
+        "Real Soulseek private messaging with persistent conversation history and unread indicators.",
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Country flags beside listeners throughout Search, People, Shares, and Transfers."),
+      screen.getByText(
+        "Bundled country flags and validated profile pictures now render in packaged builds.",
+      ),
     ).toBeInTheDocument();
   });
 

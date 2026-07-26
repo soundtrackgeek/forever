@@ -4,6 +4,7 @@ mod distributed;
 mod downloads;
 mod folders;
 mod local_shares;
+mod messages;
 mod people;
 mod protocol;
 mod search;
@@ -13,7 +14,10 @@ mod shares;
 mod uploads;
 
 use search::SearchSnapshot;
-use service::{ConnectionBootstrap, ConnectionManager, ConnectionSnapshot, SaveConnectionRequest};
+use service::{
+    ConnectionBootstrap, ConnectionManager, ConnectionPaths, ConnectionSnapshot,
+    SaveConnectionRequest,
+};
 use tauri::{AppHandle, Manager, State};
 
 pub fn initialize(app: &AppHandle) -> Result<ConnectionManager, String> {
@@ -29,11 +33,14 @@ pub fn initialize(app: &AppHandle) -> Result<ConnectionManager, String> {
 
     ConnectionManager::new(
         app.clone(),
-        config_directory.join("connection.json"),
-        config_directory.join("transfers.json"),
-        config_directory.join("sharing.json"),
-        config_directory.join("people.json"),
-        config_directory.join("logs").join("connection.log"),
+        ConnectionPaths {
+            settings: config_directory.join("connection.json"),
+            transfers: config_directory.join("transfers.json"),
+            sharing: config_directory.join("sharing.json"),
+            people: config_directory.join("people.json"),
+            messages: config_directory.join("messages.json"),
+            diagnostics: config_directory.join("logs").join("connection.log"),
+        },
         download_directory,
     )
     .map_err(|error| error.to_string())
@@ -77,6 +84,45 @@ pub async fn people_set_blocked(
 ) -> Result<people::PeopleSnapshot, String> {
     manager
         .set_person_blocked(&username, blocked)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn people_set_ignored(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+    ignored: bool,
+) -> Result<people::PeopleSnapshot, String> {
+    manager
+        .set_person_ignored(&username, ignored)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn messages_snapshot(
+    manager: State<'_, ConnectionManager>,
+) -> Result<messages::MessagesSnapshot, String> {
+    Ok(manager.current_messages())
+}
+
+#[tauri::command]
+pub async fn messages_send(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+    message: String,
+) -> Result<(), String> {
+    manager
+        .send_private_message(username, message)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn messages_mark_read(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+) -> Result<messages::MessagesSnapshot, String> {
+    manager
+        .mark_conversation_read(&username)
         .map_err(|error| error.to_string())
 }
 

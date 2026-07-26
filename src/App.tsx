@@ -20,6 +20,7 @@ import { useSoulseekSearch } from "./hooks/useSoulseekSearch";
 import { useSoulseekShares } from "./hooks/useSoulseekShares";
 import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
 import { useLocalSharing } from "./hooks/useLocalSharing";
+import { usePrivateMessages } from "./hooks/usePrivateMessages";
 import type { SearchResult } from "./types";
 
 const viewDetails = {
@@ -97,6 +98,7 @@ function App() {
   const folders = useSoulseekFolders();
   const shares = useSoulseekShares();
   const people = useSoulseekPeople();
+  const messages = usePrivateMessages();
   const [sharesUsername, setSharesUsername] = useState("audiophile92");
   const [selectedUsername, setSelectedUsername] = useState<string | null>("audiophile92");
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
@@ -117,6 +119,12 @@ function App() {
   };
 
   const navigate = (view: string) => {
+    if (view === "people" && messages.snapshot.unreadCount > 0) {
+      const unread = messages.snapshot.conversations.find(
+        (conversation) => conversation.unreadCount > 0,
+      );
+      if (unread) setSelectedUsername(unread.username);
+    }
     setActiveView(view);
   };
 
@@ -147,6 +155,7 @@ function App() {
           updateStatus={updater.status}
           username={connection.snapshot.username}
           connectionState={connection.snapshot.state}
+          unreadMessages={messages.snapshot.unreadCount}
           onNavigate={navigate}
           onCheckForUpdates={() => void updater.checkForUpdates(true)}
         />
@@ -207,7 +216,7 @@ function App() {
           <PeopleWorkspace
             snapshot={people.snapshot}
             ready={people.ready}
-            error={people.error}
+            error={people.error ?? messages.error}
             selectedUsername={selectedUsername}
             onSelect={openPerson}
             onBrowseUser={browseUser}
@@ -217,7 +226,19 @@ function App() {
             onSetBlocked={(username, blocked) =>
               void people.setBlocked(username, blocked).catch(() => undefined)
             }
-            onDismissError={people.clearError}
+            onSetIgnored={(username, ignored) =>
+              void people.setIgnored(username, ignored).catch(() => undefined)
+            }
+            conversation={selectedUsername ? messages.conversationByUsername(selectedUsername) : null}
+            connectionOnline={connection.snapshot.state === "online"}
+            onSendMessage={messages.send}
+            onMarkConversationRead={(username) =>
+              void messages.markRead(username).catch(() => undefined)
+            }
+            onDismissError={() => {
+              people.clearError();
+              messages.clearError();
+            }}
           />
         ) : activeView === "shares" ? (
           <UserSharesWorkspace

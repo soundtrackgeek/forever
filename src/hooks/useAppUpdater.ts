@@ -30,25 +30,25 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.12",
-  version: "0.0.13",
-  body: `## What’s new in Forever 0.0.13
+  currentVersion: "0.0.13",
+  version: "0.0.14",
+  body: `## What’s new in Forever 0.0.14
 
 ### Added
 
-- A dedicated People workspace with live online, away, and offline presence.
-- Soulseek profiles with descriptions, interests, share statistics, upload availability, favorites, blocked listeners, and recent sources.
-- Country flags beside listeners throughout Search, People, Shares, and Transfers.
-- A polished private-conversation shell that prepares the profile-to-message flow for the next release.
+- Real Soulseek private messaging with persistent conversation history and unread indicators.
+- Separate Ignore User and Ban User controls with clear local-message and sharing behavior.
+- Upload slot totals, current availability, and queued-upload counts on listener profiles.
 
 ### Changed
 
-- Search and transfer source names now open the listener’s profile, with complete share browsing one action away.
-- Profile images remain session-only while favorites, blocked listeners, and recent sources persist locally.
+- Incoming messages open from the People workspace and remain available after restarting Forever.
+- Banned users can no longer browse or download your shares; ignored users are filtered from messages and search activity.
 
 ### Fixed
 
-- Profile descriptions, images, interests, and server statistics are bounded before entering app state.`,
+- Bundled country flags and validated profile pictures now render in packaged builds.
+- Failed profile pictures fall back to initials without exposing duplicate image text.`,
   date: "2026-07-26",
 };
 

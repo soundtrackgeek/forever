@@ -5,6 +5,43 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.14] - 2026-07-26
+
+### Added
+
+- Native Soulseek private messaging with outgoing delivery, incoming-message
+  acknowledgement, persistent per-user history, unread counts, and direct
+  navigation from the sidebar and People workspace.
+- Separate persistent Ignore User and Ban User controls. Ignoring filters a
+  listener's private messages and search activity locally; banning prevents
+  that listener from browsing, queuing, or downloading local shares.
+- Total upload slots, current slot availability, and queued-upload counts in
+  the listener profile statistics.
+- Bounded protocol, persistence-migration, and frontend regression coverage
+  for private messages, ignore state, upload statistics, and the composer.
+
+### Changed
+
+- The People conversation shell is now a working message thread with online
+  send state, local history, timestamps, empty state, and unread indicators.
+- Favorites, ignored listeners, banned listeners, recent people, and private
+  conversations are restored after restarting Forever.
+- Application and updater preview metadata now identify version `0.0.14`.
+
+### Fixed
+
+- Bundled country flags and validated profile-picture data URLs now pass the
+  packaged application's content-security policy.
+- Failed profile images fall back to initials without rendering their alt text
+  over usernames or overflowing compact and full-size avatars.
+
+### Security
+
+- Private-message usernames, bodies, stored conversations, and per-thread
+  history are bounded before protocol encoding or local persistence.
+- Ignored messages are acknowledged without being retained, while banned
+  listeners receive no share metadata and cannot enqueue uploads.
+
 ## [0.0.13] - 2026-07-26
 
 ### Added

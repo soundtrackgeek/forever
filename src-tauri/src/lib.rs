@@ -53,6 +53,10 @@ pub fn run() {
             connection::people_profile,
             connection::people_set_favorite,
             connection::people_set_blocked,
+            connection::people_set_ignored,
+            connection::messages_snapshot,
+            connection::messages_send,
+            connection::messages_mark_read,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

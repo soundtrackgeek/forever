@@ -1,5 +1,6 @@
 import {
   ArrowClockwise,
+  BellSlash,
   ChatCircleDots,
   CheckCircle,
   FolderOpen,
@@ -14,7 +15,12 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useMemo, useState, type FormEvent } from "react";
-import type { PeopleSnapshot, PersonProfile, PersonStatus } from "../types";
+import type {
+  PeopleSnapshot,
+  PersonProfile,
+  PersonStatus,
+  PrivateConversation,
+} from "../types";
 import { CountryFlag } from "./CountryFlag";
 import { countryName } from "../utils/people";
 
@@ -27,6 +33,11 @@ type PeopleWorkspaceProps = {
   onBrowseUser: (username: string) => void;
   onSetFavorite: (username: string, favorite: boolean) => void;
   onSetBlocked: (username: string, blocked: boolean) => void;
+  onSetIgnored: (username: string, ignored: boolean) => void;
+  conversation: PrivateConversation | null;
+  connectionOnline: boolean;
+  onSendMessage: (username: string, message: string) => Promise<void>;
+  onMarkConversationRead: (username: string) => void;
   onDismissError: () => void;
 };
 
@@ -58,18 +69,32 @@ const relativeSeen = (person: PersonProfile) => {
   return `Seen ${Math.floor(hours / 24)}d ago`;
 };
 
+function AvatarPicture({ person }: { person: PersonProfile }) {
+  const [failed, setFailed] = useState(false);
+  if (!person.pictureDataUrl || failed) {
+    return <span aria-hidden="true">{person.username.slice(0, 1).toUpperCase()}</span>;
+  }
+  return (
+    <img
+      src={person.pictureDataUrl}
+      alt=""
+      aria-hidden="true"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function PersonAvatar({ person, large = false }: { person: PersonProfile; large?: boolean }) {
   return (
     <span className={`person-avatar ${large ? "is-large" : ""}`}>
-      {person.pictureDataUrl ? (
-        <img src={person.pictureDataUrl} alt={`${person.username}'s profile`} />
-      ) : (
-        <span aria-hidden="true">{person.username.slice(0, 1).toUpperCase()}</span>
-      )}
+      <AvatarPicture key={`${person.username}-${person.pictureDataUrl ?? "initial"}`} person={person} />
       <i className={`presence-dot is-${person.status}`} aria-hidden="true" />
     </span>
   );
 }
+
+const formatMessageTime = (value: number) =>
+  new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(value);
 
 export function PeopleWorkspace({
   snapshot,
@@ -80,11 +105,18 @@ export function PeopleWorkspace({
   onBrowseUser,
   onSetFavorite,
   onSetBlocked,
+  onSetIgnored,
+  conversation,
+  connectionOnline,
+  onSendMessage,
+  onMarkConversationRead,
   onDismissError,
 }: PeopleWorkspaceProps) {
   const [query, setQuery] = useState("");
   const [listMode, setListMode] = useState<"all" | "favorites">("all");
   const [messageOpen, setMessageOpen] = useState(false);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [messageSending, setMessageSending] = useState(false);
   const selected = snapshot.users.find(
     (person) =>
       person.username.toLocaleLowerCase() === selectedUsername?.toLocaleLowerCase(),
@@ -103,6 +135,26 @@ export function PeopleWorkspace({
     event.preventDefault();
     const username = query.trim();
     if (username) onSelect(username, true);
+  };
+
+  const openMessages = () => {
+    if (!selected) return;
+    setMessageOpen(true);
+    onMarkConversationRead(selected.username);
+  };
+
+  const sendMessage = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selected || !messageDraft.trim() || messageSending || !connectionOnline) return;
+    setMessageSending(true);
+    try {
+      await onSendMessage(selected.username, messageDraft);
+      setMessageDraft("");
+    } catch {
+      // The shared people error banner presents the command failure.
+    } finally {
+      setMessageSending(false);
+    }
   };
 
   return (
@@ -221,8 +273,11 @@ export function PeopleWorkspace({
                     <Heart size={17} weight={selected.favorite ? "fill" : "regular"} />
                     {selected.favorite ? "Saved" : "Save"}
                   </button>
-                  <button type="button" onClick={() => setMessageOpen(true)}>
+                  <button type="button" onClick={openMessages}>
                     <ChatCircleDots size={17} /> Message
+                    {conversation && conversation.unreadCount > 0 ? (
+                      <span className="message-unread-count" aria-hidden="true">{conversation.unreadCount}</span>
+                    ) : null}
                   </button>
                   <button type="button" className="profile-browse-action" onClick={() => onBrowseUser(selected.username)}>
                     <FolderOpen size={17} /> Browse shares
@@ -256,7 +311,9 @@ export function PeopleWorkspace({
                     <div><dt>Shared files</dt><dd>{formatNumber(selected.sharedFileCount)}</dd></div>
                     <div><dt>Folders</dt><dd>{formatNumber(selected.sharedDirectoryCount)}</dd></div>
                     <div><dt>Upload speed</dt><dd>{formatSpeed(selected.averageSpeed)}</dd></div>
-                    <div><dt>Queue</dt><dd>{selected.slotsFree ? "Slot ready" : selected.queueSize == null ? "Not reported" : `${selected.queueSize} waiting`}</dd></div>
+                    <div><dt>Upload slots</dt><dd>{selected.uploadSlots == null ? "Not reported" : formatNumber(selected.uploadSlots)}</dd></div>
+                    <div><dt>Slot available</dt><dd>{selected.slotsFree == null ? "Not reported" : selected.slotsFree ? "Yes" : "No"}</dd></div>
+                    <div><dt>Queued uploads</dt><dd>{selected.queueSize == null ? "Not reported" : formatNumber(selected.queueSize)}</dd></div>
                   </dl>
 
                   <div className="person-taste-grid">
@@ -276,13 +333,24 @@ export function PeopleWorkspace({
 
                   <footer className="person-profile-footer">
                     <span><CheckCircle size={14} weight="fill" /> Profile details are session-only; favorites remain on this device.</span>
-                    <button
-                      type="button"
-                      className={selected.blocked ? "is-blocked" : ""}
-                      onClick={() => onSetBlocked(selected.username, !selected.blocked)}
-                    >
-                      <Prohibit size={14} /> {selected.blocked ? "Unblock listener" : "Block listener"}
-                    </button>
+                    <div className="person-safety-actions">
+                      <button
+                        type="button"
+                        className={selected.ignored ? "is-blocked" : ""}
+                        onClick={() => onSetIgnored(selected.username, !selected.ignored)}
+                        title="Hide this user's private messages and search activity on this device."
+                      >
+                        <BellSlash size={14} /> {selected.ignored ? "Unignore user" : "Ignore user"}
+                      </button>
+                      <button
+                        type="button"
+                        className={selected.blocked ? "is-blocked" : ""}
+                        onClick={() => onSetBlocked(selected.username, !selected.blocked)}
+                        title="Prevent this user from browsing or downloading your shares."
+                      >
+                        <Prohibit size={14} /> {selected.blocked ? "Unban user" : "Ban user"}
+                      </button>
+                    </div>
                   </footer>
                 </div>
               )}
@@ -299,15 +367,38 @@ export function PeopleWorkspace({
               <span><strong id="message-shell-title">{selected.username}</strong><small>{statusCopy[selected.status]} · {countryName(selected.countryCode)}</small></span>
               <button type="button" aria-label="Close conversation" onClick={() => setMessageOpen(false)}><X size={16} /></button>
             </header>
-            <div className="message-shell-body">
-              <ChatCircleDots size={32} weight="thin" />
-              <h3>A quiet line is ready</h3>
-              <p>Private conversations arrive in the next release. This first shell keeps the profile and future thread in one calm place.</p>
+            <div className={`message-shell-body ${conversation?.messages.length ? "has-messages" : ""}`} aria-live="polite">
+              {conversation?.messages.length ? (
+                <ol className="message-thread">
+                  {conversation.messages.map((message) => (
+                    <li className={`is-${message.direction}`} key={message.id}>
+                      <span>{message.body}</span>
+                      <time dateTime={new Date(message.sentAtMs).toISOString()}>{formatMessageTime(message.sentAtMs)}</time>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <div className="message-empty-state">
+                  <ChatCircleDots size={32} weight="thin" />
+                  <h3>A quiet line is ready</h3>
+                  <p>Messages stay private, persist on this device, and can be delivered when the listener returns.</p>
+                </div>
+              )}
             </div>
-            <footer>
-              <input disabled placeholder={`Message ${selected.username}`} aria-label="Private messages are not available yet" />
-              <button type="button" disabled>Send</button>
-            </footer>
+            <form className="message-composer" onSubmit={sendMessage}>
+              <input
+                value={messageDraft}
+                onChange={(event) => setMessageDraft(event.target.value)}
+                disabled={!connectionOnline || messageSending}
+                placeholder={connectionOnline ? `Message ${selected.username}` : "Connect to send a message"}
+                aria-label={`Message ${selected.username}`}
+                maxLength={8192}
+                autoFocus
+              />
+              <button type="submit" disabled={!connectionOnline || !messageDraft.trim() || messageSending}>
+                {messageSending ? "Sending…" : "Send"}
+              </button>
+            </form>
           </section>
         </div>
       )}

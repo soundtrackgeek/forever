@@ -545,6 +545,19 @@
   cursor: pointer;
 }
 
+.message-unread-count {
+  display: grid;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  color: #17100a;
+  font-size: 8px;
+  font-weight: 750;
+  background: var(--amber);
+  border-radius: 99px;
+  place-items: center;
+}
+
 .person-primary-actions button:hover {
   color: #f0eff4;
   border-color: #4a5067;
@@ -589,7 +602,7 @@
 
 .person-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 18px 0;
   padding: 14px 0;
   border-top: 1px solid #242a3c;
@@ -603,12 +616,22 @@
   border-right: 1px solid #242a3c;
 }
 
+.person-stats div:nth-child(n + 4) {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #242a3c;
+}
+
+.person-stats div:nth-child(3n) {
+  border-right: 0;
+}
+
 .person-stats div:first-child {
   padding-left: 0;
 }
 
 .person-stats div:last-child {
-  border: 0;
+  border-right: 0;
 }
 
 .person-stats dt {
@@ -699,6 +722,13 @@
   border-color: rgba(228, 107, 119, 0.35);
 }
 
+.person-safety-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .message-shell-backdrop {
   position: fixed;
   z-index: 140;
@@ -714,6 +744,7 @@
   display: grid;
   width: min(560px, calc(100vw - 80px));
   min-height: 370px;
+  max-height: min(660px, calc(100vh - 80px));
   grid-template-rows: auto 1fr auto;
   overflow: hidden;
   background: #0d111e;
@@ -767,6 +798,70 @@
   text-align: center;
 }
 
+.message-shell-body.has-messages {
+  display: block;
+  min-height: 300px;
+  padding: 18px;
+  overflow-y: auto;
+  text-align: initial;
+}
+
+.message-empty-state {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+}
+
+.message-thread {
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.message-thread li {
+  display: grid;
+  max-width: 78%;
+  gap: 5px;
+}
+
+.message-thread li.is-outgoing {
+  align-self: flex-end;
+  justify-items: end;
+}
+
+.message-thread li.is-incoming {
+  align-self: flex-start;
+  justify-items: start;
+}
+
+.message-thread li > span {
+  padding: 9px 11px;
+  color: #d9d9e2;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #151a29;
+  border: 1px solid #2a3043;
+  border-radius: 4px 12px 12px 12px;
+}
+
+.message-thread li.is-outgoing > span {
+  color: #efe9fb;
+  background: #29213e;
+  border-color: #4d3d6b;
+  border-radius: 12px 4px 12px 12px;
+}
+
+.message-thread time {
+  color: #656a7c;
+  font-size: 7px;
+}
+
 .message-shell-body h3 {
   margin: 12px 0 6px;
   color: #e3e1e9;
@@ -782,7 +877,7 @@
   line-height: 1.6;
 }
 
-.message-shell > footer {
+.message-composer {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
@@ -791,16 +886,21 @@
   border-top: 1px solid #282e41;
 }
 
-.message-shell > footer input {
+.message-composer input {
   min-height: 38px;
   padding: 0 11px;
-  color: #686d7d;
+  color: #dedde5;
   background: #111522;
   border: 1px solid #272d3e;
   border-radius: 5px;
 }
 
-.message-shell > footer button {
+.message-composer input:focus {
+  border-color: #655184;
+  outline: 2px solid rgba(165, 138, 242, 0.12);
+}
+
+.message-composer button {
   padding: 0 17px;
   color: #15100a;
   font-size: 9px;
@@ -808,6 +908,12 @@
   background: var(--amber);
   border: 0;
   border-radius: 5px;
+}
+
+.message-composer button:disabled,
+.message-composer input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 @keyframes people-pulse {
@@ -1073,6 +1179,20 @@ button:disabled {
     linear-gradient(90deg, rgba(108, 82, 190, 0.17), rgba(82, 67, 142, 0.2)),
     #111426;
   border-color: rgba(145, 111, 223, 0.42);
+}
+
+.nav-unread {
+  display: grid;
+  min-width: 19px;
+  height: 19px;
+  margin-left: auto;
+  padding: 0 5px;
+  color: #17100a;
+  font-size: 9px;
+  font-weight: 750;
+  background: var(--amber);
+  border-radius: 99px;
+  place-items: center;
 }
 
 .sidebar-spacer {

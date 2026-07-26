@@ -265,9 +265,9 @@ export function useSoulseekPeople() {
 
   const updateBoolean = useCallback(
     async (
-      command: "people_set_favorite" | "people_set_blocked",
+      command: "people_set_favorite" | "people_set_blocked" | "people_set_ignored",
       username: string,
-      key: "favorite" | "blocked",
+      key: "favorite" | "blocked" | "ignored",
       value: boolean,
     ) => {
       setError(null);
@@ -310,6 +310,8 @@ export function useSoulseekPeople() {
         updateBoolean("people_set_favorite", username, "favorite", favorite),
       setBlocked: (username: string, blocked: boolean) =>
         updateBoolean("people_set_blocked", username, "blocked", blocked),
+      setIgnored: (username: string, ignored: boolean) =>
+        updateBoolean("people_set_ignored", username, "ignored", ignored),
       personByUsername,
     }),
     [error, openProfile, personByUsername, ready, snapshot, updateBoolean],

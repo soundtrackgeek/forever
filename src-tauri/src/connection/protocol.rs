@@ -15,6 +15,8 @@ pub const WATCH_USER_CODE: u32 = 5;
 pub const UNWATCH_USER_CODE: u32 = 6;
 pub const USER_STATUS_CODE: u32 = 7;
 pub const CONNECT_TO_PEER_CODE: u32 = 18;
+pub const MESSAGE_USER_CODE: u32 = 22;
+pub const MESSAGE_ACKED_CODE: u32 = 23;
 pub const FILE_SEARCH_CODE: u32 = 26;
 pub const SET_STATUS_CODE: u32 = 28;
 pub const SERVER_PING_CODE: u32 = 32;
@@ -71,6 +73,7 @@ const MAX_PROFILE_DESCRIPTION_BYTES: usize = 8 * 1024;
 const MAX_PROFILE_PICTURE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_USER_INTERESTS: usize = 500;
 const MAX_USER_INTEREST_BYTES: usize = 250;
+const MAX_PRIVATE_MESSAGE_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Frame {
@@ -162,6 +165,15 @@ pub struct DistributedSearch {
     pub username: String,
     pub token: u32,
     pub query: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrivateMessage {
+    pub id: u32,
+    pub timestamp_seconds: u32,
+    pub username: String,
+    pub message: String,
+    pub is_new: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -284,6 +296,24 @@ pub fn user_interests_frame(username: &str) -> Vec<u8> {
     let mut payload = Vec::with_capacity(username.len() + 4);
     push_string(&mut payload, username);
     encode_message(USER_INTERESTS_CODE, &payload)
+}
+
+pub fn message_user_frame(username: &str, message: &str) -> Result<Vec<u8>, ProtocolError> {
+    if username.is_empty()
+        || username.len() > MAX_NETWORK_USERNAME_BYTES
+        || message.is_empty()
+        || message.len() > MAX_PRIVATE_MESSAGE_BYTES
+    {
+        return Err(ProtocolError::InvalidPrivateMessage);
+    }
+    let mut payload = Vec::with_capacity(username.len() + message.len() + 8);
+    push_string(&mut payload, username);
+    push_string(&mut payload, message);
+    Ok(encode_message(MESSAGE_USER_CODE, &payload))
+}
+
+pub fn message_acked_frame(id: u32) -> Vec<u8> {
+    encode_message(MESSAGE_ACKED_CODE, &id.to_le_bytes())
 }
 
 pub fn have_no_parent_frame(has_no_parent: bool) -> Vec<u8> {
@@ -521,6 +551,35 @@ pub fn parse_server_search_request(frame: &Frame) -> Result<(String, u32, String
         reader.read_u32()?,
         reader.read_string_lossy()?,
     ))
+}
+
+pub fn parse_private_message(frame: &Frame) -> Result<PrivateMessage, ProtocolError> {
+    if frame.code != MESSAGE_USER_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: MESSAGE_USER_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let id = reader.read_u32()?;
+    let timestamp_seconds = reader.read_u32()?;
+    let username = reader.read_string_lossy()?;
+    let message = reader.read_string_lossy()?;
+    let is_new = reader.read_bool()?;
+    if username.is_empty()
+        || username.len() > MAX_NETWORK_USERNAME_BYTES
+        || message.is_empty()
+        || message.len() > MAX_PRIVATE_MESSAGE_BYTES
+    {
+        return Err(ProtocolError::InvalidPrivateMessage);
+    }
+    Ok(PrivateMessage {
+        id,
+        timestamp_seconds,
+        username,
+        message,
+        is_new,
+    })
 }
 
 pub fn parse_possible_parents(frame: &Frame) -> Result<Vec<ParentCandidate>, ProtocolError> {
@@ -1644,6 +1703,8 @@ pub enum ProtocolError {
     InvalidUserData,
     #[error("Soulseek user profile exceeds the safety limits")]
     InvalidUserInfo,
+    #[error("Soulseek private-message fields are invalid")]
+    InvalidPrivateMessage,
     #[error("Unexpected Soulseek peer initialization code {0}")]
     UnexpectedPeerInitCode(u8),
     #[error("Soulseek {kind} count {count} exceeds the safety limit")]
@@ -1690,6 +1751,42 @@ mod tests {
         assert_eq!(
             u32::from_le_bytes(frame[frame.len() - 4..].try_into().unwrap()),
             FOREVER_MINOR_VERSION
+        );
+    }
+
+    #[test]
+    fn private_messages_encode_acknowledge_and_parse() {
+        let outgoing = message_user_frame("listener", "hello from Forever").unwrap();
+        assert_eq!(
+            u32::from_le_bytes(outgoing[4..8].try_into().unwrap()),
+            MESSAGE_USER_CODE
+        );
+
+        let mut payload = 42_u32.to_le_bytes().to_vec();
+        payload.extend(1_700_000_000_u32.to_le_bytes());
+        payload.extend(encoded_string("listener"));
+        payload.extend(encoded_string("hello back"));
+        payload.push(1);
+        assert_eq!(
+            parse_private_message(&Frame {
+                code: MESSAGE_USER_CODE,
+                payload,
+            })
+            .unwrap(),
+            PrivateMessage {
+                id: 42,
+                timestamp_seconds: 1_700_000_000,
+                username: "listener".to_owned(),
+                message: "hello back".to_owned(),
+                is_new: true,
+            }
+        );
+        assert_eq!(
+            u32::from_le_bytes(message_acked_frame(42)[8..12].try_into().unwrap()),
+            42
+        );
+        assert!(
+            message_user_frame("listener", &"x".repeat(MAX_PRIVATE_MESSAGE_BYTES + 1)).is_err()
         );
     }
 

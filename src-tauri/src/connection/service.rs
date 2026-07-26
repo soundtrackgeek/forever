@@ -11,36 +11,38 @@ use super::{
         LocalSharesError, LocalSharesHub, LocalSharesSnapshot, SearchResponseOrigin,
         SearchResponseTicket,
     },
+    messages::{MessagesError, MessagesHub, MessagesSnapshot},
     people::{PeopleError, PeopleHub, PeopleSnapshot, PersonProfile, ProfileState, ProfileTicket},
     protocol::{
         accept_children_frame, branch_level_frame, branch_root_frame, cant_connect_to_peer_frame,
         connect_to_peer_frame, file_search_frame, file_search_response_frame,
         folder_contents_request_frame, folder_contents_response_frame, get_peer_address_frame,
-        have_no_parent_frame, login_frame, parse_cant_connect_token, parse_connect_to_peer,
-        parse_distributed_branch_level, parse_distributed_branch_root, parse_distributed_search,
-        parse_embedded_distributed_search, parse_filename, parse_folder_contents_request,
-        parse_folder_contents_response, parse_login_response, parse_peer_address,
-        parse_possible_parents, parse_queue_position, parse_search_response,
-        parse_server_search_request, parse_shared_file_list_response, parse_transfer_request,
-        parse_transfer_response, parse_upload_denied, parse_user_info_response,
-        parse_user_interests, parse_user_stats, parse_user_status, parse_watch_user,
-        peer_init_frame, pierce_firewall_frame, place_in_queue_request_frame,
-        place_in_queue_response_frame, queue_upload_frame, read_distributed_frame, read_frame,
-        read_peer_frame, read_peer_init, read_profile_frame, server_ping_frame, set_online_frame,
-        set_wait_port_frame, shared_counts_frame, shared_file_list_request_frame,
-        shared_file_list_response_frame, transfer_request_frame, transfer_response_frame,
-        unwatch_user_frame, upload_denied_frame, user_info_request_frame, user_info_response_frame,
-        user_interests_frame, user_stats_frame, watch_user_frame, write_raw_frame, ConnectToPeer,
-        DistributedFrame, DistributedSearch, Frame, LoginResponse, ParentCandidate, PeerAddress,
-        PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE,
-        DISTRIBUTED_BRANCH_LEVEL_CODE, DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_SEARCH_CODE,
-        EMBEDDED_MESSAGE_CODE, FILE_SEARCH_CODE, FILE_SEARCH_RESPONSE_CODE,
-        FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE, GET_PEER_ADDRESS_CODE,
-        PLACE_IN_QUEUE_REQUEST_CODE, PLACE_IN_QUEUE_RESPONSE_CODE, POSSIBLE_PARENTS_CODE,
-        QUEUE_UPLOAD_CODE, RELOGGED_CODE, RESET_DISTRIBUTED_CODE, SHARED_FILE_LIST_REQUEST_CODE,
-        SHARED_FILE_LIST_RESPONSE_CODE, TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE,
-        UPLOAD_FAILED_CODE, USER_INFO_REQUEST_CODE, USER_INFO_RESPONSE_CODE, USER_INTERESTS_CODE,
-        USER_STATS_CODE, USER_STATUS_CODE, WATCH_USER_CODE,
+        have_no_parent_frame, login_frame, message_acked_frame, message_user_frame,
+        parse_cant_connect_token, parse_connect_to_peer, parse_distributed_branch_level,
+        parse_distributed_branch_root, parse_distributed_search, parse_embedded_distributed_search,
+        parse_filename, parse_folder_contents_request, parse_folder_contents_response,
+        parse_login_response, parse_peer_address, parse_possible_parents, parse_private_message,
+        parse_queue_position, parse_search_response, parse_server_search_request,
+        parse_shared_file_list_response, parse_transfer_request, parse_transfer_response,
+        parse_upload_denied, parse_user_info_response, parse_user_interests, parse_user_stats,
+        parse_user_status, parse_watch_user, peer_init_frame, pierce_firewall_frame,
+        place_in_queue_request_frame, place_in_queue_response_frame, queue_upload_frame,
+        read_distributed_frame, read_frame, read_peer_frame, read_peer_init, read_profile_frame,
+        server_ping_frame, set_online_frame, set_wait_port_frame, shared_counts_frame,
+        shared_file_list_request_frame, shared_file_list_response_frame, transfer_request_frame,
+        transfer_response_frame, unwatch_user_frame, upload_denied_frame, user_info_request_frame,
+        user_info_response_frame, user_interests_frame, user_stats_frame, watch_user_frame,
+        write_raw_frame, ConnectToPeer, DistributedFrame, DistributedSearch, Frame, LoginResponse,
+        ParentCandidate, PeerAddress, PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE,
+        CONNECT_TO_PEER_CODE, DISTRIBUTED_BRANCH_LEVEL_CODE, DISTRIBUTED_BRANCH_ROOT_CODE,
+        DISTRIBUTED_SEARCH_CODE, EMBEDDED_MESSAGE_CODE, FILE_SEARCH_CODE,
+        FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE,
+        GET_PEER_ADDRESS_CODE, MESSAGE_USER_CODE, PLACE_IN_QUEUE_REQUEST_CODE,
+        PLACE_IN_QUEUE_RESPONSE_CODE, POSSIBLE_PARENTS_CODE, QUEUE_UPLOAD_CODE, RELOGGED_CODE,
+        RESET_DISTRIBUTED_CODE, SHARED_FILE_LIST_REQUEST_CODE, SHARED_FILE_LIST_RESPONSE_CODE,
+        TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE, UPLOAD_FAILED_CODE, USER_INFO_REQUEST_CODE,
+        USER_INFO_RESPONSE_CODE, USER_INTERESTS_CODE, USER_STATS_CODE, USER_STATUS_CODE,
+        WATCH_USER_CODE,
     },
     search::{SearchHub, SearchSnapshot, SearchState},
     settings::{ConnectionProfile, SettingsStore},
@@ -296,6 +298,7 @@ impl DistributedCoordinator {
 
 enum ConnectionCommand {
     StartSearch { token: u32, query: String },
+    SendPrivateMessage { username: String, message: String },
     InspectFolder { ticket: FolderTicket },
     BrowseShares { ticket: SharesTicket },
     RequestProfile { ticket: ProfileTicket },
@@ -349,35 +352,42 @@ pub struct ConnectionManager {
     folders: FolderHub,
     shares: SharesHub,
     people: PeopleHub,
+    messages: MessagesHub,
     transfers: TransferHub,
     local_shares: LocalSharesHub,
     uploads: UploadHub,
     distributed: DistributedHub,
 }
 
+pub struct ConnectionPaths {
+    pub settings: PathBuf,
+    pub transfers: PathBuf,
+    pub sharing: PathBuf,
+    pub people: PathBuf,
+    pub messages: PathBuf,
+    pub diagnostics: PathBuf,
+}
+
 impl ConnectionManager {
     pub fn new(
         app: AppHandle,
-        settings_path: PathBuf,
-        transfers_path: PathBuf,
-        sharing_path: PathBuf,
-        people_path: PathBuf,
-        diagnostics_path: PathBuf,
+        paths: ConnectionPaths,
         download_directory: PathBuf,
     ) -> Result<Self, ConnectionServiceError> {
-        let settings = SettingsStore::new(settings_path);
-        let diagnostics = Diagnostics::new(diagnostics_path)?;
+        let settings = SettingsStore::new(paths.settings);
+        let diagnostics = Diagnostics::new(paths.diagnostics)?;
         let profile = settings.load()?;
         let snapshot = profile
             .as_ref()
             .map(ConnectionSnapshot::offline)
             .unwrap_or_else(ConnectionSnapshot::unconfigured);
         let search = SearchHub::new(app.clone());
-        let transfers = TransferHub::new(app.clone(), transfers_path)?;
-        let local_shares = LocalSharesHub::new(app.clone(), sharing_path)?;
+        let transfers = TransferHub::new(app.clone(), paths.transfers)?;
+        let local_shares = LocalSharesHub::new(app.clone(), paths.sharing)?;
         let uploads = UploadHub::new(app.clone());
         let distributed = DistributedHub::new(app.clone());
-        let people = PeopleHub::new(app.clone(), people_path)?;
+        let people = PeopleHub::new(app.clone(), paths.people)?;
+        let messages = MessagesHub::new(app.clone(), paths.messages)?;
 
         Ok(Self {
             app,
@@ -400,6 +410,7 @@ impl ConnectionManager {
             folders: FolderHub::default(),
             shares: SharesHub::default(),
             people,
+            messages,
             transfers,
             local_shares,
             uploads,
@@ -540,6 +551,42 @@ impl ConnectionManager {
         self.people.snapshot()
     }
 
+    pub fn current_messages(&self) -> MessagesSnapshot {
+        self.messages.snapshot()
+    }
+
+    pub fn send_private_message(
+        &self,
+        username: String,
+        message: String,
+    ) -> Result<(), ConnectionServiceError> {
+        let username = username.trim().to_owned();
+        let message = super::messages::valid_message(&message)?;
+        if username.is_empty() || username.len() > MAX_SEARCH_USERNAME_BYTES {
+            return Err(ConnectionServiceError::InvalidPerson);
+        }
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::MessagesUnavailable);
+        }
+        let sender = self
+            .command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .ok_or(ConnectionServiceError::MessagesUnavailable)?;
+        self.people.remember(&username)?;
+        sender
+            .send(ConnectionCommand::SendPrivateMessage { username, message })
+            .map_err(|_| ConnectionServiceError::MessagesUnavailable)
+    }
+
+    pub fn mark_conversation_read(
+        &self,
+        username: &str,
+    ) -> Result<MessagesSnapshot, ConnectionServiceError> {
+        Ok(self.messages.mark_read(username)?)
+    }
+
     pub async fn open_person_profile(
         &self,
         username: String,
@@ -630,6 +677,14 @@ impl ConnectionManager {
         blocked: bool,
     ) -> Result<PeopleSnapshot, ConnectionServiceError> {
         Ok(self.people.set_blocked(username, blocked)?)
+    }
+
+    pub fn set_person_ignored(
+        &self,
+        username: &str,
+        ignored: bool,
+    ) -> Result<PeopleSnapshot, ConnectionServiceError> {
+        Ok(self.people.set_ignored(username, ignored)?)
     }
 
     pub fn add_local_share(
@@ -1110,6 +1165,9 @@ impl ConnectionManager {
         {
             return Ok(());
         }
+        if self.people.is_ignored(&request.username) {
+            return Ok(());
+        }
         if origin == SearchResponseOrigin::Distributed
             && self
                 .distributed
@@ -1447,7 +1505,33 @@ impl ConnectionManager {
                             "relogged",
                         ));
                     }
-                    if frame.code == FILE_SEARCH_CODE {
+                    if frame.code == MESSAGE_USER_CODE {
+                        if let Ok(message) = parse_private_message(&frame) {
+                            if !self.people.is_ignored(&message.username) {
+                                self.people.remember(&message.username).map_err(|error| {
+                                    ConnectionFailure::retryable(
+                                        format!("The incoming-message sender could not be saved: {error}"),
+                                        "message_store_failed",
+                                    )
+                                })?;
+                                self.messages.record_incoming(
+                                    message.id,
+                                    message.timestamp_seconds,
+                                    &message.username,
+                                    &message.message,
+                                ).map_err(|error| ConnectionFailure::retryable(
+                                    format!("The incoming private message could not be saved: {error}"),
+                                    "message_store_failed",
+                                ))?;
+                            }
+                            write_raw_frame(&mut server_writer, &message_acked_frame(message.id))
+                                .await
+                                .map_err(|error| ConnectionFailure::retryable(
+                                    format!("The private-message acknowledgement failed: {error}"),
+                                    "message_ack_failed",
+                                ))?;
+                        }
+                    } else if frame.code == FILE_SEARCH_CODE {
                         if let Ok((username, search_token, query)) = parse_server_search_request(&frame) {
                             self.answer_search_request(
                                 &mut server_writer,
@@ -1715,6 +1799,26 @@ impl ConnectionManager {
                                         "search_send_failed",
                                     )
                                 })?;
+                        }
+                        Some(ConnectionCommand::SendPrivateMessage { username, message }) => {
+                            let frame = message_user_frame(&username, &message).map_err(|error| {
+                                ConnectionFailure::fatal(
+                                    format!("The private message is invalid: {error}"),
+                                    "message_invalid",
+                                )
+                            })?;
+                            write_raw_frame(&mut server_writer, &frame)
+                                .await
+                                .map_err(|error| ConnectionFailure::retryable(
+                                    format!("The private message could not be sent: {error}"),
+                                    "message_send_failed",
+                                ))?;
+                            self.messages.record_outgoing(&username, &message).map_err(|error| {
+                                ConnectionFailure::retryable(
+                                    format!("The sent private message could not be saved: {error}"),
+                                    "message_store_failed",
+                                )
+                            })?;
                         }
                         Some(ConnectionCommand::InspectFolder { ticket }) => {
                             write_raw_frame(
@@ -2842,22 +2946,33 @@ async fn handle_peer_messages(
                 }
             }
             SHARED_FILE_LIST_REQUEST_CODE => {
-                let response =
-                    shared_file_list_response_frame(&services.local_shares.share_list())?;
+                let shares = if services.people.is_blocked(username) {
+                    Vec::new()
+                } else {
+                    services.local_shares.share_list()
+                };
+                let response = shared_file_list_response_frame(&shares)?;
                 write_raw_frame(stream, &response).await?;
             }
             FOLDER_CONTENTS_REQUEST_CODE => {
                 let (token, folder) = parse_folder_contents_request(&frame)?;
-                let response = folder_contents_response_frame(
-                    token,
-                    &folder,
-                    &services.local_shares.folder_list(&folder),
-                )?;
+                let folders = if services.people.is_blocked(username) {
+                    Vec::new()
+                } else {
+                    services.local_shares.folder_list(&folder)
+                };
+                let response = folder_contents_response_frame(token, &folder, &folders)?;
                 write_raw_frame(stream, &response).await?;
             }
             QUEUE_UPLOAD_CODE => {
                 let filename = parse_filename(&frame, QUEUE_UPLOAD_CODE)?;
-                if let Some(file) = services.local_shares.resolve_file(&filename) {
+                if services.people.is_blocked(username) {
+                    write_raw_frame(
+                        stream,
+                        &upload_denied_frame(&filename, "Banned by the sharing user."),
+                    )
+                    .await?;
+                } else if let Some(file) = services.local_shares.resolve_file(&filename) {
                     match services.uploads.enqueue(username, file) {
                         Ok(_) => {
                             let _ = services
@@ -2882,7 +2997,14 @@ async fn handle_peer_messages(
             }
             PLACE_IN_QUEUE_REQUEST_CODE => {
                 let filename = parse_filename(&frame, PLACE_IN_QUEUE_REQUEST_CODE)?;
-                if let Some(position) = services.uploads.queue_position(username, &filename) {
+                if services.people.is_blocked(username) {
+                    write_raw_frame(
+                        stream,
+                        &upload_denied_frame(&filename, "Banned by the sharing user."),
+                    )
+                    .await?;
+                } else if let Some(position) = services.uploads.queue_position(username, &filename)
+                {
                     write_raw_frame(stream, &place_in_queue_response_frame(&filename, position))
                         .await?;
                 } else {
@@ -2895,6 +3017,12 @@ async fn handle_peer_messages(
             }
             FILE_SEARCH_RESPONSE_CODE => {
                 let response = parse_search_response(&frame)?;
+                if services.people.is_ignored(&response.username) {
+                    if purpose == PeerMessagePurpose::General {
+                        return Ok(());
+                    }
+                    continue;
+                }
                 if services.people.observe(&response.username) {
                     let _ = services
                         .command_sender
@@ -3324,6 +3452,8 @@ pub enum ConnectionServiceError {
     Upload(#[from] UploadError),
     #[error("{0}")]
     People(#[from] PeopleError),
+    #[error("{0}")]
+    Messages(#[from] MessagesError),
     #[error("Add your Soulseek account before connecting.")]
     NotConfigured,
     #[error("Enter your Soulseek password.")]
@@ -3348,6 +3478,8 @@ pub enum ConnectionServiceError {
     InvalidPerson,
     #[error("The user did not answer the profile request in time.")]
     ProfileTimeout,
+    #[error("Connect to Soulseek before sending private messages.")]
+    MessagesUnavailable,
     #[error("{0}")]
     InvalidSearch(String),
     #[error("Could not initialize connection diagnostics: {0}")]

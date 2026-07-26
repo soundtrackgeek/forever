@@ -56,6 +56,7 @@ export type PersonProfile = {
   privileged: boolean;
   favorite: boolean;
   blocked: boolean;
+  ignored?: boolean;
   error: string | null;
   lastSeenAtMs: number | null;
   lastInteractionAtMs: number;
@@ -66,6 +67,31 @@ export type PeopleSnapshot = {
   users: PersonProfile[];
   favoriteCount: number;
   onlineFavoriteCount: number;
+  updatedAtMs: number;
+};
+
+export type MessageDirection = "incoming" | "outgoing";
+
+export type PrivateMessage = {
+  id: string;
+  serverId: number | null;
+  username: string;
+  body: string;
+  direction: MessageDirection;
+  sentAtMs: number;
+  unread: boolean;
+};
+
+export type PrivateConversation = {
+  username: string;
+  messages: PrivateMessage[];
+  unreadCount: number;
+  updatedAtMs: number;
+};
+
+export type MessagesSnapshot = {
+  conversations: PrivateConversation[];
+  unreadCount: number;
   updatedAtMs: number;
 };
 

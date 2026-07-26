@@ -17,6 +17,7 @@ type AppSidebarProps = {
   updateStatus: UpdateStatus;
   username: string | null;
   connectionState: ConnectionState;
+  unreadMessages: number;
   onNavigate: (view: string) => void;
   onCheckForUpdates: () => void;
 };
@@ -35,6 +36,7 @@ export function AppSidebar({
   updateStatus,
   username,
   connectionState,
+  unreadMessages,
   onNavigate,
   onCheckForUpdates,
 }: AppSidebarProps) {
@@ -77,6 +79,11 @@ export function AppSidebar({
             >
               <Icon size={21} weight={isActive ? "regular" : "light"} />
               <span>{item.label}</span>
+              {item.id === "people" && unreadMessages > 0 ? (
+                <b className="nav-unread" aria-label={`${unreadMessages} unread messages`}>
+                  {unreadMessages > 99 ? "99+" : unreadMessages}
+                </b>
+              ) : null}
             </button>
           );
         })}

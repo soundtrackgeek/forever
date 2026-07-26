@@ -16,6 +16,7 @@ pub const PEOPLE_EVENT: &str = "forever://people";
 const STORE_VERSION: u32 = 1;
 const MAX_FAVORITES: usize = 200;
 const MAX_BLOCKED: usize = 500;
+const MAX_IGNORED: usize = 500;
 const MAX_RECENT: usize = 40;
 const MAX_RUNTIME_PROFILES: usize = 256;
 const MAX_PENDING_PROFILES: usize = 8;
@@ -72,6 +73,7 @@ pub struct PersonProfile {
     pub privileged: bool,
     pub favorite: bool,
     pub blocked: bool,
+    pub ignored: bool,
     pub error: Option<String>,
     pub last_seen_at_ms: Option<u64>,
     pub last_interaction_at_ms: u64,
@@ -79,7 +81,13 @@ pub struct PersonProfile {
 }
 
 impl PersonProfile {
-    fn new(username: String, favorite: bool, blocked: bool, interacted_at_ms: u64) -> Self {
+    fn new(
+        username: String,
+        favorite: bool,
+        blocked: bool,
+        ignored: bool,
+        interacted_at_ms: u64,
+    ) -> Self {
         Self {
             username,
             status: PersonStatus::Unknown,
@@ -100,6 +108,7 @@ impl PersonProfile {
             privileged: false,
             favorite,
             blocked,
+            ignored,
             error: None,
             last_seen_at_ms: None,
             last_interaction_at_ms: interacted_at_ms,
@@ -136,6 +145,8 @@ struct PeopleStore {
     version: u32,
     favorites: Vec<String>,
     blocked: Vec<String>,
+    #[serde(default)]
+    ignored: Vec<String>,
     recent: Vec<RecentPerson>,
 }
 
@@ -145,6 +156,7 @@ impl Default for PeopleStore {
             version: STORE_VERSION,
             favorites: Vec::new(),
             blocked: Vec::new(),
+            ignored: Vec::new(),
             recent: Vec::new(),
         }
     }
@@ -261,9 +273,10 @@ impl PeopleHub {
         }
         let favorite = contains_username(&store.favorites, &username);
         let blocked = contains_username(&store.blocked, &username);
+        let ignored = contains_username(&store.ignored, &username);
         runtime.profiles.insert(
             key,
-            PersonProfile::new(username, favorite, blocked, timestamp_ms()),
+            PersonProfile::new(username, favorite, blocked, ignored, timestamp_ms()),
         );
         drop(runtime);
         drop(store);
@@ -379,6 +392,65 @@ impl PeopleHub {
         self.persist()?;
         self.publish();
         Ok(self.snapshot())
+    }
+
+    pub fn set_ignored(
+        &self,
+        username: &str,
+        ignored: bool,
+    ) -> Result<PeopleSnapshot, PeopleError> {
+        let username = valid_username(username).ok_or(PeopleError::InvalidUsername)?;
+        self.observe(&username);
+        {
+            let mut store = self
+                .store
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            store
+                .ignored
+                .retain(|value| !value.eq_ignore_ascii_case(&username));
+            if ignored {
+                if store.ignored.len() >= MAX_IGNORED {
+                    return Err(PeopleError::TooManyIgnored);
+                }
+                store.ignored.push(username.clone());
+            }
+        }
+        if let Some(profile) = self
+            .runtime
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .profiles
+            .get_mut(&person_key(&username))
+        {
+            profile.ignored = ignored;
+            profile.updated_at_ms = timestamp_ms();
+        }
+        self.persist()?;
+        self.publish();
+        Ok(self.snapshot())
+    }
+
+    pub fn is_ignored(&self, username: &str) -> bool {
+        contains_username(
+            &self
+                .store
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .ignored,
+            username,
+        )
+    }
+
+    pub fn is_blocked(&self, username: &str) -> bool {
+        contains_username(
+            &self
+                .store
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .blocked,
+            username,
+        )
     }
 
     pub fn start_profile(
@@ -674,6 +746,7 @@ fn ensure_saved_profiles(store: &PeopleStore, runtime: &mut PeopleRuntime) {
         .favorites
         .iter()
         .chain(store.blocked.iter())
+        .chain(store.ignored.iter())
         .chain(store.recent.iter().map(|recent| &recent.username))
     {
         let key = person_key(username);
@@ -695,6 +768,7 @@ fn ensure_saved_profiles(store: &PeopleStore, runtime: &mut PeopleRuntime) {
                 username.clone(),
                 contains_username(&store.favorites, username),
                 contains_username(&store.blocked, username),
+                contains_username(&store.ignored, username),
                 recent_at,
             ),
         );
@@ -776,6 +850,8 @@ pub enum PeopleError {
     TooManyFavorites,
     #[error("Forever supports up to {MAX_BLOCKED} blocked users.")]
     TooManyBlocked,
+    #[error("Forever supports up to {MAX_IGNORED} ignored users.")]
+    TooManyIgnored,
     #[error("Too many user profiles are loading at once.")]
     TooManyRequests,
     #[error("Connect to Soulseek before opening a live user profile.")]
@@ -822,6 +898,7 @@ mod tests {
                 .map(|index| format!("listener-{index}"))
                 .collect(),
             blocked: Vec::new(),
+            ignored: Vec::new(),
             recent: Vec::new(),
         };
         let mut runtime = PeopleRuntime::default();
@@ -829,5 +906,14 @@ mod tests {
         ensure_saved_profiles(&store, &mut runtime);
 
         assert_eq!(runtime.profiles.len(), MAX_RUNTIME_PROFILES);
+    }
+
+    #[test]
+    fn older_people_store_defaults_to_no_ignored_users() {
+        let store: PeopleStore =
+            serde_json::from_str(r#"{"version":1,"favorites":[],"blocked":[],"recent":[]}"#)
+                .unwrap();
+
+        assert!(store.ignored.is_empty());
     }
 }

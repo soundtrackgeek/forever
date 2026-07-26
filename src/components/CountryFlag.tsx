@@ -37,6 +37,22 @@ const loadFlag = (code: string) => {
   );
 };
 
+function FlagImage({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <GlobeHemisphereWest className="country-unknown" size={14} weight="light" aria-hidden="true" />;
+  }
+  return (
+    <img
+      className="country-flag"
+      src={url}
+      alt=""
+      aria-hidden="true"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export function CountryFlag({ code, showName = false, className = "" }: CountryFlagProps) {
   const normalized = code?.trim().toLowerCase();
   const [loaded, setLoaded] = useState<{ code: string; url: string } | null>(
@@ -65,7 +81,7 @@ export function CountryFlag({ code, showName = false, className = "" }: CountryF
   return (
     <span className={`country-identity ${className}`.trim()} aria-label={name} title={name}>
       {flagUrl ? (
-        <img className="country-flag" src={flagUrl} alt="" aria-hidden="true" />
+        <FlagImage key={flagUrl} url={flagUrl} />
       ) : (
         <GlobeHemisphereWest className="country-unknown" size={14} weight="light" aria-hidden="true" />
       )}
