@@ -5,6 +5,43 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.25] - 2026-07-26
+
+### Added
+
+- **Wanted Signals**, a persistent watchlist inside Archive for MusicBrainz
+  albums that are still missing from the read-only Music Library source.
+- Automatic serialized Soulseek checks every 15 minutes, 30 minutes, or hour,
+  plus a manual-only rhythm and per-album Check, Pause, Resume, and Remove
+  controls that stop cleanly while offline.
+- Availability summaries grouped by listener and remote folder, including
+  available and ready source counts, fullest returned folder count, best audio
+  format, album size, and fastest reported source.
+- Stable source-fingerprint comparison, clickable in-app alerts, and Windows
+  notifications when new sources appear, with direct handoff to a fresh grouped
+  album-source search.
+- **Watch** actions on missing MusicBrainz releases and active album-source
+  reports, persisted separately in Forever's own `wanted.json`.
+- Rust and frontend regression coverage for watchlist persistence, source
+  grouping, supported check rhythms, notification flow, and source comparison.
+
+### Changed
+
+- Archive now has separate **Library source** and **Wanted** views while the
+  external `music-library.sqlite3` database remains strictly read-only and
+  query-only.
+- Wanted checks use isolated search tokens and never replace or mix with the
+  visible Search workspace; selecting **Compare sources** remains explicit and
+  no wanted album is downloaded automatically.
+- Application, MusicBrainz User-Agent, and updater preview metadata now identify
+  version `0.0.25` and describe Wanted Signals.
+
+### Fixed
+
+- Album-source reports outside the currently open MusicBrainz catalog now say
+  **Archive not checked** instead of incorrectly reporting that the connected
+  Archive is unavailable.
+
 ## [0.0.24] - 2026-07-26
 
 ### Changed

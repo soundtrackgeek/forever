@@ -37,6 +37,7 @@ import { AlbumSourceResults } from "./AlbumSourceResults";
 import { ArchiveOwnershipBadge } from "./ArchiveOwnershipBadge";
 import { CountryFlag } from "./CountryFlag";
 import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
+import { WantedToggle } from "./WantedToggle";
 
 type Filter = "all" | "lossless" | "compressed";
 type Sort = "best" | "ready" | "fast" | "small";
@@ -49,6 +50,7 @@ type SearchWorkspaceProps = {
   archiveConnected: boolean;
   archiveLoading: boolean;
   archiveMatch?: ArchiveAlbumMatch;
+  wanted: boolean;
   query: string;
   results: SearchResult[];
   transfers: Transfer[];
@@ -68,6 +70,7 @@ type SearchWorkspaceProps = {
   onOpenPerson: (username: string) => void;
   onSearchModeChange: (mode: SearchMode) => void;
   onAlbumResultViewChange: (view: AlbumResultView) => void;
+  onToggleWanted: () => Promise<unknown>;
 };
 
 const losslessFormats = new Set(["FLAC", "ALAC", "WAV", "AIFF", "APE", "WV"]);
@@ -134,6 +137,7 @@ export function SearchWorkspace({
   archiveConnected,
   archiveLoading,
   archiveMatch,
+  wanted,
   query,
   results,
   transfers,
@@ -153,6 +157,7 @@ export function SearchWorkspace({
   onOpenPerson,
   onSearchModeChange,
   onAlbumResultViewChange,
+  onToggleWanted,
 }: SearchWorkspaceProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -437,11 +442,20 @@ export function SearchWorkspace({
             </h2>
             <p>{searchError ?? search.message}</p>
             {albumContext ? (
-              <ArchiveOwnershipBadge
-                match={archiveMatch}
-                archiveConnected={archiveConnected}
-                loading={archiveLoading}
-              />
+              <span className="album-search-statuses">
+                <ArchiveOwnershipBadge
+                  match={archiveMatch}
+                  archiveConnected={archiveConnected}
+                  loading={archiveLoading}
+                />
+                {archiveMatch?.ownership !== "owned" ? (
+                  <WantedToggle
+                    watched={wanted}
+                    albumTitle={albumContext.title}
+                    onToggle={onToggleWanted}
+                  />
+                ) : null}
+              </span>
             ) : null}
           </div>
           <dl>

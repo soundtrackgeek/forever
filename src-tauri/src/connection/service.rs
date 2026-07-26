@@ -51,6 +51,7 @@ use super::{
         UserSharesOverview,
     },
     uploads::{UploadError, UploadHub, UploadQueueSnapshot, UploadTicket},
+    wanted::{WantedAlbumRequest, WantedError, WantedHub, WantedSnapshot},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -336,6 +337,7 @@ enum ConnectionCommand {
 #[derive(Clone)]
 struct PeerServices {
     search: SearchHub,
+    wanted: WantedHub,
     folders: FolderHub,
     shares: SharesHub,
     people: PeopleHub,
@@ -371,6 +373,7 @@ pub struct ConnectionManager {
     next_folder_token: Arc<AtomicU32>,
     next_connection_token: Arc<AtomicU32>,
     search: SearchHub,
+    wanted: WantedHub,
     folders: FolderHub,
     shares: SharesHub,
     people: PeopleHub,
@@ -387,6 +390,7 @@ pub struct ConnectionPaths {
     pub sharing: PathBuf,
     pub people: PathBuf,
     pub messages: PathBuf,
+    pub wanted: PathBuf,
     pub diagnostics: PathBuf,
 }
 
@@ -410,6 +414,7 @@ impl ConnectionManager {
         let distributed = DistributedHub::new(app.clone());
         let people = PeopleHub::new(app.clone(), paths.people)?;
         let messages = MessagesHub::new(app.clone(), paths.messages)?;
+        let wanted = WantedHub::new(app.clone(), paths.wanted)?;
 
         Ok(Self {
             app,
@@ -429,6 +434,7 @@ impl ConnectionManager {
                 (timestamp_ms() as u32).wrapping_add(0x4000).max(1),
             )),
             search,
+            wanted,
             folders: FolderHub::default(),
             shares: SharesHub::default(),
             people,
@@ -559,6 +565,62 @@ impl ConnectionManager {
 
     pub fn current_search(&self) -> SearchSnapshot {
         self.search.current()
+    }
+
+    pub fn current_wanted(&self) -> WantedSnapshot {
+        self.wanted.snapshot()
+    }
+
+    pub fn add_wanted(
+        &self,
+        request: WantedAlbumRequest,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.add(request)?)
+    }
+
+    pub fn remove_wanted(&self, album_id: &str) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.remove(album_id)?)
+    }
+
+    pub fn set_wanted_paused(
+        &self,
+        album_id: &str,
+        paused: bool,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.set_paused(album_id, paused)?)
+    }
+
+    pub fn set_wanted_interval(
+        &self,
+        interval_minutes: u32,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.set_interval(interval_minutes)?)
+    }
+
+    pub fn check_wanted(&self, album_id: &str) -> Result<WantedSnapshot, ConnectionServiceError> {
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::WantedUnavailable);
+        }
+        let sender = self
+            .command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .ok_or(ConnectionServiceError::WantedUnavailable)?;
+        let mut token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
+        if token == 0 {
+            token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
+        }
+        let query = self.wanted.start_manual(album_id, token)?;
+        if sender
+            .send(ConnectionCommand::StartSearch { token, query })
+            .is_err()
+        {
+            self.wanted
+                .fail_active("The Soulseek connection changed before this check could start.");
+            return Err(ConnectionServiceError::WantedUnavailable);
+        }
+        Ok(self.wanted.snapshot())
     }
 
     pub fn current_transfers(&self) -> TransferQueueSnapshot {
@@ -1123,6 +1185,7 @@ impl ConnectionManager {
     ) -> PeerServices {
         PeerServices {
             search: self.search.clone(),
+            wanted: self.wanted.clone(),
             folders: self.folders.clone(),
             shares: self.shares.clone(),
             people: self.people.clone(),
@@ -1376,6 +1439,7 @@ impl ConnectionManager {
             self.local_shares.connection_lost();
             self.people.connection_lost();
             self.distributed.offline();
+            self.wanted.connection_lost();
             self.search
                 .fail("Search stopped because the Soulseek connection was interrupted.");
 
@@ -1580,9 +1644,11 @@ impl ConnectionManager {
 
         let mut keepalive = tokio::time::interval(KEEPALIVE_INTERVAL);
         let mut search_tick = tokio::time::interval(Duration::from_millis(250));
+        let mut wanted_tick = tokio::time::interval(Duration::from_secs(5));
         let peer_limit = Arc::new(Semaphore::new(MAX_CONCURRENT_PEERS));
         keepalive.tick().await;
         search_tick.tick().await;
+        wanted_tick.tick().await;
         loop {
             tokio::select! {
                 _ = keepalive.tick() => {
@@ -2166,6 +2232,21 @@ impl ConnectionManager {
                 }
                 _ = search_tick.tick() => {
                     self.search.expire_if_due();
+                    self.wanted.expire_if_due();
+                }
+                _ = wanted_tick.tick() => {
+                    let mut token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
+                    if token == 0 {
+                        token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
+                    }
+                    if let Some(query) = self.wanted.start_due(token) {
+                        write_raw_frame(&mut server_writer, &file_search_frame(token, &query))
+                            .await
+                            .map_err(|error| ConnectionFailure::retryable(
+                                format!("The Wanted check could not be sent: {error}"),
+                                "wanted_search_send_failed",
+                            ))?;
+                    }
                 }
             }
         }
@@ -2212,6 +2293,7 @@ impl ConnectionManager {
         self.local_shares.connection_lost();
         self.people.connection_lost();
         self.distributed.offline();
+        self.wanted.connection_lost();
         if let Some(active) = self
             .task
             .lock()
@@ -2700,6 +2782,7 @@ fn spawn_outbound_download_peer(
     tauri::async_runtime::spawn(async move {
         let PeerServices {
             search,
+            wanted,
             folders,
             shares,
             people,
@@ -2734,6 +2817,7 @@ fn spawn_outbound_download_peer(
             claimed.clone(),
             PeerServices {
                 search,
+                wanted,
                 folders,
                 shares,
                 people,
@@ -2773,6 +2857,7 @@ fn spawn_outbound_folder_peer(
     tauri::async_runtime::spawn(async move {
         let PeerServices {
             search,
+            wanted,
             folders,
             shares,
             people,
@@ -2807,6 +2892,7 @@ fn spawn_outbound_folder_peer(
             claimed.clone(),
             PeerServices {
                 search,
+                wanted,
                 folders: folders.clone(),
                 shares,
                 people,
@@ -3144,6 +3230,7 @@ async fn handle_peer_messages(
                             username: response.username.clone(),
                         });
                 }
+                services.wanted.record(&response);
                 services.search.record(response);
                 if purpose == PeerMessagePurpose::General {
                     return Ok(());
@@ -3568,12 +3655,16 @@ pub enum ConnectionServiceError {
     People(#[from] PeopleError),
     #[error("{0}")]
     Messages(#[from] MessagesError),
+    #[error("{0}")]
+    Wanted(#[from] WantedError),
     #[error("Add your Soulseek account before connecting.")]
     NotConfigured,
     #[error("Enter your Soulseek password.")]
     MissingPassword,
     #[error("Connect to Soulseek before starting a live search.")]
     SearchUnavailable,
+    #[error("Connect to Soulseek before checking a wanted album.")]
+    WantedUnavailable,
     #[error("Connect to Soulseek before browsing a source folder.")]
     FolderUnavailable,
     #[error("Choose a valid Soulseek source folder.")]

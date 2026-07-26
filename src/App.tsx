@@ -17,6 +17,7 @@ import { TransfersWorkspace } from "./components/TransfersWorkspace";
 import { UserSharesWorkspace } from "./components/UserSharesWorkspace";
 import { UpdateExperience } from "./components/UpdateExperience";
 import { WindowControls } from "./components/WindowControls";
+import { WantedAlert } from "./components/WantedAlert";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { useArchiveInventory } from "./hooks/useArchiveInventory";
 import { useAlbumDiscovery } from "./hooks/useAlbumDiscovery";
@@ -28,6 +29,7 @@ import { useSoulseekShares } from "./hooks/useSoulseekShares";
 import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
 import { useLocalSharing } from "./hooks/useLocalSharing";
 import { usePrivateMessages } from "./hooks/usePrivateMessages";
+import { useWantedAlbums } from "./hooks/useWantedAlbums";
 import type {
   AlbumReleaseGroup,
   AlbumSearchContext,
@@ -116,6 +118,7 @@ function App() {
   const albums = useAlbumDiscovery();
   const archiveAlbums = albums.catalog?.albums ?? emptyAlbumCatalog;
   const archive = useArchiveInventory(albums.selectedArtist?.name ?? null, archiveAlbums);
+  const wanted = useWantedAlbums();
   const connection = useSoulseekConnection();
   const search = useSoulseekSearch();
   const transfers = useSoulseekTransfers();
@@ -154,6 +157,17 @@ function App() {
       remoteFolder: inspection.requestedFolder,
       files: inspection.files,
     });
+  };
+
+  const openAlbumSources = (context: AlbumSearchContext) => {
+    const nextQuery = `${context.artist} ${context.title}`;
+    setQuery(nextQuery);
+    setSelectedResultId(null);
+    setAlbumContext(context);
+    setAlbumResultView("sources");
+    setSearchMode("files");
+    setActiveView("search");
+    void search.startSearch(nextQuery).catch(() => undefined);
   };
 
   const navigate = (view: string) => {
@@ -235,6 +249,7 @@ function App() {
                   ? archive.matchByAlbumId.get(albumContext.albumId)
                   : undefined
               }
+              wanted={Boolean(albumContext && wanted.byAlbumId.has(albumContext.albumId))}
               query={query}
               results={search.results}
               transfers={transfers.snapshot.transfers}
@@ -264,6 +279,20 @@ function App() {
               onOpenPerson={openPerson}
               onSearchModeChange={setSearchMode}
               onAlbumResultViewChange={setAlbumResultView}
+              onToggleWanted={() => {
+                if (!albumContext) return Promise.resolve();
+                if (wanted.byAlbumId.has(albumContext.albumId)) {
+                  return wanted.remove(albumContext.albumId);
+                }
+                return wanted.add(albumContext.artist, {
+                  id: albumContext.albumId,
+                  title: albumContext.title,
+                  firstReleaseDate: albumContext.firstReleaseDate,
+                  primaryType: "Album",
+                  secondaryTypes: [],
+                  coverArtUrl: albumContext.coverArtUrl,
+                });
+              }}
             />
             {isFileSearchView ? <ReleaseInspector
               result={selectedResult}
@@ -303,6 +332,7 @@ function App() {
             archiveConnected={Boolean(archive.status?.connected)}
             archiveLoading={archive.loading || archive.matching}
             archiveMatches={archive.matchByAlbumId}
+            wantedAlbums={wanted.byAlbumId}
             onQueryChange={albums.setQuery}
             onSearch={(artistQuery) => {
               void albums.searchArtists(artistQuery).catch(() => undefined);
@@ -311,20 +341,16 @@ function App() {
               void albums.selectArtist(artist).catch(() => undefined);
             }}
             onSearchModeChange={setSearchMode}
+            onAddWanted={wanted.add}
+            onRemoveWanted={wanted.remove}
             onSearchSoulseek={(artist, album) => {
-              const nextQuery = `${artist} ${album.title}`;
-              setQuery(nextQuery);
-              setSelectedResultId(null);
-              setAlbumContext({
+              openAlbumSources({
                 albumId: album.id,
                 artist,
                 title: album.title,
                 coverArtUrl: album.coverArtUrl,
                 firstReleaseDate: album.firstReleaseDate,
               });
-              setAlbumResultView("sources");
-              setSearchMode("files");
-              void search.startSearch(nextQuery).catch(() => undefined);
             }}
             onOpenConnection={() => setActiveView("settings")}
             onDismissError={albums.clearError}
@@ -334,7 +360,23 @@ function App() {
             status={archive.status}
             loading={archive.loading}
             error={archive.error}
+            wanted={wanted.snapshot}
+            wantedReady={wanted.ready}
+            wantedError={wanted.error}
+            online={connection.snapshot.state === "online"}
             onRefresh={archive.refresh}
+            onSetWantedInterval={wanted.setIntervalMinutes}
+            onCheckWanted={wanted.check}
+            onSetWantedPaused={wanted.setPaused}
+            onRemoveWanted={wanted.remove}
+            onOpenWanted={(album) => openAlbumSources({
+              albumId: album.albumId,
+              artist: album.artist,
+              title: album.title,
+              coverArtUrl: album.coverArtUrl ?? "",
+              firstReleaseDate: album.firstReleaseDate,
+            })}
+            onDismissWantedError={wanted.clearError}
           />
         ) : activeView === "messages" ? (
           <MessagesWorkspace
@@ -525,6 +567,25 @@ function App() {
       />
 
       <UpdateExperience {...updater} />
+
+      {wanted.alert ? (
+        <WantedAlert
+          album={wanted.alert}
+          onOpen={() => {
+            const album = wanted.alert;
+            if (!album) return;
+            wanted.dismissAlert();
+            openAlbumSources({
+              albumId: album.albumId,
+              artist: album.artist,
+              title: album.title,
+              coverArtUrl: album.coverArtUrl ?? "",
+              firstReleaseDate: album.firstReleaseDate,
+            });
+          }}
+          onDismiss={wanted.dismissAlert}
+        />
+      ) : null}
 
       {onboardingOpen && connection.ready && (
         <ConnectionOnboarding

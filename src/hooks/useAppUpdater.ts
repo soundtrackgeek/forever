@@ -30,18 +30,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.23",
-  version: "0.0.24",
-  body: `## What’s new in Forever 0.0.24
+  currentVersion: "0.0.24",
+  version: "0.0.25",
+  body: `## What’s new in Forever 0.0.25
+
+### Added
+
+- Wanted Signals turns missing MusicBrainz albums into a persistent watchlist inside Archive.
+- Forever checks wanted albums in the background and alerts you when new Soulseek folders appear.
+- Compare sources opens the familiar grouped album view without downloading automatically.
 
 ### Changed
 
-- The Signal Order handle now follows your Windows mouse from press through release and clearly marks the drop position.
-- Arrow up, Arrow down, and Home can reorder a release while its drag handle is focused.
-
-### Fixed
-
-- Dragging queued releases now works reliably in Tauri's Windows WebView.`,
+- The Music Library database remains strictly read-only; Wanted data is stored separately by Forever.`,
   date: "2026-07-26",
 };
 

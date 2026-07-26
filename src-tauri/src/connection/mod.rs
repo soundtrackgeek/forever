@@ -12,6 +12,7 @@ mod service;
 mod settings;
 mod shares;
 mod uploads;
+mod wanted;
 
 use search::SearchSnapshot;
 use service::{
@@ -39,11 +40,70 @@ pub fn initialize(app: &AppHandle) -> Result<ConnectionManager, String> {
             sharing: config_directory.join("sharing.json"),
             people: config_directory.join("people.json"),
             messages: config_directory.join("messages.json"),
+            wanted: config_directory.join("wanted.json"),
             diagnostics: config_directory.join("logs").join("connection.log"),
         },
         download_directory,
     )
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn wanted_snapshot(
+    manager: State<'_, ConnectionManager>,
+) -> Result<wanted::WantedSnapshot, String> {
+    Ok(manager.current_wanted())
+}
+
+#[tauri::command]
+pub async fn wanted_add(
+    manager: State<'_, ConnectionManager>,
+    request: wanted::WantedAlbumRequest,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .add_wanted(request)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn wanted_remove(
+    manager: State<'_, ConnectionManager>,
+    album_id: String,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .remove_wanted(&album_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn wanted_set_paused(
+    manager: State<'_, ConnectionManager>,
+    album_id: String,
+    paused: bool,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .set_wanted_paused(&album_id, paused)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn wanted_set_interval(
+    manager: State<'_, ConnectionManager>,
+    interval_minutes: u32,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .set_wanted_interval(interval_minutes)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn wanted_check(
+    manager: State<'_, ConnectionManager>,
+    album_id: String,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .check_wanted(&album_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

@@ -8,11 +8,12 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { useDeferredValue, useMemo, useState, type FormEvent } from "react";
-import type { AlbumArtist, AlbumCatalog, AlbumReleaseGroup, ConnectionSnapshot } from "../types";
+import type { AlbumArtist, AlbumCatalog, AlbumReleaseGroup, ConnectionSnapshot, WantedAlbum } from "../types";
 import type { ArchiveAlbumMatch } from "../types";
 import { ArchiveOwnershipBadge } from "./ArchiveOwnershipBadge";
 import { CountryFlag } from "./CountryFlag";
 import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
+import { WantedToggle } from "./WantedToggle";
 
 type AlbumFilter = "studio" | "live" | "compilation" | "ep" | "all";
 
@@ -28,11 +29,14 @@ type AlbumSearchWorkspaceProps = {
   archiveConnected: boolean;
   archiveLoading: boolean;
   archiveMatches: ReadonlyMap<string, ArchiveAlbumMatch>;
+  wantedAlbums: ReadonlyMap<string, WantedAlbum>;
   onQueryChange: (query: string) => void;
   onSearch: (query: string) => void;
   onSelectArtist: (artist: AlbumArtist) => void;
   onSearchModeChange: (mode: SearchMode) => void;
   onSearchSoulseek: (artist: string, album: AlbumReleaseGroup) => void;
+  onAddWanted: (artist: string, album: AlbumReleaseGroup) => Promise<unknown>;
+  onRemoveWanted: (albumId: string) => Promise<unknown>;
   onOpenConnection: () => void;
   onDismissError: () => void;
 };
@@ -96,11 +100,14 @@ export function AlbumSearchWorkspace({
   archiveConnected,
   archiveLoading,
   archiveMatches,
+  wantedAlbums,
   onQueryChange,
   onSearch,
   onSelectArtist,
   onSearchModeChange,
   onSearchSoulseek,
+  onAddWanted,
+  onRemoveWanted,
   onOpenConnection,
   onDismissError,
 }: AlbumSearchWorkspaceProps) {
@@ -248,15 +255,25 @@ export function AlbumSearchWorkspace({
                   </div>
                   <h3>{album.title}</h3>
                   <p>{[album.primaryType, ...album.secondaryTypes].filter(Boolean).join(" · ")}</p>
-                  <button
-                    type="button"
-                    disabled={!online}
-                    aria-label={`${online ? "Search Soulseek for" : "Connect before searching for"} ${album.title}`}
-                    title={online ? `Search Soulseek for ${album.title}` : "Connect to Soulseek first"}
-                    onClick={() => onSearchSoulseek(selectedArtist.name, album)}
-                  >
-                    <MusicNotesPlus size={15} /> {online ? "Search Soulseek" : "Connect to search"}
-                  </button>
+                  <div className="album-card-actions">
+                    <button
+                      type="button"
+                      disabled={!online}
+                      aria-label={`${online ? "Search Soulseek for" : "Connect before searching for"} ${album.title}`}
+                      title={online ? `Search Soulseek for ${album.title}` : "Connect to Soulseek first"}
+                      onClick={() => onSearchSoulseek(selectedArtist.name, album)}
+                    >
+                      <MusicNotesPlus size={15} /> {online ? "Search Soulseek" : "Connect to search"}
+                    </button>
+                    {archiveMatches.get(album.id)?.ownership !== "owned" ? (
+                      <WantedToggle
+                        compact
+                        watched={wantedAlbums.has(album.id)}
+                        albumTitle={album.title}
+                        onToggle={() => wantedAlbums.has(album.id) ? onRemoveWanted(album.id) : onAddWanted(selectedArtist.name, album)}
+                      />
+                    ) : null}
+                  </div>
                 </div>
               </article>
             )) : (

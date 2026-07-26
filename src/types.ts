@@ -52,6 +52,34 @@ export type AlbumSource = {
   representative: SearchResult;
 };
 
+export type WantedAlbum = {
+  albumId: string;
+  artist: string;
+  title: string;
+  firstReleaseDate: string;
+  coverArtUrl: string | null;
+  paused: boolean;
+  addedAtMs: number;
+  lastCheckedAtMs: number | null;
+  sourceCount: number;
+  readySourceCount: number;
+  completeSourceCount: number;
+  newSourceCount: number;
+  bestFormat: string | null;
+  bestTrackCount: number | null;
+  bestSizeBytes: number | null;
+  bestSpeedBytesPerSecond: number | null;
+  error: string | null;
+};
+
+export type WantedSnapshot = {
+  albums: WantedAlbum[];
+  intervalMinutes: 0 | 15 | 30 | 60;
+  activeAlbumId: string | null;
+  nextCheckAtMs: number | null;
+  updatedAtMs: number;
+};
+
 export type PersonStatus = "unknown" | "offline" | "away" | "online";
 
 export type ProfileState =

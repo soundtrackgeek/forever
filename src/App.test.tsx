@@ -217,10 +217,52 @@ describe("Forever shell", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Read-only by construction")).toBeInTheDocument();
     expect(
-      screen.getByText(/Nothing downloaded from Soulseek is added to Archive/),
+      screen.getByText(/completed download stays watched until Music Library reports it as owned/),
     ).toBeInTheDocument();
     expect(screen.getByText("72,366")).toBeInTheDocument();
     expect(screen.getByText("1,101,878")).toBeInTheDocument();
+  });
+
+  it("watches missing albums and opens newly available sources without changing Archive", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
+    const adrenalize = screen
+      .getByRole("heading", { name: "Adrenalize" })
+      .closest("article") as HTMLElement;
+    fireEvent.click(
+      within(adrenalize).getByRole("button", { name: "Add Adrenalize to Wanted" }),
+    );
+    expect(
+      within(adrenalize).getByRole("button", { name: "Remove Adrenalize from Wanted" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Wanted 4" }));
+    expect(screen.getByText("High ’n’ Dry")).toBeInTheDocument();
+    expect(screen.getByText("7 available")).toBeInTheDocument();
+
+    const rhythm = screen.getByRole("combobox", { name: "Check rhythm" });
+    fireEvent.change(rhythm, { target: { value: "15" } });
+    expect(rhythm).toHaveValue("15");
+    expect(screen.getByText(/Checks run every 15 minutes/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Waiting/ }));
+    const sonicHoliday = screen.getByText("A Sonic Holiday").closest("article") as HTMLElement;
+    fireEvent.click(within(sonicHoliday).getByRole("button", { name: "Check" }));
+    expect(within(sonicHoliday).getByText("Checking")).toBeInTheDocument();
+
+    expect(
+      await screen.findByText("3 sources now transmitting for Engine Alley.", {}, { timeout: 1_500 }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Compare sources" }));
+    expect(
+      screen.getByRole("heading", { name: "A Sonic Holiday — Engine Alley" }),
+    ).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Engine Alley A Sonic Holiday")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove A Sonic Holiday from Wanted" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("opens Browse as a dedicated workspace before requesting a user's shares", async () => {
@@ -542,16 +584,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.24 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.25 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "The Signal Order handle now follows your Windows mouse from press through release and clearly marks the drop position.",
+        "Wanted Signals turns missing MusicBrainz albums into a persistent watchlist inside Archive.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Arrow up, Arrow down, and Home can reorder a release while its drag handle is focused.",
+        "Forever checks wanted albums in the background and alerts you when new Soulseek folders appear.",
       ),
     ).toBeInTheDocument();
   });

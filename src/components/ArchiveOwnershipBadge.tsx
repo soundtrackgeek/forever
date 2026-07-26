@@ -21,8 +21,10 @@ export function ArchiveOwnershipBadge({
 }: ArchiveOwnershipBadgeProps) {
   const state = loading
     ? "loading"
-    : !archiveConnected || !match || match.ownership === "unknown"
+    : !archiveConnected
       ? "unknown"
+      : !match || match.ownership === "unknown"
+        ? "unchecked"
       : match.ownership;
   const detail =
     match?.ownership === "owned"
@@ -34,12 +36,12 @@ export function ArchiveOwnershipBadge({
           .filter(Boolean)
           .join(" · ")
       : undefined;
-  const classState = state === "notOwned" ? "not-owned" : state;
+  const classState = state === "notOwned" ? "not-owned" : state === "unchecked" ? "unknown" : state;
 
   return (
     <span
       className={`archive-ownership is-${classState} ${compact ? "is-compact" : ""}`}
-      title={detail || (state === "unknown" ? "Music Library Archive unavailable" : undefined)}
+      title={detail || (state === "unknown" ? "Music Library Archive unavailable" : state === "unchecked" ? "This album has not been matched against the current Archive catalog." : undefined)}
     >
       {state === "owned" ? (
         <CheckCircle size={13} weight="fill" />
@@ -56,7 +58,9 @@ export function ArchiveOwnershipBadge({
           ? "Don’t own"
           : state === "loading"
             ? "Checking Archive"
-            : "Archive unavailable"}
+            : state === "unchecked"
+              ? "Archive not checked"
+              : "Archive unavailable"}
     </span>
   );
 }

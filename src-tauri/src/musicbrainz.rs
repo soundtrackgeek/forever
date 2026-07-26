@@ -8,7 +8,7 @@ use tauri::State;
 use tokio::sync::{Mutex, RwLock};
 
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "Forever/0.0.24 (https://github.com/soundtrackgeek/soulseek_forever)";
+const USER_AGENT: &str = "Forever/0.0.25 (https://github.com/soundtrackgeek/soulseek_forever)";
 const REQUEST_INTERVAL: Duration = Duration::from_millis(1_050);
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const MAX_CATALOG_PAGES: usize = 3;

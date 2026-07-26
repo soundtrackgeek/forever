@@ -20,6 +20,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             archive::archive_status,
             archive::archive_match_albums,
+            connection::wanted_snapshot,
+            connection::wanted_add,
+            connection::wanted_remove,
+            connection::wanted_set_paused,
+            connection::wanted_set_interval,
+            connection::wanted_check,
             connection::connection_bootstrap,
             connection::connection_save_profile,
             connection::connection_connect,
