@@ -363,6 +363,17 @@ pub async fn transfer_cancel_release(
 }
 
 #[tauri::command]
+pub async fn transfer_reorder_release(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+    before_transfer_id: Option<String>,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .reorder_release(&release_id, before_transfer_id.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn transfer_clear_completed(
     manager: State<'_, ConnectionManager>,
 ) -> Result<downloads::TransferQueueSnapshot, String> {

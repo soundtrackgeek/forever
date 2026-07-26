@@ -128,6 +128,30 @@ const basename = (path: string) => {
   return segments[segments.length - 1] || path;
 };
 
+const normalizedFolder = (value: string) =>
+  value.replace(/\//g, "\\").replace(/\\+/g, "\\").replace(/^\\|\\$/g, "").toLocaleLowerCase();
+
+const remoteFolder = (remoteFilename: string) => {
+  const normalized = normalizedFolder(remoteFilename);
+  const separator = normalized.lastIndexOf("\\");
+  return separator >= 0 ? normalized.slice(0, separator) : "";
+};
+
+const reorderReleaseTransfers = (
+  transfers: Transfer[],
+  releaseId: string,
+  beforeTransferId: string | null,
+) => {
+  const moving = transfers.filter((transfer) => transfer.releaseId === releaseId);
+  if (moving.length === 0) return transfers;
+  const remaining = transfers.filter((transfer) => transfer.releaseId !== releaseId);
+  const insertion = beforeTransferId
+    ? remaining.findIndex((transfer) => transfer.id === beforeTransferId)
+    : -1;
+  const index = insertion >= 0 ? insertion : remaining.length;
+  return [...remaining.slice(0, index), ...moving, ...remaining.slice(index)];
+};
+
 export type EnqueueReleaseInput = {
   title: string;
   username: string;
@@ -312,6 +336,22 @@ export function useSoulseekTransfers() {
       setError(null);
       if (release.files.length === 0) {
         const message = "Choose at least one file before downloading the release.";
+        setError(message);
+        throw new Error(message);
+      }
+      const duplicate = groupTransfers(snapshot.transfers).some(
+        (group) =>
+          Boolean(group.releaseId) &&
+          group.status !== "completed" &&
+          group.username.toLocaleLowerCase() === release.username.toLocaleLowerCase() &&
+          group.transfers.some(
+            (transfer) =>
+              remoteFolder(transfer.remoteFilename) ===
+              normalizedFolder(release.remoteFolder),
+          ),
+      );
+      if (duplicate) {
+        const message = "That exact listener and folder are already in the release queue.";
         setError(message);
         throw new Error(message);
       }
@@ -580,6 +620,35 @@ export function useSoulseekTransfers() {
     [native],
   );
 
+  const reorderRelease = useCallback(
+    async (releaseId: string, beforeTransferId: string | null) => {
+      setError(null);
+      if (native) {
+        try {
+          const next = await invoke<TransferQueueSnapshot>(
+            "transfer_reorder_release",
+            { releaseId, beforeTransferId },
+          );
+          setSnapshot(next);
+          return;
+        } catch (cause) {
+          setError(errorMessage(cause));
+          throw cause;
+        }
+      }
+      setSnapshot((current) =>
+        withCount(
+          reorderReleaseTransfers(
+            current.transfers,
+            releaseId,
+            beforeTransferId,
+          ),
+        ),
+      );
+    },
+    [native],
+  );
+
   const clearCompleted = useCallback(async () => {
     setError(null);
     if (native) {
@@ -639,6 +708,7 @@ export function useSoulseekTransfers() {
       pauseRelease,
       resumeRelease,
       cancelRelease,
+      reorderRelease,
       clearCompleted,
       revealRelease,
       clearError: () => setError(null),
@@ -653,6 +723,7 @@ export function useSoulseekTransfers() {
       pause,
       pauseRelease,
       ready,
+      reorderRelease,
       resume,
       resumeRelease,
       reveal,

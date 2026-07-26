@@ -14,6 +14,7 @@ import type { AlbumSource, PersonProfile, Transfer } from "../types";
 import {
   albumDownloadStates,
   type AlbumDownloadState,
+  type AlbumDownloadStatus,
 } from "../utils/albumDownloadState";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { CountryFlag } from "./CountryFlag";
@@ -28,7 +29,7 @@ type AlbumSourceResultsProps = {
   onOpenPerson: (username: string) => void;
 };
 
-const downloadLabel: Record<AlbumDownloadState, string> = {
+const downloadLabel: Record<AlbumDownloadStatus, string> = {
   downloading: "Downloading",
   queued: "Queued",
   paused: "Paused",
@@ -36,7 +37,12 @@ const downloadLabel: Record<AlbumDownloadState, string> = {
   failed: "Needs attention",
 };
 
-function DownloadStateIcon({ state }: { state: AlbumDownloadState }) {
+const labelFor = (state: AlbumDownloadState) =>
+  state.status === "queued" && state.queuePosition
+    ? `Queued #${state.queuePosition}`
+    : downloadLabel[state.status];
+
+function DownloadStateIcon({ state }: { state: AlbumDownloadStatus }) {
   if (state === "downloading") {
     return <CircleNotch className="search-spinner" size={16} />;
   }
@@ -211,7 +217,7 @@ export function AlbumSourceResults({
               const queuedState = sourceDownloadStates.get(source.id);
               const downloadable = Boolean(source.representative.folder);
               const buttonLabel = queuedState
-                ? downloadLabel[queuedState]
+                ? labelFor(queuedState)
                 : preparing
                   ? "Preparing…"
                   : "Download album";
@@ -259,12 +265,12 @@ export function AlbumSourceResults({
                     </button>
                     <button
                       type="button"
-                      className={`album-source-download${queuedState ? ` is-${queuedState}` : ""}`}
+                      className={`album-source-download${queuedState ? ` is-${queuedState.status}` : ""}`}
                       disabled={!downloadable || preparingSourceId !== null || Boolean(queuedState)}
                       title={queuedState ? `${buttonLabel}. Manage this album in Transfers.` : downloadable ? "Inspect the folder and download every file" : "This result has no source folder"}
                       onClick={() => void queueAlbum(source)}
                     >
-                      {queuedState ? <DownloadStateIcon state={queuedState} /> : preparing ? <CircleNotch className="search-spinner" size={16} /> : <DownloadSimple size={16} weight="bold" />}
+                      {queuedState ? <DownloadStateIcon state={queuedState.status} /> : preparing ? <CircleNotch className="search-spinner" size={16} /> : <DownloadSimple size={16} weight="bold" />}
                       {buttonLabel}
                     </button>
                   </span>

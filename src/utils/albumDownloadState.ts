@@ -1,12 +1,17 @@
 import type { AlbumSource, Transfer } from "../types";
 import { groupTransfers, type TransferGroupStatus } from "./transfers";
 
-export type AlbumDownloadState =
+export type AlbumDownloadStatus =
   | "downloading"
   | "queued"
   | "paused"
   | "downloaded"
   | "failed";
+
+export type AlbumDownloadState = {
+  status: AlbumDownloadStatus;
+  queuePosition: number | null;
+};
 
 const normalizeRemoteFilename = (value: string) =>
   value
@@ -25,7 +30,7 @@ const remoteFolder = (remoteFilename: string) => {
   return separator >= 0 ? normalized.slice(0, separator) : "";
 };
 
-const downloadState = (status: TransferGroupStatus): AlbumDownloadState => {
+const downloadStatus = (status: TransferGroupStatus): AlbumDownloadStatus => {
   if (status === "active") return "downloading";
   if (status === "completed") return "downloaded";
   return status;
@@ -37,7 +42,7 @@ export function albumDownloadStates(
 ): Map<string, AlbumDownloadState> {
   const groupByFolder = new Map<
     string,
-    { createdAtMs: number; status: TransferGroupStatus }
+    { createdAtMs: number; state: AlbumDownloadState }
   >();
 
   for (const group of groupTransfers(transfers)) {
@@ -48,7 +53,10 @@ export function albumDownloadStates(
       if (!current || group.createdAtMs >= current.createdAtMs) {
         groupByFolder.set(key, {
           createdAtMs: group.createdAtMs,
-          status: group.status,
+          state: {
+            status: downloadStatus(group.status),
+            queuePosition: group.queuePosition,
+          },
         });
       }
     }
@@ -57,7 +65,7 @@ export function albumDownloadStates(
   const states = new Map<string, AlbumDownloadState>();
   for (const source of sources) {
     const group = groupByFolder.get(sourceKey(source.owner, source.folder));
-    if (group) states.set(source.id, downloadState(group.status));
+    if (group) states.set(source.id, group.state);
   }
 
   return states;

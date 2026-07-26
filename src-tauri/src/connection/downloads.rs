@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -227,29 +227,26 @@ impl TransferHub {
         download_directory: &Path,
     ) -> Result<TransferQueueSnapshot, TransferError> {
         validate_release_request(&request)?;
+        let mut transfers = self
+            .transfers
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if unfinished_release_uses_source(&transfers, &request) {
+            return Err(TransferError::DuplicateReleaseSource);
+        }
+        let existing = transfers.clone();
         fs::create_dir_all(download_directory)?;
 
         let now = timestamp_ms();
         let id_number = self.next_id.fetch_add(1, Ordering::SeqCst);
         let release_id = format!("release-{now}-{id_number}");
         let release_title = request.title.trim().to_owned();
-        let release_directory = unique_release_directory(
-            download_directory,
-            &release_title,
-            &self
-                .transfers
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
-        );
+        let release_directory =
+            unique_release_directory(download_directory, &release_title, &existing);
         fs::create_dir_all(&release_directory)?;
 
         let file_count = u32::try_from(request.files.len()).unwrap_or(u32::MAX);
         let mut release_transfers = Vec::with_capacity(request.files.len());
-        let existing = self
-            .transfers
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
         for (index, file) in request.files.into_iter().enumerate() {
             let local_path = unique_target_path(
                 &release_directory,
@@ -285,7 +282,9 @@ impl TransferHub {
                 transfer_token: None,
             });
         }
-        self.mutate(|transfers| transfers.extend(release_transfers))?;
+        transfers.extend(release_transfers);
+        drop(transfers);
+        self.persist_and_publish()?;
         Ok(self.snapshot())
     }
 
@@ -416,6 +415,22 @@ impl TransferHub {
             if transfer.status != TransferStatus::Completed {
                 schedule_partial_cleanup(partial_path(Path::new(&transfer.local_path)));
             }
+        }
+        self.persist_and_publish()?;
+        Ok(self.snapshot())
+    }
+
+    pub fn reorder_release(
+        &self,
+        release_id: &str,
+        before_transfer_id: Option<&str>,
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        {
+            let mut transfers = self
+                .transfers
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            reorder_queued_release(&mut transfers, release_id, before_transfer_id)?;
         }
         self.persist_and_publish()?;
         Ok(self.snapshot())
@@ -892,6 +907,94 @@ fn validate_release_request(request: &EnqueueReleaseRequest) -> Result<(), Trans
     Ok(())
 }
 
+fn unfinished_release_uses_source(
+    transfers: &[TransferSnapshot],
+    request: &EnqueueReleaseRequest,
+) -> bool {
+    let requested_folder = normalize_remote_folder(&request.remote_folder);
+    let unfinished_releases: HashSet<&str> = transfers
+        .iter()
+        .filter(|transfer| transfer.status != TransferStatus::Completed)
+        .filter_map(|transfer| transfer.release_id.as_deref())
+        .collect();
+
+    transfers.iter().any(|transfer| {
+        transfer
+            .release_id
+            .as_deref()
+            .is_some_and(|release_id| unfinished_releases.contains(release_id))
+            && transfer.username.eq_ignore_ascii_case(&request.username)
+            && remote_parent(&transfer.remote_filename).eq_ignore_ascii_case(&requested_folder)
+    })
+}
+
+fn reorder_queued_release(
+    transfers: &mut Vec<TransferSnapshot>,
+    release_id: &str,
+    before_transfer_id: Option<&str>,
+) -> Result<(), TransferError> {
+    let release: Vec<&TransferSnapshot> = transfers
+        .iter()
+        .filter(|transfer| transfer.release_id.as_deref() == Some(release_id))
+        .collect();
+    if release.is_empty() {
+        return Err(TransferError::ReleaseNotFound);
+    }
+    if release
+        .iter()
+        .any(|transfer| transfer.status.occupies_slot())
+        || !release
+            .iter()
+            .any(|transfer| transfer.status == TransferStatus::Queued)
+    {
+        return Err(TransferError::ReleaseNotQueued);
+    }
+    if before_transfer_id
+        .is_some_and(|target_id| release.iter().any(|transfer| transfer.id == target_id))
+    {
+        return Ok(());
+    }
+    if let Some(target_id) = before_transfer_id {
+        let target = transfers
+            .iter()
+            .find(|transfer| transfer.id == target_id)
+            .ok_or(TransferError::InvalidReleaseOrder)?;
+        if target.status != TransferStatus::Queued {
+            return Err(TransferError::InvalidReleaseOrder);
+        }
+        let target_release_id = target
+            .release_id
+            .as_deref()
+            .ok_or(TransferError::InvalidReleaseOrder)?;
+        if transfers.iter().any(|transfer| {
+            transfer.release_id.as_deref() == Some(target_release_id)
+                && transfer.status.occupies_slot()
+        }) {
+            return Err(TransferError::InvalidReleaseOrder);
+        }
+    }
+
+    let mut moving = Vec::new();
+    let mut remaining = Vec::with_capacity(transfers.len());
+    for transfer in std::mem::take(transfers) {
+        if transfer.release_id.as_deref() == Some(release_id) {
+            moving.push(transfer);
+        } else {
+            remaining.push(transfer);
+        }
+    }
+    let insertion = before_transfer_id
+        .and_then(|target_id| {
+            remaining
+                .iter()
+                .position(|transfer| transfer.id == target_id)
+        })
+        .unwrap_or(remaining.len());
+    remaining.splice(insertion..insertion, moving);
+    *transfers = remaining;
+    Ok(())
+}
+
 fn reset_runtime_state(transfer: &mut TransferSnapshot) {
     transfer.speed_bytes_per_second = 0;
     transfer.eta_seconds = None;
@@ -999,6 +1102,21 @@ fn normalize_remote_filename(value: &str) -> String {
     value.replace('/', "\\")
 }
 
+fn normalize_remote_folder(value: &str) -> String {
+    normalize_remote_filename(value)
+        .trim_matches('\\')
+        .trim_end_matches('\\')
+        .to_owned()
+}
+
+fn remote_parent(remote_filename: &str) -> String {
+    let normalized = normalize_remote_filename(remote_filename);
+    normalized
+        .rsplit_once('\\')
+        .map(|(folder, _)| normalize_remote_folder(folder))
+        .unwrap_or_default()
+}
+
 fn safe_basename(remote_filename: &str) -> String {
     let normalized = normalize_remote_filename(remote_filename);
     let raw = normalized
@@ -1078,6 +1196,12 @@ pub enum TransferError {
     NotFound,
     #[error("That release is no longer in the queue.")]
     ReleaseNotFound,
+    #[error("That exact listener and folder are already in the release queue.")]
+    DuplicateReleaseSource,
+    #[error("Only a queued release can be reordered.")]
+    ReleaseNotQueued,
+    #[error("That release cannot be moved to the requested queue position.")]
+    InvalidReleaseOrder,
     #[error("Choose at least one valid file before downloading the release.")]
     InvalidReleaseRequest,
     #[error("The incoming Soulseek file connection did not match the active download.")]
@@ -1097,6 +1221,39 @@ pub enum TransferError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn release_transfer(
+        id: &str,
+        release_id: &str,
+        username: &str,
+        remote_filename: &str,
+        status: TransferStatus,
+        file_index: u32,
+    ) -> TransferSnapshot {
+        TransferSnapshot {
+            id: id.to_owned(),
+            release_id: Some(release_id.to_owned()),
+            release_title: Some(release_id.to_owned()),
+            release_folder: Some(format!("C:\\Downloads\\{release_id}")),
+            file_index: Some(file_index),
+            file_count: Some(2),
+            title: remote_filename.to_owned(),
+            username: username.to_owned(),
+            remote_filename: remote_filename.to_owned(),
+            size_bytes: 100,
+            transferred_bytes: 0,
+            speed_bytes_per_second: 0,
+            eta_seconds: None,
+            status,
+            queue_position: None,
+            local_path: format!("C:\\Downloads\\{release_id}\\{id}.flac"),
+            error: None,
+            created_at_ms: u64::from(file_index),
+            updated_at_ms: u64::from(file_index),
+            connection_token: None,
+            transfer_token: None,
+        }
+    }
 
     #[test]
     fn remote_paths_are_reduced_to_safe_local_filenames() {
@@ -1208,5 +1365,159 @@ mod tests {
             unique_release_directory(directory.path(), &request.title, &[]),
             directory.path().join("Night_ Geometry (2)")
         );
+    }
+
+    #[test]
+    fn exact_unfinished_release_sources_are_not_queued_twice() {
+        let request = EnqueueReleaseRequest {
+            title: "Hysteria".to_owned(),
+            username: "listener".to_owned(),
+            remote_folder: "Music/Hysteria".to_owned(),
+            files: vec![EnqueueReleaseFileRequest {
+                title: "01 - Women.flac".to_owned(),
+                remote_filename: "Music\\Hysteria\\01 - Women.flac".to_owned(),
+                size_bytes: 100,
+            }],
+        };
+        let queued = release_transfer(
+            "queued",
+            "release-one",
+            "Listener",
+            "Music\\Hysteria\\01 - Women.flac",
+            TransferStatus::Queued,
+            1,
+        );
+        assert!(unfinished_release_uses_source(
+            std::slice::from_ref(&queued),
+            &request,
+        ));
+
+        let mut completed = queued;
+        completed.status = TransferStatus::Completed;
+        assert!(!unfinished_release_uses_source(&[completed], &request));
+
+        let other_user = EnqueueReleaseRequest {
+            username: "another-listener".to_owned(),
+            ..request
+        };
+        assert!(!unfinished_release_uses_source(
+            &[release_transfer(
+                "queued",
+                "release-one",
+                "listener",
+                "Music\\Hysteria\\01 - Women.flac",
+                TransferStatus::Queued,
+                1,
+            )],
+            &other_user,
+        ));
+    }
+
+    #[test]
+    fn queued_releases_move_as_persistable_file_order_blocks() {
+        let mut transfers = vec![
+            release_transfer(
+                "one-a",
+                "release-one",
+                "one",
+                "Music\\One\\01.flac",
+                TransferStatus::Queued,
+                1,
+            ),
+            release_transfer(
+                "one-b",
+                "release-one",
+                "one",
+                "Music\\One\\02.flac",
+                TransferStatus::Queued,
+                2,
+            ),
+            release_transfer(
+                "two-a",
+                "release-two",
+                "two",
+                "Music\\Two\\01.flac",
+                TransferStatus::Queued,
+                1,
+            ),
+            release_transfer(
+                "three-a",
+                "release-three",
+                "three",
+                "Music\\Three\\01.flac",
+                TransferStatus::Queued,
+                1,
+            ),
+        ];
+
+        reorder_queued_release(&mut transfers, "release-three", Some("two-a")).unwrap();
+        assert_eq!(
+            transfers
+                .iter()
+                .map(|transfer| transfer.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["one-a", "one-b", "three-a", "two-a"]
+        );
+
+        reorder_queued_release(&mut transfers, "release-one", None).unwrap();
+        assert_eq!(
+            transfers
+                .iter()
+                .map(|transfer| transfer.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["three-a", "two-a", "one-a", "one-b"]
+        );
+    }
+
+    #[test]
+    fn active_releases_cannot_be_reordered() {
+        let mut transfers = vec![release_transfer(
+            "active",
+            "release-active",
+            "listener",
+            "Music\\Active\\01.flac",
+            TransferStatus::Downloading,
+            1,
+        )];
+
+        assert!(matches!(
+            reorder_queued_release(&mut transfers, "release-active", None),
+            Err(TransferError::ReleaseNotQueued)
+        ));
+    }
+
+    #[test]
+    fn queued_release_cannot_be_inserted_inside_an_active_release() {
+        let mut transfers = vec![
+            release_transfer(
+                "active-current",
+                "release-active",
+                "active-listener",
+                "Music\\Active\\01.flac",
+                TransferStatus::Downloading,
+                1,
+            ),
+            release_transfer(
+                "active-next",
+                "release-active",
+                "active-listener",
+                "Music\\Active\\02.flac",
+                TransferStatus::Queued,
+                2,
+            ),
+            release_transfer(
+                "queued",
+                "release-queued",
+                "queued-listener",
+                "Music\\Queued\\01.flac",
+                TransferStatus::Queued,
+                1,
+            ),
+        ];
+
+        assert!(matches!(
+            reorder_queued_release(&mut transfers, "release-queued", Some("active-next")),
+            Err(TransferError::InvalidReleaseOrder)
+        ));
     }
 }

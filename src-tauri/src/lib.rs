@@ -39,6 +39,7 @@ pub fn run() {
             connection::transfer_pause_release,
             connection::transfer_resume_release,
             connection::transfer_cancel_release,
+            connection::transfer_reorder_release,
             connection::transfer_clear_completed,
             connection::transfer_reveal_release_path,
             connection::folder_inspect,

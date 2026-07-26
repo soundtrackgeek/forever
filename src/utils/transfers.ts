@@ -19,8 +19,18 @@ export type TransferGroup = {
   speedBytesPerSecond: number;
   etaSeconds: number | null;
   status: TransferGroupStatus;
+  queueIndex: number;
+  queuePosition: number | null;
   createdAtMs: number;
   updatedAtMs: number;
+};
+
+export type TransferQueueSummary = {
+  releaseCount: number;
+  fileCount: number;
+  remainingBytes: number;
+  speedBytesPerSecond: number;
+  etaSeconds: number | null;
 };
 
 const activeStatuses = [
@@ -51,15 +61,20 @@ const statusFor = (transfers: Transfer[]): TransferGroupStatus => {
 };
 
 export const groupTransfers = (transfers: Transfer[]): TransferGroup[] => {
-  const grouped = new Map<string, Transfer[]>();
-  for (const transfer of transfers) {
+  const grouped = new Map<
+    string,
+    { transfers: Transfer[]; queueIndex: number }
+  >();
+  for (const [index, transfer] of transfers.entries()) {
     const key = transfer.releaseId ?? `single:${transfer.id}`;
-    grouped.set(key, [...(grouped.get(key) ?? []), transfer]);
+    const existing = grouped.get(key);
+    if (existing) existing.transfers.push(transfer);
+    else grouped.set(key, { transfers: [transfer], queueIndex: index });
   }
 
-  return [...grouped.entries()]
+  const groups = [...grouped.entries()]
     .map(([id, group]) => {
-      const ordered = [...group].sort(
+      const ordered = [...group.transfers].sort(
         (left, right) =>
           (left.fileIndex ?? Number.MAX_SAFE_INTEGER) -
             (right.fileIndex ?? Number.MAX_SAFE_INTEGER) ||
@@ -95,6 +110,8 @@ export const groupTransfers = (transfers: Transfer[]): TransferGroup[] => {
             ? Math.ceil(remainingBytes / speedBytesPerSecond)
             : null,
         status: statusFor(ordered),
+        queueIndex: group.queueIndex,
+        queuePosition: null,
         createdAtMs: Math.min(...ordered.map((transfer) => transfer.createdAtMs)),
         updatedAtMs: Math.max(...ordered.map((transfer) => transfer.updatedAtMs)),
       } satisfies TransferGroup;
@@ -104,6 +121,45 @@ export const groupTransfers = (transfers: Transfer[]): TransferGroup[] => {
       const difference = priority[left.status] - priority[right.status];
       return difference || (left.status === "completed"
         ? right.updatedAtMs - left.updatedAtMs
-        : left.createdAtMs - right.createdAtMs);
+        : left.queueIndex - right.queueIndex);
     });
+
+  let queuedPosition = 0;
+  return groups.map((group) => ({
+    ...group,
+    queuePosition:
+      group.status === "queued" ? (queuedPosition += 1) : null,
+  }));
+};
+
+export const summarizeTransferGroups = (
+  groups: TransferGroup[],
+): TransferQueueSummary => {
+  const pending = groups.filter(
+    (group) => group.status === "active" || group.status === "queued",
+  );
+  let fileCount = 0;
+  let remainingBytes = 0;
+  let speedBytesPerSecond = 0;
+  for (const group of pending) {
+    speedBytesPerSecond += group.speedBytesPerSecond;
+    for (const transfer of group.transfers) {
+      if (transfer.status === "completed") continue;
+      fileCount += 1;
+      remainingBytes += Math.max(
+        0,
+        transfer.sizeBytes - transfer.transferredBytes,
+      );
+    }
+  }
+  return {
+    releaseCount: pending.length,
+    fileCount,
+    remainingBytes,
+    speedBytesPerSecond,
+    etaSeconds:
+      speedBytesPerSecond > 0
+        ? Math.ceil(remainingBytes / speedBytesPerSecond)
+        : null,
+  };
 };

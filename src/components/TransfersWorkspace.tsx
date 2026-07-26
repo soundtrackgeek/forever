@@ -1,8 +1,11 @@
 import {
+  ArrowLineUp,
   ArrowClockwise,
+  CaretUp,
   CaretDown,
   CheckCircle,
   DownloadSimple,
+  DotsSixVertical,
   FolderOpen,
   MagnifyingGlass,
   Pause,
@@ -12,9 +15,13 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 import type { PersonProfile, Transfer, Upload } from "../types";
-import { groupTransfers, type TransferGroup } from "../utils/transfers";
+import {
+  groupTransfers,
+  summarizeTransferGroups,
+  type TransferGroup,
+} from "../utils/transfers";
 import { CountryFlag } from "./CountryFlag";
 
 type Filter = "all" | "active" | "queued" | "completed" | "failed";
@@ -32,6 +39,7 @@ type TransfersWorkspaceProps = {
   onResumeRelease: (id: string) => void;
   onCancelRelease: (id: string) => void;
   onRevealRelease: (id: string) => void;
+  onReorderRelease: (id: string, beforeTransferId: string | null) => void;
   onClearCompleted: () => void;
   onDismissError: () => void;
   personByUsername: (username: string) => PersonProfile | null;
@@ -92,6 +100,7 @@ export function TransfersWorkspace({
   onResumeRelease,
   onCancelRelease,
   onRevealRelease,
+  onReorderRelease,
   onClearCompleted,
   onDismissError,
   personByUsername,
@@ -104,12 +113,21 @@ export function TransfersWorkspace({
   const groups = useMemo(() => groupTransfers(transfers), [transfers]);
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
+  const [draggedReleaseId, setDraggedReleaseId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    id: string;
+    placement: "before" | "after";
+  } | null>(null);
   const [expansion, setExpansion] = useState<{
     touched: boolean;
     ids: Set<string>;
   }>({ touched: false, ids: new Set() });
   const defaultOpenId =
     groups.find((group) => group.status === "active")?.id ?? groups[0]?.id;
+  const queueSummary = useMemo(() => summarizeTransferGroups(groups), [groups]);
+  const queuedGroups = groups.filter(
+    (group) => group.status === "queued" && group.releaseId,
+  );
 
   const counts = {
     all: groups.length,
@@ -139,6 +157,43 @@ export function TransfersWorkspace({
     else group.transfers.forEach((transfer) => fileAction(transfer.id));
   };
 
+  const queuedTransferId = (group: TransferGroup | undefined) =>
+    group?.transfers.find((transfer) => transfer.status === "queued")?.id ?? null;
+
+  const moveQueuedRelease = (
+    group: TransferGroup,
+    direction: "next" | "up" | "down",
+  ) => {
+    if (!group.releaseId) return;
+    const index = queuedGroups.findIndex((candidate) => candidate.id === group.id);
+    if (index < 0) return;
+
+    if (direction === "next" || direction === "up") {
+      const target = direction === "next" ? queuedGroups[0] : queuedGroups[index - 1];
+      const beforeTransferId = queuedTransferId(target);
+      if (beforeTransferId) onReorderRelease(group.releaseId, beforeTransferId);
+      return;
+    }
+
+    const beforeTransferId = queuedTransferId(queuedGroups[index + 2]);
+    onReorderRelease(group.releaseId, beforeTransferId);
+  };
+
+  const finishDrop = (
+    sourceReleaseId: string,
+    target: TransferGroup,
+    placement: "before" | "after",
+  ) => {
+    if (sourceReleaseId === target.releaseId) return;
+    const remaining = queuedGroups.filter(
+      (candidate) => candidate.releaseId !== sourceReleaseId,
+    );
+    const targetIndex = remaining.findIndex((candidate) => candidate.id === target.id);
+    if (targetIndex < 0) return;
+    const beforeGroup = remaining[targetIndex + (placement === "after" ? 1 : 0)];
+    onReorderRelease(sourceReleaseId, queuedTransferId(beforeGroup));
+  };
+
   return (
     <section className="transfers-workspace">
       <header className="transfers-heading">
@@ -165,6 +220,28 @@ export function TransfersWorkspace({
           <UploadSimple size={15} /> Uploads <span>{uploads.length}</span>
         </button>
       </div>
+
+      {direction === "downloads" ? (
+        <section className="transfer-queue-overview" aria-label="Download queue summary">
+          <span className="transfer-queue-signal"><DownloadSimple size={18} weight="light" /></span>
+          <span className="transfer-queue-overview-copy">
+            <small>Signal order</small>
+            <strong>
+              {queueSummary.releaseCount
+                ? `${queueSummary.releaseCount} ${queueSummary.releaseCount === 1 ? "release" : "releases"} · ${queueSummary.fileCount} ${queueSummary.fileCount === 1 ? "file" : "files"}`
+                : "Queue clear"}
+            </strong>
+          </span>
+          <span>
+            <small>Remaining</small>
+            <strong>{formatBytes(queueSummary.remainingBytes)}</strong>
+          </span>
+          <span>
+            <small>Total queue ETA</small>
+            <strong>{queueSummary.etaSeconds === null ? "Waiting for speed" : formatEta(queueSummary.etaSeconds)}</strong>
+          </span>
+        </section>
+      ) : null}
 
       {direction === "downloads" ? <div className="transfer-filters">
         <div role="tablist" aria-label="Transfer filters">
@@ -247,7 +324,7 @@ export function TransfersWorkspace({
         ) : visibleGroups.length === 0 ? (
           <div className="transfers-empty-state">
             <DownloadSimple size={30} weight="thin" />
-            <h2>{groups.length ? "Nothing in this signal" : "Your queue is quiet"}</h2>
+            <h2>{groups.length ? "Nothing in this signal" : "Signal order is clear"}</h2>
             <p>{groups.length ? "Try another filter or search term." : "Browse a source folder from Search to download a release."}</p>
           </div>
         ) : visibleGroups.map((group) => {
@@ -261,7 +338,31 @@ export function TransfersWorkspace({
           const completed = group.status === "completed";
           const knownArt = group.title.toLocaleLowerCase().includes("night geometry");
           return (
-            <article className={`release-transfer-card is-${group.status}`} key={group.id}>
+            <article
+              className={`release-transfer-card is-${group.status}${dropTarget?.id === group.id ? ` is-drop-${dropTarget.placement}` : ""}`}
+              key={group.id}
+              onDragOver={group.status === "queued" && group.releaseId ? (event) => {
+                if (!draggedReleaseId || draggedReleaseId === group.releaseId) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                const bounds = event.currentTarget.getBoundingClientRect();
+                setDropTarget({
+                  id: group.id,
+                  placement: event.clientY < bounds.top + bounds.height / 2 ? "before" : "after",
+                });
+              } : undefined}
+              onDrop={group.status === "queued" && group.releaseId ? (event) => {
+                event.preventDefault();
+                const sourceReleaseId = event.dataTransfer.getData("text/plain") || draggedReleaseId;
+                if (sourceReleaseId) {
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const placement = event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+                  finishDrop(sourceReleaseId, group, placement);
+                }
+                setDraggedReleaseId(null);
+                setDropTarget(null);
+              } : undefined}
+            >
               <div className="release-transfer-summary">
                 {knownArt ? (
                   <img src="/assets/night-geometry-cover.png" alt="" />
@@ -282,12 +383,62 @@ export function TransfersWorkspace({
                     <i aria-label="Online" />
                   </small>
                   <small>{group.transfers.length} {group.transfers.length === 1 ? "file" : "files"} · {formatBytes(group.sizeBytes)}</small>
+                  {group.status === "queued" && group.releaseId ? (
+                    <span className="release-queue-order">
+                      <b>Queue #{group.queuePosition}</b>
+                      <button
+                        type="button"
+                        className="release-drag-handle"
+                        draggable
+                        aria-label={`Drag ${group.title} to reorder`}
+                        title="Drag to reorder"
+                        onDragStart={(event: DragEvent<HTMLButtonElement>) => {
+                          setDraggedReleaseId(group.releaseId);
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", group.releaseId ?? "");
+                        }}
+                        onDragEnd={() => {
+                          setDraggedReleaseId(null);
+                          setDropTarget(null);
+                        }}
+                      >
+                        <DotsSixVertical size={15} weight="bold" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={group.queuePosition === 1}
+                        aria-label={`Download ${group.title} next`}
+                        title="Download next"
+                        onClick={() => moveQueuedRelease(group, "next")}
+                      >
+                        <ArrowLineUp size={14} weight="bold" /><small>Next</small>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={group.queuePosition === 1}
+                        aria-label={`Move ${group.title} up`}
+                        title="Move up"
+                        onClick={() => moveQueuedRelease(group, "up")}
+                      >
+                        <CaretUp size={13} weight="bold" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={group.queuePosition === queuedGroups.length}
+                        aria-label={`Move ${group.title} down`}
+                        title="Move down"
+                        onClick={() => moveQueuedRelease(group, "down")}
+                      >
+                        <CaretDown size={13} weight="bold" />
+                      </button>
+                    </span>
+                  ) : null}
                 </span>
                 <span className="release-transfer-total">
                   <strong>{completed ? "Completed" : `${formatBytes(group.transferredBytes)} / ${formatBytes(group.sizeBytes)} (${Math.round(progress)}%)`}</strong>
                   <i><b style={{ width: `${progress}%` }} /></i>
                   <small>
-                    {group.status === "active" ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : group.status === "queued" ? "Waiting for slot…" : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : "Ready in your download folder"}
+                    {group.status === "active" ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : group.status === "queued" ? `Queue #${group.queuePosition} · Waiting for slot…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : "Ready in your download folder"}
                   </small>
                 </span>
                 <span className="release-transfer-actions">

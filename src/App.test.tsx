@@ -192,7 +192,7 @@ describe("Forever shell", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Download album" })[0]);
     const queued = await screen.findByRole(
       "button",
-      { name: "Queued" },
+      { name: "Queued #1" },
       { timeout: 1_500 },
     );
     expect(queued).toHaveClass("is-queued");
@@ -263,6 +263,14 @@ describe("Forever shell", () => {
 
     fireEvent.click(
       screen.getByRole("button", { name: "Resume Night Geometry" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Cancel Night Geometry" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Cancel Night Geometry" }),
+      ).not.toBeInTheDocument(),
     );
     fireEvent.click(screen.getByRole("button", { name: "Browse folder" }));
 
@@ -534,16 +542,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.22 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.23 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Album rows now show live Downloading and Queued states while you keep choosing more sources.",
+        "Signal Order controls let you drag queued albums, move them up or down, or choose Download next.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "MusicBrainz-guided downloads use Artist - Album (Year) for their destination folder when the metadata is available.",
+        "Queue order persists across restarts and Search labels queued album sources as Queued #1, Queued #2, and onward.",
       ),
     ).toBeInTheDocument();
   });

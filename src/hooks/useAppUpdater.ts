@@ -30,23 +30,22 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.21",
-  version: "0.0.22",
-  body: `## What’s new in Forever 0.0.22
+  currentVersion: "0.0.22",
+  version: "0.0.23",
+  body: `## What’s new in Forever 0.0.23
 
 ### Added
 
-- Album rows now show live Downloading and Queued states while you keep choosing more sources.
-- Release headers show an Album ETA based on every remaining file, not only the current track.
+- Signal Order controls let you drag queued albums, move them up or down, or choose Download next.
+- Transfers now summarizes unfinished releases, files, remaining size, and total queue ETA.
 
 ### Changed
 
-- Download album keeps you in Search instead of opening Transfers automatically.
-- MusicBrainz-guided downloads use Artist - Album (Year) for their destination folder when the metadata is available.
+- Queue order persists across restarts and Search labels queued album sources as Queued #1, Queued #2, and onward.
 
 ### Fixed
 
-- Queue status buttons stay synchronized with the real release transfer state.`,
+- Forever prevents the exact same listener and remote folder from being queued twice while its earlier release remains unfinished.`,
   date: "2026-07-26",
 };
 

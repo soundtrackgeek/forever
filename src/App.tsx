@@ -454,6 +454,7 @@ function App() {
             onResumeRelease={(id) => void transfers.resumeRelease(id).catch(() => undefined)}
             onCancelRelease={(id) => void transfers.cancelRelease(id).catch(() => undefined)}
             onRevealRelease={(id) => void transfers.revealRelease(id).catch(() => undefined)}
+            onReorderRelease={(id, beforeTransferId) => void transfers.reorderRelease(id, beforeTransferId).catch(() => undefined)}
             onClearCompleted={() => void transfers.clearCompleted().catch(() => undefined)}
             onDismissError={transfers.clearError}
             personByUsername={people.personByUsername}

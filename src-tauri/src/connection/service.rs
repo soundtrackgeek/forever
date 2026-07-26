@@ -929,6 +929,18 @@ impl ConnectionManager {
         Ok(snapshot)
     }
 
+    pub fn reorder_release(
+        &self,
+        release_id: &str,
+        before_transfer_id: Option<&str>,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        let snapshot = self
+            .transfers
+            .reorder_release(release_id, before_transfer_id)?;
+        self.schedule_downloads();
+        Ok(snapshot)
+    }
+
     pub fn clear_completed_transfers(
         &self,
     ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {

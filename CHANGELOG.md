@@ -5,6 +5,36 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.23] - 2026-07-26
+
+### Added
+
+- A persistent **Signal Order** in Transfers with drag handles, accessible Move
+  up/Move down controls, and a one-click **Download next** action for queued
+  releases.
+- A queue-wide overview showing unfinished releases, remaining files and bytes,
+  plus a total ETA calculated from the current active download rate.
+- Native and frontend regression coverage for release-block reordering, queue
+  numbering, summary calculations, and exact-source duplicate detection.
+
+### Changed
+
+- Queued releases now follow their stored `transfers.json` order across app
+  restarts, while keeping every album's files together and internally ordered.
+- Album-source actions in Search show live **Queued #1**, **Queued #2**, and
+  onward, updating immediately after reorder, cancel, pause, completion, or
+  failure changes.
+- The compact transfer drawer mirrors numbered queue positions, and empty queue
+  language now makes the completed/clear state explicit.
+- Application, MusicBrainz User-Agent, and updater preview metadata now
+  identify version `0.0.23` and describe Signal Order.
+
+### Fixed
+
+- Forever now rejects an exact duplicate listener-and-folder release while an
+  earlier download from that source is unfinished, without preventing another
+  source, edition, or a later deliberate re-download after completion.
+
 ## [0.0.22] - 2026-07-26
 
 ### Added

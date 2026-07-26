@@ -55,7 +55,7 @@ const groupStatus = (group: TransferGroup) => {
   if (group.status === "active") {
     return `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}`;
   }
-  if (group.status === "queued") return "Waiting";
+  if (group.status === "queued") return `Queue #${group.queuePosition} · Waiting`;
   if (group.status === "paused") return "Paused";
   if (group.status === "failed") return "Retry";
   return "Completed";
