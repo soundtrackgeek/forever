@@ -27,6 +27,30 @@ export type SearchResult = {
   isPrivate?: boolean;
 };
 
+export type AlbumSearchContext = {
+  artist: string;
+  title: string;
+  coverArtUrl: string;
+  firstReleaseDate: string;
+};
+
+export type AlbumSource = {
+  id: string;
+  owner: string;
+  folder: string;
+  folderName: string;
+  files: SearchResult[];
+  tracks: SearchResult[];
+  formats: string[];
+  qualities: string[];
+  totalSizeBytes: number;
+  slotFree: boolean;
+  averageSpeed: number;
+  queueLength: number;
+  isPrivate: boolean;
+  representative: SearchResult;
+};
+
 export type PersonStatus = "unknown" | "offline" | "away" | "online";
 
 export type ProfileState =

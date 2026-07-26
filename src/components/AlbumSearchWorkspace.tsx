@@ -27,7 +27,7 @@ type AlbumSearchWorkspaceProps = {
   onSearch: (query: string) => void;
   onSelectArtist: (artist: AlbumArtist) => void;
   onSearchModeChange: (mode: SearchMode) => void;
-  onSearchSoulseek: (artist: string, album: string) => void;
+  onSearchSoulseek: (artist: string, album: AlbumReleaseGroup) => void;
   onOpenConnection: () => void;
   onDismissError: () => void;
 };
@@ -237,7 +237,7 @@ export function AlbumSearchWorkspace({
                     disabled={!online}
                     aria-label={`${online ? "Search Soulseek for" : "Connect before searching for"} ${album.title}`}
                     title={online ? `Search Soulseek for ${album.title}` : "Connect to Soulseek first"}
-                    onClick={() => onSearchSoulseek(selectedArtist.name, album.title)}
+                    onClick={() => onSearchSoulseek(selectedArtist.name, album)}
                   >
                     <MusicNotesPlus size={15} /> {online ? "Search Soulseek" : "Connect to search"}
                   </button>

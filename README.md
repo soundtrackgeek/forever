@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.19` adds a compact, collapsible transfer
-> drawer and tighter sidebar navigation while retaining MusicBrainz catalog
-> discovery, complete-release sharing, and the `0.0.17` startup repair.
+> **Status:** pre-alpha. Version `0.0.20` turns MusicBrainz-guided Soulseek
+> searches into album sources with track previews and whole-folder download,
+> while retaining the compact transfer drawer and the `0.0.17` startup repair.
 
-If `0.0.16` is installed, download and run the latest `0.0.19` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.20` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -30,7 +30,10 @@ configuration and transfers.
   and a live file inspector with source speed, queue, and share visibility
 - A Files/Albums search switch with MusicBrainz artist matching, artist
   disambiguation, studio/live/compilation/EP catalog filters, Cover Art Archive
-  artwork, and one-click artist-plus-album handoff to live Soulseek file search
+  artwork, and one-click artist-plus-album handoff to grouped Soulseek sources
+- Album-source results grouped by listener and remote folder, with track count,
+  formats, aggregate search size, readiness and speed, hover/focus track-list
+  previews, an individual-file fallback, and complete-folder download
 - A dedicated top-level Browse workspace with exact-username entry and recent
   or favorite listener shortcuts, keeping full share trees separate from Search
 - A dedicated People workspace with live online/away/offline presence,
@@ -148,7 +151,12 @@ uses MusicBrainz to resolve the artist and show cataloged studio albums, live
 albums, compilations, and EPs. Choosing **Search Soulseek** returns to Files and
 starts a normal live Soulseek search for that artist and album title. MusicBrainz
 identifies the release; it does not claim that a specific rip or edition is
-available. Soulseek results remain the source of truth for actual files.
+available. Soulseek results remain the source of truth for actual files. The
+search opens in **Album sources**, grouping returned files by listener and
+folder. Hover or focus the eye control to preview that source's tracks; switch
+to **Individual files** for the original file-by-file results. **Download
+album** inspects the chosen folder and queues every file in it, including cover
+art, lyrics, cue sheets, and other companion files.
 
 Open **Browse** for a dedicated exact-username entry point plus recent and
 favorite listeners. Browsing from Search, People, or Transfers opens the same
@@ -176,7 +184,7 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.19` intentionally keeps one active download at a time, even when an
+Version `0.0.20` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
 three. Edition/pressing lookup, Library management, playback, rooms, and public
 chat remain outside this release.
@@ -238,7 +246,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.19 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.20 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

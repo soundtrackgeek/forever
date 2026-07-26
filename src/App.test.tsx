@@ -111,7 +111,7 @@ describe("Forever shell", () => {
     expect(screen.getByText("320 kbps")).toBeInTheDocument();
   });
 
-  it("discovers an artist's albums and hands a release into Soulseek search", () => {
+  it("discovers an artist's albums and groups Soulseek files into downloadable sources", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
@@ -134,6 +134,33 @@ describe("Forever shell", () => {
       "aria-selected",
       "true",
     );
+
+    await waitFor(
+      () => expect(screen.getByText("3 album sources")).toBeInTheDocument(),
+      { timeout: 1_500 },
+    );
+    await screen.findByText("Found 39 files from 3 people.", {}, { timeout: 1_500 });
+    const albumReport = screen
+      .getByRole("heading", { name: "Hysteria — Def Leppard" })
+      .closest("article") as HTMLElement;
+    expect(within(albumReport).getAllByText("3")).toHaveLength(2);
+    expect(screen.getByText("1987 - Hysteria [FLAC]")).toBeInTheDocument();
+    expect(screen.getAllByText("12").length).toBeGreaterThan(0);
+
+    const previewTracks = screen.getAllByRole("button", {
+      name: /Preview tracks in/,
+    })[0];
+    fireEvent.mouseEnter(previewTracks);
+    const trackPreview = screen.getByRole("tooltip");
+    expect(within(trackPreview).getByText("01 - Women.flac")).toBeInTheDocument();
+    expect(within(trackPreview).getByText("12")).toBeInTheDocument();
+    fireEvent.mouseLeave(previewTracks);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Download album" })[0]);
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument(),
+    );
+    expect(screen.getAllByText("Hysteria").length).toBeGreaterThan(0);
   });
 
   it("opens Browse as a dedicated workspace before requesting a user's shares", async () => {
@@ -446,16 +473,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.19 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.20 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "The bottom transfer queue now has explicit Expand and Collapse controls with accessible state.",
+        "MusicBrainz-guided Soulseek searches now group matching files into album sources by listener and remote folder.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Sidebar navigation rows and spacing are tighter, leaving more room for the signed-in profile.",
+        "Download album now inspects the selected source folder first and queues its complete contents, including companion files.",
       ),
     ).toBeInTheDocument();
   });

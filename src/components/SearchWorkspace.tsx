@@ -2,6 +2,7 @@ import {
   ArrowRight,
   CaretDown,
   CircleNotch,
+  Disc,
   DownloadSimple,
   FunnelSimple,
   FolderOpen,
@@ -15,25 +16,33 @@ import {
   XCircle,
 } from "@phosphor-icons/react";
 import {
+  useDeferredValue,
   useMemo,
   useState,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
 import type {
+  AlbumSearchContext,
+  AlbumSource,
   ConnectionSnapshot,
   SearchResult,
   SearchSnapshot,
   PersonProfile,
 } from "../types";
+import { groupAlbumSources } from "../utils/albumSources";
+import { AlbumSourceResults } from "./AlbumSourceResults";
 import { CountryFlag } from "./CountryFlag";
 import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
 
 type Filter = "all" | "lossless" | "compressed";
 type Sort = "best" | "ready" | "fast" | "small";
+export type AlbumResultView = "sources" | "files";
 
 type SearchWorkspaceProps = {
   searchMode: SearchMode;
+  albumContext: AlbumSearchContext | null;
+  albumResultView: AlbumResultView;
   query: string;
   results: SearchResult[];
   selectedResult: SearchResult | null;
@@ -46,10 +55,12 @@ type SearchWorkspaceProps = {
   onStopSearch: () => void;
   onSelectResult: (result: SearchResult) => void;
   onQueueDownload: (result: SearchResult) => void;
+  onQueueAlbumSource: (source: AlbumSource) => Promise<void>;
   onBrowseUser: (username: string) => void;
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
   onSearchModeChange: (mode: SearchMode) => void;
+  onAlbumResultViewChange: (view: AlbumResultView) => void;
 };
 
 const losslessFormats = new Set(["FLAC", "ALAC", "WAV", "AIFF", "APE", "WV"]);
@@ -83,6 +94,19 @@ function Rating({ result }: { result: SearchResult }) {
   );
 }
 
+function AlbumResultArtwork({ context }: { context: AlbumSearchContext }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <span className="album-result-artwork">
+      {!failed && context.coverArtUrl ? (
+        <img src={context.coverArtUrl} alt="" onError={() => setFailed(true)} />
+      ) : (
+        <Disc size={42} weight="thin" aria-hidden="true" />
+      )}
+    </span>
+  );
+}
+
 const filterLabels: Record<Filter, string> = {
   all: "All types",
   lossless: "Lossless audio",
@@ -98,6 +122,8 @@ const sortLabels: Record<Sort, string> = {
 
 export function SearchWorkspace({
   searchMode,
+  albumContext,
+  albumResultView,
   query,
   results,
   selectedResult,
@@ -110,10 +136,12 @@ export function SearchWorkspace({
   onStopSearch,
   onSelectResult,
   onQueueDownload,
+  onQueueAlbumSource,
   onBrowseUser,
   personByUsername,
   onOpenPerson,
   onSearchModeChange,
+  onAlbumResultViewChange,
 }: SearchWorkspaceProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -123,12 +151,26 @@ export function SearchWorkspace({
   const online = connection.state === "online";
   const searching = search.state === "searching";
   const preview = search.message.startsWith("Preview data");
+  const deferredResults = useDeferredValue(results);
   const losslessCount = results.filter((result) =>
     losslessFormats.has(result.format),
   ).length;
   const compressedCount = results.filter((result) =>
     compressedFormats.has(result.format),
   ).length;
+  const albumSources = useMemo(
+    () => groupAlbumSources(deferredResults),
+    [deferredResults],
+  );
+  const sourceCounts = useMemo(() => {
+    let lossless = 0;
+    let compressed = 0;
+    for (const source of albumSources) {
+      if (source.formats.some((format) => losslessFormats.has(format))) lossless += 1;
+      if (source.formats.some((format) => compressedFormats.has(format))) compressed += 1;
+    }
+    return { lossless, compressed };
+  }, [albumSources]);
 
   const visibleResults = useMemo(() => {
     const filtered = results.filter((result) => {
@@ -155,6 +197,41 @@ export function SearchWorkspace({
     }
     return filtered;
   }, [filter, results, sort]);
+
+  const visibleAlbumSources = useMemo(() => {
+    const filtered = albumSources.filter((source) => {
+      if (filter === "lossless") {
+        return source.formats.some((format) => losslessFormats.has(format));
+      }
+      if (filter === "compressed") {
+        return source.formats.some((format) => compressedFormats.has(format));
+      }
+      return true;
+    });
+    if (sort === "ready") {
+      return [...filtered].sort(
+        (left, right) =>
+          Number(right.slotFree) - Number(left.slotFree) ||
+          left.queueLength - right.queueLength,
+      );
+    }
+    if (sort === "fast") {
+      return [...filtered].sort(
+        (left, right) => right.averageSpeed - left.averageSpeed,
+      );
+    }
+    if (sort === "small") {
+      return [...filtered].sort(
+        (left, right) => left.totalSizeBytes - right.totalSizeBytes,
+      );
+    }
+    return filtered;
+  }, [albumSources, filter, sort]);
+
+  const showingAlbumSources = Boolean(albumContext) && albumResultView === "sources";
+  const visibleCount = showingAlbumSources
+    ? visibleAlbumSources.length
+    : visibleResults.length;
 
   const connectionLabel =
     connection.state === "online"
@@ -253,9 +330,9 @@ export function SearchWorkspace({
             <div className="filter-popover" role="menu">
               {(
                 [
-                  ["all", results.length],
-                  ["lossless", losslessCount],
-                  ["compressed", compressedCount],
+                  ["all", showingAlbumSources ? albumSources.length : results.length],
+                  ["lossless", showingAlbumSources ? sourceCounts.lossless : losslessCount],
+                  ["compressed", showingAlbumSources ? sourceCounts.compressed : compressedCount],
                 ] as const
               ).map(([value, count]) => (
                 <button
@@ -281,7 +358,7 @@ export function SearchWorkspace({
         <p>Discover rare music shared by real people.</p>
       </header>
 
-      {preview && search.query === "night geometry" ? (
+      {preview && search.query === "night geometry" && !albumContext ? (
         <article className="featured-release">
           <img
             className="featured-art"
@@ -319,18 +396,34 @@ export function SearchWorkspace({
           </button>
         </article>
       ) : (
-        <article className={`live-search-card is-${search.state}`}>
-          <span className="live-search-signal" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
+        <article className={`live-search-card is-${search.state} ${albumContext ? "is-album-search" : ""}`}>
+          {albumContext ? (
+            <AlbumResultArtwork key={albumContext.coverArtUrl} context={albumContext} />
+          ) : (
+            <span className="live-search-signal" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+              <i />
+            </span>
+          )}
           <div>
             <span className="eyebrow">
-              {searching ? "Live signal" : "Search report"}
+              {albumContext
+                ? searching
+                  ? "Finding album sources"
+                  : "Album source report"
+                : searching
+                  ? "Live signal"
+                  : "Search report"}
             </span>
-            <h2>{search.query ? `“${search.query}”` : "Ready to listen"}</h2>
+            <h2>
+              {albumContext
+                ? `${albumContext.title} — ${albumContext.artist}`
+                : search.query
+                  ? `“${search.query}”`
+                  : "Ready to listen"}
+            </h2>
             <p>{searchError ?? search.message}</p>
           </div>
           <dl>
@@ -338,6 +431,12 @@ export function SearchWorkspace({
               <dt>Files</dt>
               <dd>{search.resultCount}</dd>
             </div>
+            {albumContext ? (
+              <div>
+                <dt>Sources</dt>
+                <dd>{albumSources.length}</dd>
+              </div>
+            ) : null}
             <div>
               <dt>People</dt>
               <dd>{search.peerCount}</dd>
@@ -357,12 +456,50 @@ export function SearchWorkspace({
 
       <div className="results-toolbar">
         <p>
-          Results for <strong>“{search.query || "—"}”</strong>
+          {albumContext ? "Sources for " : "Results for "}
+          <strong>
+            {albumContext
+              ? `${albumContext.title} by ${albumContext.artist}`
+              : `“${search.query || "—"}”`}
+          </strong>
           <span>
-            {visibleResults.length} {visibleResults.length === 1 ? "result" : "results"}
+            {visibleCount}{" "}
+            {showingAlbumSources
+              ? visibleCount === 1
+                ? "album source"
+                : "album sources"
+              : albumContext
+                ? visibleCount === 1
+                  ? "file"
+                  : "files"
+                : visibleCount === 1
+                  ? "result"
+                  : "results"}
           </span>
         </p>
         <div className="results-actions">
+          {albumContext ? (
+            <div className="album-result-view-switch" role="tablist" aria-label="Soulseek result view">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={albumResultView === "sources"}
+                className={albumResultView === "sources" ? "is-active" : ""}
+                onClick={() => onAlbumResultViewChange("sources")}
+              >
+                <Disc size={14} /> Album sources
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={albumResultView === "files"}
+                className={albumResultView === "files" ? "is-active" : ""}
+                onClick={() => onAlbumResultViewChange("files")}
+              >
+                <ListBullets size={14} /> Individual files
+              </button>
+            </div>
+          ) : null}
           <div className="sort-wrap">
             <button
               type="button"
@@ -396,7 +533,7 @@ export function SearchWorkspace({
               </div>
             )}
           </div>
-          <div className="view-toggle" aria-label="Results layout">
+          {!showingAlbumSources ? <div className="view-toggle" aria-label="Results layout">
             <button
               type="button"
               className={layout === "list" ? "is-active" : ""}
@@ -413,11 +550,20 @@ export function SearchWorkspace({
             >
               <GridFour size={17} />
             </button>
-          </div>
+          </div> : null}
         </div>
       </div>
 
-      <div className={`results-table ${layout === "grid" ? "is-grid" : ""}`}>
+      {showingAlbumSources ? (
+        <AlbumSourceResults
+          sources={visibleAlbumSources}
+          searching={searching}
+          onQueueAlbumSource={onQueueAlbumSource}
+          onBrowseUser={onBrowseUser}
+          personByUsername={personByUsername}
+          onOpenPerson={onOpenPerson}
+        />
+      ) : <div className={`results-table ${layout === "grid" ? "is-grid" : ""}`}>
         <div className="result-header" aria-hidden="true">
           <span>Name</span>
           <span>User</span>
@@ -541,7 +687,7 @@ export function SearchWorkspace({
             })
           )}
         </div>
-      </div>
+      </div>}
     </section>
   );
 }

@@ -30,22 +30,23 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.18",
-  version: "0.0.19",
-  body: `## What’s new in Forever 0.0.19
+  currentVersion: "0.0.19",
+  version: "0.0.20",
+  body: `## What’s new in Forever 0.0.20
 
 ### Added
 
-- The bottom transfer queue now has explicit Expand and Collapse controls with accessible state.
+- MusicBrainz-guided Soulseek searches now group matching files into album sources by listener and remote folder.
+- Every album source has an eye control that previews its returned track list on hover or keyboard focus.
 
 ### Changed
 
-- The transfer queue starts as a compact 44-pixel status handle and automatically folds away when the full Transfers workspace opens.
-- Sidebar navigation rows and spacing are tighter, leaving more room for the signed-in profile.
+- Album source rows show folder, track count, formats, total size, readiness, and source speed.
+- You can switch between grouped album sources and the original individual-file results.
 
 ### Fixed
 
-- The username and online status at the bottom of the sidebar are no longer clipped behind the transfer area on common desktop window sizes.`,
+- Download album now inspects the selected source folder first and queues its complete contents, including companion files.`,
   date: "2026-07-26",
 };
 

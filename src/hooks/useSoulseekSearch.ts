@@ -116,39 +116,93 @@ const presentResult = (result: LiveSearchResult): SearchResult => {
   };
 };
 
-const previewNetworkResults = previewResults.map((result, index) =>
-  presentResult({
-    id: `preview-live-${result.id}`,
-    token: 2,
-    username: result.owner,
-    filename: `Music\\Liminal Structures\\Night Geometry\\${String(
-      index + 1,
-    ).padStart(2, "0")} - ${[
-      "Thresholds.flac",
-      "Hollow Planes.flac",
-      "Night Geometry.mp3",
-      "Vector Dreams.flac",
-      "Static Bloom.flac",
-      "Liminal Structures.flac",
-    ][index]}`,
-    sizeBytes: [
-      118_400_000, 112_700_000, 12_900_000, 139_800_000, 101_300_000,
-      156_600_000,
-    ][index],
-    extension: result.format.toLowerCase(),
-    bitrate: result.format === "MP3" ? 320 : 2_304,
-    durationSeconds: [321, 307, 362, 378, 276, 431][index],
-    vbr: false,
-    sampleRate: result.format === "MP3" ? 44_100 : index < 2 ? 96_000 : 48_000,
-    bitDepth: result.format === "MP3" ? null : index < 2 ? 24 : 16,
-    slotFree: index !== 3,
-    averageSpeed: [8_200_000, 6_800_000, 5_100_000, 3_700_000, 7_400_000, 4_900_000][
-      index
-    ],
-    queueLength: index === 3 ? 4 : 0,
-    isPrivate: index === 5,
+type PreviewAlbumSource = {
+  id: string;
+  username: string;
+  folder: string;
+  tracks: string[];
+  format: "flac" | "mp3";
+  slotFree: boolean;
+  averageSpeed: number;
+  queueLength: number;
+};
+
+const previewAlbumSource = (source: PreviewAlbumSource) => [
+  ...source.tracks.map((track, index) => {
+    const extension = source.format;
+    return presentResult({
+      id: `${source.id}-${index + 1}`,
+      token: 2,
+      username: source.username,
+      filename: `${source.folder}\\${String(index + 1).padStart(2, "0")} - ${track}.${extension}`,
+      sizeBytes:
+        extension === "mp3" ? 9_400_000 + index * 170_000 : 38_000_000 + index * 2_300_000,
+      extension,
+      bitrate: extension === "mp3" ? 320 : 1_411,
+      durationSeconds: 245 + ((index * 31) % 155),
+      vbr: false,
+      sampleRate: 44_100,
+      bitDepth: extension === "flac" ? 16 : null,
+      slotFree: source.slotFree,
+      averageSpeed: source.averageSpeed,
+      queueLength: source.queueLength,
+      isPrivate: false,
+    });
   }),
-);
+  presentResult({
+    id: `${source.id}-cover`,
+    token: 2,
+    username: source.username,
+    filename: `${source.folder}\\cover.jpg`,
+    sizeBytes: 1_800_000,
+    extension: "jpg",
+    bitrate: null,
+    durationSeconds: null,
+    vbr: null,
+    sampleRate: null,
+    bitDepth: null,
+    slotFree: source.slotFree,
+    averageSpeed: source.averageSpeed,
+    queueLength: source.queueLength,
+    isPrivate: false,
+  }),
+];
+
+const nightGeometryTracks = [
+  "Thresholds",
+  "Hollow Planes",
+  "Vector Dreams",
+  "Night Geometry",
+  "Static Bloom",
+  "Liminal Structures",
+  "Phase Rotate",
+  "Afterglow",
+  "Silent Constellations",
+  "Return Vector",
+];
+
+const hysteriaTracks = [
+  "Women",
+  "Rocket",
+  "Animal",
+  "Love Bites",
+  "Pour Some Sugar on Me",
+  "Armageddon It",
+  "Gods of War",
+  "Don't Shoot Shotgun",
+  "Run Riot",
+  "Hysteria",
+  "Excitable",
+  "Love and Affection",
+];
+
+const previewNetworkResults = [
+  ...previewAlbumSource({ id: "night-flac", username: "audiophile92", folder: "Music\\Liminal Structures\\Night Geometry [FLAC]", tracks: nightGeometryTracks, format: "flac", slotFree: true, averageSpeed: 8_200_000, queueLength: 0 }),
+  ...previewAlbumSource({ id: "night-mp3", username: "soulseeker7", folder: "Music\\Liminal Structures\\Night Geometry (2019) [320]", tracks: nightGeometryTracks, format: "mp3", slotFree: false, averageSpeed: 5_100_000, queueLength: 3 }),
+  ...previewAlbumSource({ id: "hysteria-flac", username: "bleachjt", folder: "Music\\Def Leppard\\1987 - Hysteria [FLAC]", tracks: hysteriaTracks, format: "flac", slotFree: true, averageSpeed: 9_400_000, queueLength: 0 }),
+  ...previewAlbumSource({ id: "hysteria-mp3", username: "rockarchive", folder: "Music\\Def Leppard\\Hysteria (1987) [320]", tracks: hysteriaTracks, format: "mp3", slotFree: true, averageSpeed: 6_800_000, queueLength: 0 }),
+  ...previewAlbumSource({ id: "hysteria-mfsl", username: "vinylrips", folder: "Music\\Rock\\Def Leppard\\Hysteria MFSL", tracks: hysteriaTracks, format: "flac", slotFree: false, averageSpeed: 3_700_000, queueLength: 4 }),
+];
 
 const errorMessage = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
@@ -263,6 +317,7 @@ export function useSoulseekSearch() {
             .includes(term),
         ),
       );
+      const matchingPeople = new Set(matches.map((result) => result.owner)).size;
       const firstBatch = matches.slice(0, 3);
       const secondBatch = matches.slice(3);
 
@@ -272,8 +327,8 @@ export function useSoulseekSearch() {
         setSnapshot((current) => ({
           ...current,
           resultCount: total,
-          peerCount: total,
-          message: `Receiving files from ${total} ${total === 1 ? "person" : "people"}…`,
+          peerCount: matchingPeople,
+          message: `Receiving files from ${matchingPeople} ${matchingPeople === 1 ? "person" : "people"}…`,
         }));
       };
 
@@ -289,11 +344,11 @@ export function useSoulseekSearch() {
             ...current,
             state: "completed",
             resultCount: matches.length,
-            peerCount: matches.length,
+            peerCount: matchingPeople,
             message:
               matches.length === 0
                 ? "No matching files arrived."
-                : `Found ${matches.length} files from ${matches.length} people.`,
+                : `Found ${matches.length} files from ${matchingPeople} ${matchingPeople === 1 ? "person" : "people"}.`,
             finishedAtMs: Date.now(),
           }));
         }, 820),

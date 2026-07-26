@@ -5,6 +5,30 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20] - 2026-07-26
+
+### Added
+
+- An album-source results view for MusicBrainz-guided Soulseek searches that
+  groups matching files by listener and remote folder.
+- Source rows with folder name, audio-track count, available formats, estimated
+  album size, queue readiness, transfer speed, and a one-click **Download
+  album** action.
+- An eye control on every album source that previews the returned track list on
+  hover or keyboard focus without leaving Search.
+- Frontend regression coverage for album grouping, companion-file handling,
+  natural track ordering, track previews, and whole-album enqueue.
+
+### Changed
+
+- Choosing **Search Soulseek** from a MusicBrainz release now opens album
+  sources by default, with a switch back to the original individual-file view.
+- Whole-album downloads inspect the selected listener's exact folder first, so
+  artwork, lyrics, cue sheets, and other companion files join the audio in one
+  release transfer.
+- Application and updater preview metadata now identify version `0.0.20` and
+  describe album-source search and download.
+
 ## [0.0.19] - 2026-07-26
 
 ### Added

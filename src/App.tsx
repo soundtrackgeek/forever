@@ -9,7 +9,7 @@ import { ConnectionSettings } from "./components/ConnectionSettings";
 import { MessagesWorkspace } from "./components/MessagesWorkspace";
 import { ReleaseInspector } from "./components/ReleaseInspector";
 import { PeopleWorkspace } from "./components/PeopleWorkspace";
-import { SearchWorkspace } from "./components/SearchWorkspace";
+import { SearchWorkspace, type AlbumResultView } from "./components/SearchWorkspace";
 import type { SearchMode } from "./components/SearchModeSwitch";
 import { TransferShelf } from "./components/TransferShelf";
 import { TransfersWorkspace } from "./components/TransfersWorkspace";
@@ -26,7 +26,7 @@ import { useSoulseekShares } from "./hooks/useSoulseekShares";
 import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
 import { useLocalSharing } from "./hooks/useLocalSharing";
 import { usePrivateMessages } from "./hooks/usePrivateMessages";
-import type { SearchResult } from "./types";
+import type { AlbumSearchContext, AlbumSource, SearchResult } from "./types";
 
 const viewDetails = {
   home: {
@@ -93,6 +93,8 @@ function App() {
   const [activeView, setActiveView] = useState("search");
   const [transferShelfExpanded, setTransferShelfExpanded] = useState(false);
   const [searchMode, setSearchMode] = useState<SearchMode>("files");
+  const [albumContext, setAlbumContext] = useState<AlbumSearchContext | null>(null);
+  const [albumResultView, setAlbumResultView] = useState<AlbumResultView>("files");
   const [query, setQuery] = useState("night geometry");
   const [selectedResultId, setSelectedResultId] = useState<string | null>(
     "night-geometry",
@@ -127,6 +129,17 @@ function App() {
 
   const queueDownload = (result: SearchResult) => {
     void transfers.enqueue(result).catch(() => undefined);
+  };
+
+  const queueAlbumSource = async (source: AlbumSource) => {
+    const inspection = await folders.inspect(source.representative);
+    await transfers.enqueueRelease({
+      title: albumContext?.title ?? source.folderName,
+      username: source.owner,
+      remoteFolder: inspection.requestedFolder,
+      files: inspection.files,
+    });
+    navigate("transfers");
   };
 
   const navigate = (view: string) => {
@@ -168,7 +181,10 @@ function App() {
     void messages.openConversation(username).catch(() => undefined);
   };
 
-  const isFileSearchView = activeView === "search" && searchMode === "files";
+  const isFileSearchView =
+    activeView === "search" &&
+    searchMode === "files" &&
+    (!albumContext || albumResultView === "files");
 
   return (
     <div
@@ -196,6 +212,8 @@ function App() {
           <>
             <SearchWorkspace
               searchMode={searchMode}
+              albumContext={albumContext}
+              albumResultView={albumResultView}
               query={query}
               results={search.results}
               selectedResult={selectedResult}
@@ -208,6 +226,8 @@ function App() {
                 const normalizedQuery = nextQuery.trim();
                 setQuery(normalizedQuery);
                 setSelectedResultId(null);
+                setAlbumContext(null);
+                setAlbumResultView("files");
                 void search.startSearch(normalizedQuery).catch(() => undefined);
               }}
               onStopSearch={() => void search.stopSearch()}
@@ -216,12 +236,14 @@ function App() {
                 folders.clear();
               }}
               onQueueDownload={queueDownload}
+              onQueueAlbumSource={queueAlbumSource}
               onBrowseUser={browseUser}
               personByUsername={people.personByUsername}
               onOpenPerson={openPerson}
               onSearchModeChange={setSearchMode}
+              onAlbumResultViewChange={setAlbumResultView}
             />
-            <ReleaseInspector
+            {isFileSearchView ? <ReleaseInspector
               result={selectedResult}
               inspection={folders.inspection}
               folderLoading={folders.loading}
@@ -244,7 +266,7 @@ function App() {
                   .then(() => navigate("transfers"))
                   .catch(() => undefined);
               }}
-            />
+            /> : null}
           </>
         ) : activeView === "search" ? (
           <AlbumSearchWorkspace
@@ -265,9 +287,16 @@ function App() {
             }}
             onSearchModeChange={setSearchMode}
             onSearchSoulseek={(artist, album) => {
-              const nextQuery = `${artist} ${album}`;
+              const nextQuery = `${artist} ${album.title}`;
               setQuery(nextQuery);
               setSelectedResultId(null);
+              setAlbumContext({
+                artist,
+                title: album.title,
+                coverArtUrl: album.coverArtUrl,
+                firstReleaseDate: album.firstReleaseDate,
+              });
+              setAlbumResultView("sources");
               setSearchMode("files");
               void search.startSearch(nextQuery).catch(() => undefined);
             }}
