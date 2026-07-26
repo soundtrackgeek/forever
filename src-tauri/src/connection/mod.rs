@@ -97,6 +97,27 @@ pub async fn wanted_set_interval(
 }
 
 #[tauri::command]
+pub async fn wanted_set_preferences(
+    manager: State<'_, ConnectionManager>,
+    album_id: String,
+    preferences: wanted::WantedPreferences,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .set_wanted_preferences(&album_id, preferences)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn wanted_sync_fulfilled(
+    manager: State<'_, ConnectionManager>,
+    fulfillments: Vec<wanted::WantedFulfillmentRequest>,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .sync_wanted_fulfilled(fulfillments)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn wanted_check(
     manager: State<'_, ConnectionManager>,
     album_id: String,

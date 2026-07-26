@@ -1,5 +1,5 @@
 import { DownloadSimple, MagnifyingGlass, Radio, Sliders } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { AppSidebar } from "./components/AppSidebar";
 import { AlbumSearchWorkspace } from "./components/AlbumSearchWorkspace";
@@ -11,6 +11,8 @@ import { MessagesWorkspace } from "./components/MessagesWorkspace";
 import { ReleaseInspector } from "./components/ReleaseInspector";
 import { PeopleWorkspace } from "./components/PeopleWorkspace";
 import { SearchWorkspace, type AlbumResultView } from "./components/SearchWorkspace";
+import { SmartMatchPreferencesDialog } from "./components/SmartMatchPreferencesDialog";
+import { SmartMatchReviewDialog } from "./components/SmartMatchReviewDialog";
 import type { SearchMode } from "./components/SearchModeSwitch";
 import { TransferShelf } from "./components/TransferShelf";
 import { TransfersWorkspace } from "./components/TransfersWorkspace";
@@ -34,7 +36,9 @@ import type {
   AlbumReleaseGroup,
   AlbumSearchContext,
   AlbumSource,
+  FolderInspection,
   SearchResult,
+  WantedAlbum,
 } from "./types";
 
 const emptyAlbumCatalog: AlbumReleaseGroup[] = [];
@@ -117,8 +121,12 @@ function App() {
   const updater = useAppUpdater();
   const albums = useAlbumDiscovery();
   const archiveAlbums = albums.catalog?.albums ?? emptyAlbumCatalog;
-  const archive = useArchiveInventory(albums.selectedArtist?.name ?? null, archiveAlbums);
   const wanted = useWantedAlbums();
+  const archive = useArchiveInventory(
+    albums.selectedArtist?.name ?? null,
+    archiveAlbums,
+    wanted.snapshot.albums,
+  );
   const connection = useSoulseekConnection();
   const search = useSoulseekSearch();
   const transfers = useSoulseekTransfers();
@@ -134,6 +142,12 @@ function App() {
   );
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [onboardingInProgress, setOnboardingInProgress] = useState(false);
+  const [preferencesAlbum, setPreferencesAlbum] = useState<WantedAlbum | null>(null);
+  const [reviewAlbum, setReviewAlbum] = useState<WantedAlbum | null>(null);
+  const [reviewInspection, setReviewInspection] = useState<FolderInspection | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const lastFulfillmentSync = useRef("");
   const needsOnboarding = !connection.profile || !connection.hasPassword;
   const onboardingOpen =
     connection.ready &&
@@ -144,6 +158,48 @@ function App() {
     search.results.find((result) => result.id === selectedResultId) ??
     search.results[0] ??
     null;
+
+  const fulfillmentRequests = useMemo(() => wanted.snapshot.albums.flatMap((album) => {
+    const match = archive.wantedMatchByAlbumId.get(album.albumId);
+    if (!match || match.ownership === "unknown") return [];
+    return [{
+      albumId: album.albumId,
+      owned: match.ownership === "owned",
+      trackCount: match.trackCount,
+    }];
+  }), [archive.wantedMatchByAlbumId, wanted.snapshot.albums]);
+  const fulfillmentSignature = useMemo(
+    () => fulfillmentRequests
+      .map((item) => `${item.albumId}:${item.owned ? 1 : 0}:${item.trackCount ?? ""}`)
+      .sort()
+      .join("|"),
+    [fulfillmentRequests],
+  );
+
+  useEffect(() => {
+    if (!fulfillmentSignature || lastFulfillmentSync.current === fulfillmentSignature) return;
+    lastFulfillmentSync.current = fulfillmentSignature;
+    void wanted.syncFulfilled(fulfillmentRequests).catch(() => {
+      lastFulfillmentSync.current = "";
+    });
+  }, [fulfillmentRequests, fulfillmentSignature, wanted]);
+
+  const queuedWantedAlbumIds = useMemo(() => {
+    const releaseTitles = new Set(
+      transfers.snapshot.transfers
+        .map((transfer) => transfer.releaseTitle)
+        .filter((title): title is string => Boolean(title)),
+    );
+    return new Set(wanted.snapshot.albums
+      .filter((album) => releaseTitles.has(albumDownloadTitle({
+        albumId: album.albumId,
+        artist: album.artist,
+        title: album.title,
+        coverArtUrl: album.coverArtUrl ?? "",
+        firstReleaseDate: album.firstReleaseDate,
+      }, album.title)))
+      .map((album) => album.albumId));
+  }, [transfers.snapshot.transfers, wanted.snapshot.albums]);
 
   const queueDownload = (result: SearchResult) => {
     void transfers.enqueue(result).catch(() => undefined);
@@ -156,6 +212,60 @@ function App() {
       username: source.owner,
       remoteFolder: inspection.requestedFolder,
       files: inspection.files,
+    });
+  };
+
+  const inspectSmartMatch = async (album: WantedAlbum) => {
+    const source = album.bestSource;
+    if (!source) return;
+    setReviewAlbum(album);
+    setReviewInspection(null);
+    setReviewError(null);
+    setReviewLoading(true);
+    const result: SearchResult = {
+      id: `wanted-${album.albumId}`,
+      title: album.title,
+      subtitle: source.folder,
+      owner: source.username,
+      trust: 100,
+      format: source.format,
+      quality: source.minimumBitrateKbps ? `${source.minimumBitrateKbps} kbps` : "Lossless",
+      size: String(source.sizeBytes),
+      tracks: source.trackCount,
+      rating: 5,
+      ratingLabel: "Smart Match",
+      availability: [],
+      source: "live",
+      folder: source.folder,
+      sizeBytes: source.sizeBytes,
+      bitrate: source.minimumBitrateKbps,
+      slotFree: source.slotFree,
+      averageSpeed: source.averageSpeedBytesPerSecond,
+      queueLength: source.queueLength,
+      isPrivate: false,
+    };
+    try {
+      setReviewInspection(await folders.inspect(result));
+    } catch (cause) {
+      setReviewError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const queueReviewedSmartMatch = async () => {
+    if (!reviewAlbum || !reviewInspection) return;
+    await transfers.enqueueRelease({
+      title: albumDownloadTitle({
+        albumId: reviewAlbum.albumId,
+        artist: reviewAlbum.artist,
+        title: reviewAlbum.title,
+        coverArtUrl: reviewAlbum.coverArtUrl ?? "",
+        firstReleaseDate: reviewAlbum.firstReleaseDate,
+      }, reviewAlbum.title),
+      username: reviewInspection.username,
+      remoteFolder: reviewInspection.requestedFolder,
+      files: reviewInspection.files,
     });
   };
 
@@ -249,7 +359,7 @@ function App() {
                   ? archive.matchByAlbumId.get(albumContext.albumId)
                   : undefined
               }
-              wanted={Boolean(albumContext && wanted.byAlbumId.has(albumContext.albumId))}
+              wantedAlbum={albumContext ? wanted.byAlbumId.get(albumContext.albumId) ?? null : null}
               query={query}
               results={search.results}
               transfers={transfers.snapshot.transfers}
@@ -369,6 +479,9 @@ function App() {
             onCheckWanted={wanted.check}
             onSetWantedPaused={wanted.setPaused}
             onRemoveWanted={wanted.remove}
+            queuedAlbumIds={queuedWantedAlbumIds}
+            onReviewBest={(album) => void inspectSmartMatch(album)}
+            onEditPreferences={setPreferencesAlbum}
             onOpenWanted={(album) => openAlbumSources({
               albumId: album.albumId,
               artist: album.artist,
@@ -568,10 +681,48 @@ function App() {
 
       <UpdateExperience {...updater} />
 
+      {preferencesAlbum ? (
+        <SmartMatchPreferencesDialog
+          key={preferencesAlbum.albumId}
+          album={wanted.byAlbumId.get(preferencesAlbum.albumId) ?? preferencesAlbum}
+          onSave={(preferences) => wanted.setPreferences(preferencesAlbum.albumId, preferences)}
+          onClose={() => setPreferencesAlbum(null)}
+        />
+      ) : null}
+
+      {reviewAlbum ? (
+        <SmartMatchReviewDialog
+          album={wanted.byAlbumId.get(reviewAlbum.albumId) ?? reviewAlbum}
+          inspection={reviewInspection}
+          loading={reviewLoading}
+          error={reviewError}
+          queued={queuedWantedAlbumIds.has(reviewAlbum.albumId)}
+          onConfirm={queueReviewedSmartMatch}
+          onRetry={() => void inspectSmartMatch(reviewAlbum)}
+          onCompare={() => {
+            setReviewAlbum(null);
+            openAlbumSources({
+              albumId: reviewAlbum.albumId,
+              artist: reviewAlbum.artist,
+              title: reviewAlbum.title,
+              coverArtUrl: reviewAlbum.coverArtUrl ?? "",
+              firstReleaseDate: reviewAlbum.firstReleaseDate,
+            });
+          }}
+          onClose={() => setReviewAlbum(null)}
+        />
+      ) : null}
+
       {wanted.alert ? (
         <WantedAlert
           album={wanted.alert}
-          onOpen={() => {
+          onReview={() => {
+            const album = wanted.alert;
+            if (!album) return;
+            wanted.dismissAlert();
+            void inspectSmartMatch(album);
+          }}
+          onCompare={() => {
             const album = wanted.alert;
             if (!album) return;
             wanted.dismissAlert();

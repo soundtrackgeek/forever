@@ -3,16 +3,16 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.25` adds Wanted Signals: a persistent
-> album watchlist with isolated background Soulseek checks, new-source alerts,
-> and direct handoff to the grouped album-source view.
+> **Status:** pre-alpha. Version `0.0.26` adds Smart Matches: per-album quality
+> profiles, ranked source recommendations, a complete-folder review before
+> queueing, and automatic fulfillment from the read-only Music Library Archive.
 
-If `0.0.16` is installed, download and run the latest `0.0.25` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.26` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
 
-![Forever Midnight Radio user shares interface](design/implementation/release-user-shares-0.0.9.png)
+![Forever Smart Matches interface](design/implementation/smart-matches-0.0.26-minimum.png)
 
 ## Current foundation
 
@@ -45,8 +45,16 @@ configuration and transfers.
   artist, album, release-year, and track-count metadata
 - A separate **Wanted Signals** watchlist for albums that are still missing,
   with 15-minute, 30-minute, hourly, or manual background checks, per-album
-  pause/check/remove controls, source quality summaries, in-app and Windows
-  availability alerts, and one-click handoff to fresh grouped Soulseek results
+  pause/check/remove controls, in-app and Windows availability alerts, and
+  configurable **Smart Match** profiles for format, minimum bitrate, and track
+  count
+- Ranked Smart Match recommendations based on completeness, format, upload-slot
+  readiness, speed, and queue length, with a remote-folder review that preserves
+  artwork, cue sheets, lyrics, logs, and other companion files when explicitly
+  queueing the complete album
+- Automatic **Fulfilled** Wanted state when the external read-only Archive
+  reports an owned album, without importing Forever downloads or modifying the
+  Music Library database
 - A dedicated top-level Browse workspace with exact-username entry and recent
   or favorite listener shortcuts, keeping full share trees separate from Search
 - A dedicated People workspace with live online/away/offline presence,
@@ -193,14 +201,20 @@ are never imported into Archive.
 Choose **Add to Wanted** on a missing MusicBrainz album, then open **Archive →
 Wanted** to follow it. Forever serializes background checks while connected and
 groups returned audio by listener and remote folder without disturbing the
-visible Search workspace. Each row reports available and ready sources, the
-fullest returned folder, best format, size, and speed. Use **Check** for an
-immediate lookup, pause individual watches, or set the global rhythm to manual,
-15 minutes, 30 minutes, or one hour. A new source raises a clickable in-app
-alert and a Windows notification; **Compare sources** starts a fresh grouped
-album search so the source remains your choice. Forever never auto-downloads a
-wanted album and does not mark a download as owned. The watch remains until
-Music Library reports the album as owned or you remove it.
+visible Search workspace. Edit a row's **Smart Match profile** to prefer
+lossless, require lossless, or accept any format, then optionally set minimum
+bitrate and track-count requirements. Qualifying folders are ranked by
+completeness, format, free upload slot, speed, and queue length.
+
+Use **Download best** to inspect the recommended folder before anything is
+queued. The review shows the listener, remote path, format, tracks, aggregate
+size, source speed, and the audio/companion-file split. **Queue complete album**
+preserves cover art, cue sheets, lyrics, logs, and other files beside the audio
+and leaves Archive open so another album can be queued. **Compare** opens the
+full grouped source report with the recommendation highlighted. Forever never
+auto-downloads a Smart Match. When the read-only Music Library Archive later
+reports that album as owned, the watch moves to **Fulfilled** and stops checking;
+it returns to the active list if the external source no longer reports it.
 
 Open **Browse** for a dedicated exact-username entry point plus recent and
 favorite listeners. Browsing from Search, People, or Transfers opens the same
@@ -228,7 +242,7 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.25` intentionally keeps one active download at a time, even when an
+Version `0.0.26` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
 three. Edition/pressing lookup, playback, rooms, and public
 chat remain outside this release.
@@ -265,11 +279,12 @@ Passwords are excluded from both. With “Remember
 password” enabled, Windows Credential Manager stores the password; otherwise it
 exists only for the current app session.
 
-Wanted albums, their configurable check rhythm, last availability summary, and
-source identity fingerprints are stored in Forever's `wanted.json`. These
-fingerprints contain normalized Soulseek usernames and remote folder names so
-Forever can recognize newly appearing sources; they never contain local Music
-Library rows and are not written to the external Archive database.
+Wanted albums, their configurable check rhythm, per-album Smart Match profiles,
+last ranked source summary, fulfillment state, and source identity fingerprints
+are stored in Forever's `wanted.json`. These fingerprints contain normalized
+Soulseek usernames and remote folder names so Forever can recognize newly
+appearing qualifying sources; they never contain local Music Library rows and
+are not written to the external Archive database.
 
 Archive reads the external Music Library database at
 `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`. Forever uses the
@@ -304,7 +319,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.25 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.26 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

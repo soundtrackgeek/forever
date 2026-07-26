@@ -238,9 +238,18 @@ describe("Forever shell", () => {
     ).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Wanted 4" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Wanted 5" }));
     expect(screen.getByText("High ’n’ Dry")).toBeInTheDocument();
-    expect(screen.getByText("7 available")).toBeInTheDocument();
+    expect(screen.getByText("4 matching")).toBeInTheDocument();
+
+    const highAndDry = screen.getByText("High ’n’ Dry").closest("article") as HTMLElement;
+    fireEvent.click(within(highAndDry).getByRole("button", { name: "Edit High ’n’ Dry Smart Match profile" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Lossless only/ }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: /Minimum track count/ }), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save match profile" }));
+    expect(await screen.findByText("Lossless only · 10+ tracks")).toBeInTheDocument();
 
     const rhythm = screen.getByRole("combobox", { name: "Check rhythm" });
     fireEvent.change(rhythm, { target: { value: "15" } });
@@ -249,13 +258,17 @@ describe("Forever shell", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /Waiting/ }));
     const sonicHoliday = screen.getByText("A Sonic Holiday").closest("article") as HTMLElement;
-    fireEvent.click(within(sonicHoliday).getByRole("button", { name: "Check" }));
+    fireEvent.click(within(sonicHoliday).getByRole("button", { name: "Check A Sonic Holiday now" }));
     expect(within(sonicHoliday).getByText("Checking")).toBeInTheDocument();
 
     expect(
-      await screen.findByText("3 sources now transmitting for Engine Alley.", {}, { timeout: 1_500 }),
+      await screen.findByText(/FLAC · 11 tracks · free slot for Engine Alley/, {}, { timeout: 1_500 }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Compare sources" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review match" }));
+    expect(screen.getByRole("heading", { name: "Review the best transmission." })).toBeInTheDocument();
+    expect(await screen.findByText("Folder verified")).toBeInTheDocument();
+    expect(screen.getByText("Companion")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Compare alternatives" }));
     expect(
       screen.getByRole("heading", { name: "A Sonic Holiday — Engine Alley" }),
     ).toBeInTheDocument();
@@ -263,6 +276,29 @@ describe("Forever shell", () => {
     expect(
       screen.getByRole("button", { name: "Remove A Sonic Holiday from Wanted" }),
     ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("reviews and queues the best matching source while preserving companion files", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Wanted 4" }));
+
+    const highAndDry = screen.getByText("High ’n’ Dry").closest("article") as HTMLElement;
+    fireEvent.click(within(highAndDry).getByRole("button", { name: "Download best" }));
+    expect(screen.getByRole("heading", { name: "Review the best transmission." })).toBeInTheDocument();
+    expect(await screen.findByText("Folder verified")).toBeInTheDocument();
+    expect(screen.getByText("Companion")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Queue complete album" }));
+
+    expect(await within(screen.getByRole("dialog")).findByRole("button", { name: "Queued" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Close Smart Match review" }));
+    expect(within(highAndDry).getByRole("button", { name: "Queued" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Fulfilled/ }));
+    expect(screen.getByText("Hysteria")).toBeInTheDocument();
+    expect(screen.getByText("Fulfilled by Music Library")).toBeInTheDocument();
+    expect(screen.getByText("Read-only source of truth")).toBeInTheDocument();
   });
 
   it("opens Browse as a dedicated workspace before requesting a user's shares", async () => {
@@ -318,16 +354,16 @@ describe("Forever shell", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Download 10 files" }),
+        screen.getByRole("button", { name: "Download 12 files" }),
       ).toBeInTheDocument(),
     );
     fireEvent.click(
       screen.getByRole("button", { name: "Deselect 01 - Thresholds.flac" }),
     );
     expect(
-      screen.getByRole("button", { name: "Download 9 files" }),
+      screen.getByRole("button", { name: "Download 11 files" }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Download 9 files" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download 11 files" }));
 
     await waitFor(() =>
       expect(
@@ -584,16 +620,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.25 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.26 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Wanted Signals turns missing MusicBrainz albums into a persistent watchlist inside Archive.",
+        "Smart Match profiles let each wanted album prefer lossless audio, require lossless, or accept any format with optional bitrate and track-count limits.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Forever checks wanted albums in the background and alerts you when new Soulseek folders appear.",
+        "Review best opens the recommended remote folder before download, showing its listener, format, track count, size, speed, and preserved companion files.",
       ),
     ).toBeInTheDocument();
   });

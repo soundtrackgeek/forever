@@ -1,6 +1,7 @@
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     time::{Duration, UNIX_EPOCH},
 };
@@ -27,6 +28,15 @@ pub struct ArchiveStatus {
 #[serde(rename_all = "camelCase")]
 pub struct ArchiveAlbumQuery {
     pub id: String,
+    pub title: String,
+    pub first_release_date: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveWantedQuery {
+    pub id: String,
+    pub artist: String,
     pub title: String,
     pub first_release_date: String,
 }
@@ -323,6 +333,64 @@ fn match_for_path(
     }
 }
 
+fn match_wanted_for_path(path: &Path, queries: &[ArchiveWantedQuery]) -> ArchiveMatchResponse {
+    let connection = match open_read_only(path) {
+        Ok(connection) => connection,
+        Err(error) => {
+            return ArchiveMatchResponse {
+                source: disconnected_status(path, error),
+                matches: queries
+                    .iter()
+                    .map(|query| ArchiveAlbumMatch {
+                        album_id: query.id.clone(),
+                        ownership: ArchiveOwnership::Unknown,
+                        local_album_id: None,
+                        local_title: None,
+                        local_artist: None,
+                        local_year: None,
+                        track_count: None,
+                    })
+                    .collect(),
+            };
+        }
+    };
+    let source = match status_from_connection(path, &connection) {
+        Ok(status) => status,
+        Err(error) => {
+            return ArchiveMatchResponse {
+                source: disconnected_status(path, error),
+                matches: Vec::new(),
+            };
+        }
+    };
+    let mut by_artist: HashMap<String, Result<Vec<LocalAlbum>, String>> = HashMap::new();
+    let mut matches = Vec::with_capacity(queries.len());
+    for query in queries {
+        let artist_key = query.artist.to_lowercase();
+        let local_albums = by_artist
+            .entry(artist_key)
+            .or_insert_with(|| query_artist_albums(&connection, &query.artist));
+        let local_albums = match local_albums {
+            Ok(local_albums) => local_albums,
+            Err(error) => {
+                return ArchiveMatchResponse {
+                    source: disconnected_status(path, error.clone()),
+                    matches: Vec::new(),
+                };
+            }
+        };
+        let album_query = ArchiveAlbumQuery {
+            id: query.id.clone(),
+            title: query.title.clone(),
+            first_release_date: query.first_release_date.clone(),
+        };
+        if let Some(album_match) = match_queries(local_albums, &[album_query]).pop() {
+            matches.push(album_match);
+        }
+    }
+    ArchiveMatchResponse { source, matches }
+}
+
 #[tauri::command]
 pub async fn archive_status(app: AppHandle) -> Result<ArchiveStatus, String> {
     let path = default_database_path(&app)?;
@@ -354,6 +422,31 @@ pub async fn archive_match_albums(
     tokio::task::spawn_blocking(move || match_for_path(&path, &artist, &albums))
         .await
         .map_err(|error| format!("The Archive ownership task stopped unexpectedly: {error}"))
+}
+
+#[tauri::command]
+pub async fn archive_match_wanted(
+    app: AppHandle,
+    albums: Vec<ArchiveWantedQuery>,
+) -> Result<ArchiveMatchResponse, String> {
+    if albums.len() > 500
+        || albums.iter().any(|album| {
+            album.id.is_empty()
+                || album.id.chars().count() > 100
+                || album.artist.trim().is_empty()
+                || album.artist.chars().count() > 180
+                || album.artist.chars().any(char::is_control)
+                || album.title.trim().is_empty()
+                || album.title.chars().count() > 500
+                || album.title.chars().any(char::is_control)
+        })
+    {
+        return Err("The Archive can check up to 500 valid Wanted albums at a time.".to_owned());
+    }
+    let path = default_database_path(&app)?;
+    tokio::task::spawn_blocking(move || match_wanted_for_path(&path, &albums))
+        .await
+        .map_err(|error| format!("The Wanted ownership task stopped unexpectedly: {error}"))
 }
 
 #[cfg(test)]
@@ -451,5 +544,36 @@ mod tests {
         assert_eq!(response.matches[0].track_count, Some(12));
         assert_eq!(response.matches[1].ownership, ArchiveOwnership::NotOwned);
         assert_eq!(response.matches[2].ownership, ArchiveOwnership::Owned);
+    }
+
+    #[test]
+    fn reconciles_wanted_albums_across_artists_without_writing() {
+        let file = fixture();
+        let response = match_wanted_for_path(
+            file.path(),
+            &[
+                ArchiveWantedQuery {
+                    id: "hysteria".to_owned(),
+                    artist: "Def Leppard".to_owned(),
+                    title: "Hysteria".to_owned(),
+                    first_release_date: "1987-08-03".to_owned(),
+                },
+                ArchiveWantedQuery {
+                    id: "other".to_owned(),
+                    artist: "Engine Alley".to_owned(),
+                    title: "A Sonic Holiday".to_owned(),
+                    first_release_date: "1992".to_owned(),
+                },
+            ],
+        );
+        assert!(response.source.connected);
+        assert_eq!(response.matches[0].ownership, ArchiveOwnership::Owned);
+        assert_eq!(response.matches[0].track_count, Some(12));
+        assert_eq!(response.matches[1].ownership, ArchiveOwnership::NotOwned);
+        let connection = Connection::open(file.path()).expect("reopen archive fixture");
+        let remaining: u32 = connection
+            .query_row("SELECT COUNT(*) FROM albums", [], |row| row.get(0))
+            .expect("count untouched albums");
+        assert_eq!(remaining, 3);
     }
 }

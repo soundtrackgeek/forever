@@ -31,6 +31,7 @@ import type {
   SearchSnapshot,
   PersonProfile,
   Transfer,
+  WantedAlbum,
 } from "../types";
 import { groupAlbumSources } from "../utils/albumSources";
 import { AlbumSourceResults } from "./AlbumSourceResults";
@@ -50,7 +51,7 @@ type SearchWorkspaceProps = {
   archiveConnected: boolean;
   archiveLoading: boolean;
   archiveMatch?: ArchiveAlbumMatch;
-  wanted: boolean;
+  wantedAlbum: WantedAlbum | null;
   query: string;
   results: SearchResult[];
   transfers: Transfer[];
@@ -137,7 +138,7 @@ export function SearchWorkspace({
   archiveConnected,
   archiveLoading,
   archiveMatch,
-  wanted,
+  wantedAlbum,
   query,
   results,
   transfers,
@@ -450,7 +451,7 @@ export function SearchWorkspace({
                 />
                 {archiveMatch?.ownership !== "owned" ? (
                   <WantedToggle
-                    watched={wanted}
+                    watched={Boolean(wantedAlbum)}
                     albumTitle={albumContext.title}
                     onToggle={onToggleWanted}
                   />
@@ -595,6 +596,7 @@ export function SearchWorkspace({
           onBrowseUser={onBrowseUser}
           personByUsername={personByUsername}
           onOpenPerson={onOpenPerson}
+          smartPreferences={wantedAlbum?.preferences}
         />
       ) : <div className={`results-table ${layout === "grid" ? "is-grid" : ""}`}>
         <div className="result-header" aria-hidden="true">

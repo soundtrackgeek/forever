@@ -51,7 +51,10 @@ use super::{
         UserSharesOverview,
     },
     uploads::{UploadError, UploadHub, UploadQueueSnapshot, UploadTicket},
-    wanted::{WantedAlbumRequest, WantedError, WantedHub, WantedSnapshot},
+    wanted::{
+        WantedAlbumRequest, WantedError, WantedFulfillmentRequest, WantedHub, WantedPreferences,
+        WantedSnapshot,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -595,6 +598,21 @@ impl ConnectionManager {
         interval_minutes: u32,
     ) -> Result<WantedSnapshot, ConnectionServiceError> {
         Ok(self.wanted.set_interval(interval_minutes)?)
+    }
+
+    pub fn set_wanted_preferences(
+        &self,
+        album_id: &str,
+        preferences: WantedPreferences,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.set_preferences(album_id, preferences)?)
+    }
+
+    pub fn sync_wanted_fulfilled(
+        &self,
+        fulfillments: Vec<WantedFulfillmentRequest>,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.sync_fulfilled(fulfillments)?)
     }
 
     pub fn check_wanted(&self, album_id: &str) -> Result<WantedSnapshot, ConnectionServiceError> {

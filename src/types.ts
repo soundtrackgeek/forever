@@ -52,6 +52,27 @@ export type AlbumSource = {
   representative: SearchResult;
 };
 
+export type WantedFormatPreference = "any" | "preferLossless" | "losslessOnly";
+
+export type WantedPreferences = {
+  formatPreference: WantedFormatPreference;
+  minimumBitrateKbps: 128 | 192 | 256 | 320 | null;
+  minimumTrackCount: number | null;
+};
+
+export type WantedBestSource = {
+  username: string;
+  folder: string;
+  format: string;
+  trackCount: number;
+  sizeBytes: number;
+  slotFree: boolean;
+  averageSpeedBytesPerSecond: number;
+  queueLength: number;
+  minimumBitrateKbps: number | null;
+  score: number;
+};
+
 export type WantedAlbum = {
   albumId: string;
   artist: string;
@@ -59,9 +80,14 @@ export type WantedAlbum = {
   firstReleaseDate: string;
   coverArtUrl: string | null;
   paused: boolean;
+  fulfilled: boolean;
+  fulfilledAtMs: number | null;
+  ownedTrackCount: number | null;
+  preferences: WantedPreferences;
   addedAtMs: number;
   lastCheckedAtMs: number | null;
   sourceCount: number;
+  matchingSourceCount: number;
   readySourceCount: number;
   completeSourceCount: number;
   newSourceCount: number;
@@ -69,6 +95,7 @@ export type WantedAlbum = {
   bestTrackCount: number | null;
   bestSizeBytes: number | null;
   bestSpeedBytesPerSecond: number | null;
+  bestSource: WantedBestSource | null;
   error: string | null;
 };
 

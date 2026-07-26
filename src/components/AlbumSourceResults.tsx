@@ -10,13 +10,14 @@ import {
 } from "@phosphor-icons/react";
 import { useId, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import type { AlbumSource, PersonProfile, Transfer } from "../types";
+import type { AlbumSource, PersonProfile, Transfer, WantedPreferences } from "../types";
 import {
   albumDownloadStates,
   type AlbumDownloadState,
   type AlbumDownloadStatus,
 } from "../utils/albumDownloadState";
 import { formatAlbumBytes } from "../utils/albumSources";
+import { rankAlbumSources } from "../utils/smartMatches";
 import { CountryFlag } from "./CountryFlag";
 
 type AlbumSourceResultsProps = {
@@ -27,6 +28,7 @@ type AlbumSourceResultsProps = {
   onBrowseUser: (username: string) => void;
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
+  smartPreferences?: WantedPreferences;
 };
 
 const downloadLabel: Record<AlbumDownloadStatus, string> = {
@@ -157,6 +159,7 @@ export function AlbumSourceResults({
   onBrowseUser,
   personByUsername,
   onOpenPerson,
+  smartPreferences,
 }: AlbumSourceResultsProps) {
   const [preparingSourceId, setPreparingSourceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -164,6 +167,15 @@ export function AlbumSourceResults({
     () => albumDownloadStates(sources, transfers),
     [sources, transfers],
   );
+  const rankedSources = useMemo(
+    () => smartPreferences ? rankAlbumSources(sources, smartPreferences) : [],
+    [smartPreferences, sources],
+  );
+  const rankBySourceId = useMemo(
+    () => new Map(rankedSources.map((match) => [match.source.id, match])),
+    [rankedSources],
+  );
+  const recommendedSourceId = rankedSources.find((match) => match.eligible)?.source.id;
 
   const queueAlbum = async (source: AlbumSource) => {
     setPreparingSourceId(source.id);
@@ -212,6 +224,8 @@ export function AlbumSourceResults({
             </div>
           ) : (
             sources.map((source) => {
+              const smartMatch = rankBySourceId.get(source.id);
+              const recommended = source.id === recommendedSourceId;
               const person = personByUsername(source.owner);
               const preparing = preparingSourceId === source.id;
               const queuedState = sourceDownloadStates.get(source.id);
@@ -222,7 +236,7 @@ export function AlbumSourceResults({
                   ? "Preparing…"
                   : "Download album";
               return (
-                <article className="album-source-row" key={source.id}>
+                <article className={`album-source-row ${recommended ? "is-smart-match" : ""}`} key={source.id}>
                   <button
                     type="button"
                     className="album-source-user"
@@ -233,6 +247,7 @@ export function AlbumSourceResults({
                     <span><strong>{source.owner}</strong><small>{source.isPrivate ? "Private share" : "Public share"}</small></span>
                   </button>
                   <span className="album-source-folder">
+                    {recommended ? <b className="album-smart-match">Smart Match</b> : null}
                     <strong>{source.folderName}</strong>
                     <small title={source.folder}>{source.folder.replace(/[\\/]/g, " / ")}</small>
                   </span>
@@ -250,7 +265,7 @@ export function AlbumSourceResults({
                   </span>
                   <span className={`album-source-availability ${source.slotFree ? "is-ready" : "is-queued"}`}>
                     <strong><i aria-hidden="true" />{source.slotFree ? "Ready now" : `${source.queueLength} queued`}</strong>
-                    <small>{speed(source.averageSpeed)}</small>
+                    <small>{smartMatch?.reason ?? speed(source.averageSpeed)}</small>
                   </span>
                   <span className="album-source-actions">
                     <TrackPreview source={source} />

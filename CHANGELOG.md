@@ -5,6 +5,47 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.26] - 2026-07-26
+
+### Added
+
+- Per-album **Smart Match profiles** for Wanted Signals, with Prefer lossless,
+  Lossless only, and Any format modes plus optional minimum bitrate and track
+  count requirements.
+- Deterministic recommendation scoring across qualifying folders using album
+  completeness, audio format, free upload slots, source speed, and queue length.
+- A best-source review that verifies the remote folder before queueing and
+  reports its listener, path, format, track count, size, speed, audio files, and
+  companion files.
+- One-click complete-album queueing from the review while preserving cover art,
+  cue sheets, lyrics, logs, and other files beside the audio.
+- A **Fulfilled** Wanted state synchronized in one read-only Archive batch when
+  Music Library reports that an album is owned.
+- Frontend and Rust regression coverage for source ranking, preference filters,
+  review/queue flow, companion files, ownership reconciliation, and legacy
+  Wanted-store migration.
+
+### Changed
+
+- Wanted availability alerts now open the recommended source review, while
+  **Compare** opens all grouped sources with the Smart Match highlighted.
+- New-source detection now considers only folders that satisfy the album's
+  current Smart Match profile; changing a profile clears the old recommendation
+  and schedules a fresh check.
+- Fulfilled, paused, and offline watches are excluded from background checks,
+  and no Smart Match is ever downloaded without explicit confirmation.
+- Archive's Wanted summary and filters now separate ready matches, quiet watches,
+  and albums fulfilled by the external Music Library source.
+- Application, MusicBrainz User-Agent, and updater preview metadata now identify
+  version `0.0.26` and describe Smart Matches.
+
+### Fixed
+
+- Smart Match review now derives its inspected folder total from the selected
+  source, so the displayed verification size agrees with the recommendation.
+- The five-part Wanted summary and review dialog remain readable without
+  horizontal overflow at Forever's 1024×680 minimum window size.
+
 ## [0.0.25] - 2026-07-26
 
 ### Added

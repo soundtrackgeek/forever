@@ -6,18 +6,22 @@ import {
   CircleNotch,
   Database,
   Disc,
+  DownloadSimple,
   Eye,
+  Gauge,
   LockKey,
   MusicNotes,
   Pause,
   Play,
   Record,
+  SlidersHorizontal,
   Trash,
   WarningCircle,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import type { ArchiveStatus, WantedAlbum, WantedSnapshot } from "../types";
 import { formatAlbumBytes } from "../utils/albumSources";
+import { wantedPreferencesLabel } from "../utils/smartMatches";
 
 type ArchiveWorkspaceProps = {
   status: ArchiveStatus | null;
@@ -33,11 +37,14 @@ type ArchiveWorkspaceProps = {
   onSetWantedPaused: (albumId: string, paused: boolean) => Promise<unknown>;
   onRemoveWanted: (albumId: string) => Promise<unknown>;
   onOpenWanted: (album: WantedAlbum) => void;
+  onReviewBest: (album: WantedAlbum) => void;
+  onEditPreferences: (album: WantedAlbum) => void;
+  queuedAlbumIds: ReadonlySet<string>;
   onDismissWantedError: () => void;
 };
 
 type ArchiveTab = "library" | "wanted";
-type WantedFilter = "all" | "available" | "waiting";
+type WantedFilter = "all" | "matches" | "waiting" | "fulfilled";
 
 const count = (value: number | null | undefined) =>
   value == null ? "—" : value.toLocaleString();
@@ -94,17 +101,22 @@ export function ArchiveWorkspace({
   onSetWantedPaused,
   onRemoveWanted,
   onOpenWanted,
+  onReviewBest,
+  onEditPreferences,
+  queuedAlbumIds,
   onDismissWantedError,
 }: ArchiveWorkspaceProps) {
   const [tab, setTab] = useState<ArchiveTab>("library");
   const [filter, setFilter] = useState<WantedFilter>("all");
   const connected = Boolean(status?.connected);
-  const availableCount = wanted.albums.filter((album) => album.sourceCount > 0).length;
-  const waitingCount = wanted.albums.filter((album) => album.sourceCount === 0).length;
+  const availableCount = wanted.albums.filter((album) => !album.fulfilled && album.matchingSourceCount > 0).length;
+  const waitingCount = wanted.albums.filter((album) => !album.fulfilled && album.matchingSourceCount === 0).length;
+  const fulfilledCount = wanted.albums.filter((album) => album.fulfilled).length;
   const visibleWanted = useMemo(
     () => wanted.albums.filter((album) => {
-      if (filter === "available") return album.sourceCount > 0;
-      if (filter === "waiting") return album.sourceCount === 0;
+      if (filter === "matches") return !album.fulfilled && album.matchingSourceCount > 0;
+      if (filter === "waiting") return !album.fulfilled && album.matchingSourceCount === 0;
+      if (filter === "fulfilled") return album.fulfilled;
       return true;
     }),
     [filter, wanted.albums],
@@ -200,8 +212,9 @@ export function ArchiveWorkspace({
         <div className="wanted-workspace">
           <section className="wanted-summary" aria-label="Wanted status">
             <span><small>Listening for</small><strong>{wanted.albums.length}</strong><p>wanted albums</p></span>
-            <span className="is-available"><small>Transmitting</small><strong>{availableCount}</strong><p>available now</p></span>
-            <span><small>Still quiet</small><strong>{waitingCount}</strong><p>without sources</p></span>
+            <span className="is-available"><small>Smart Matches</small><strong>{availableCount}</strong><p>ready to review</p></span>
+            <span><small>Still quiet</small><strong>{waitingCount}</strong><p>without a match</p></span>
+            <span className="is-fulfilled"><small>In your Archive</small><strong>{fulfilledCount}</strong><p>fulfilled automatically</p></span>
             <span className={online ? "is-online" : "is-offline"}><small>Background checks</small><strong>{online ? wanted.intervalMinutes ? "Live" : "Manual" : "Paused"}</strong><p>{online ? wanted.activeAlbumId ? "checking one album" : "network online" : "resume when reconnected"}</p></span>
           </section>
 
@@ -215,10 +228,10 @@ export function ArchiveWorkspace({
 
           <div className="wanted-toolbar">
             <div role="tablist" aria-label="Filter wanted albums">
-              {(["all", "available", "waiting"] as WantedFilter[]).map((value) => (
+              {(["all", "matches", "waiting", "fulfilled"] as WantedFilter[]).map((value) => (
                 <button key={value} type="button" role="tab" aria-selected={filter === value} className={filter === value ? "is-active" : ""} onClick={() => setFilter(value)}>
-                  {value === "all" ? "All" : value === "available" ? "Available" : "Waiting"}
-                  <small>{value === "all" ? wanted.albums.length : value === "available" ? availableCount : waitingCount}</small>
+                  {value === "all" ? "All" : value === "matches" ? "Matches" : value === "fulfilled" ? "Fulfilled" : "Waiting"}
+                  <small>{value === "all" ? wanted.albums.length : value === "matches" ? availableCount : value === "fulfilled" ? fulfilledCount : waitingCount}</small>
                 </button>
               ))}
             </div>
@@ -232,35 +245,40 @@ export function ArchiveWorkspace({
               <div className="wanted-empty"><BellRinging size={30} weight="thin" /><strong>{wanted.albums.length ? "Nothing in this filter" : "Nothing wanted yet"}</strong><p>{wanted.albums.length ? "Choose another filter above." : "Use Add to Wanted from MusicBrainz album discovery."}</p></div>
             ) : visibleWanted.map((album) => {
               const checking = wanted.activeAlbumId === album.albumId;
-              const available = album.sourceCount > 0;
+              const available = album.matchingSourceCount > 0 && Boolean(album.bestSource);
+              const queued = queuedAlbumIds.has(album.albumId);
               return (
-                <article className={`wanted-row ${available ? "is-available" : "is-waiting"} ${album.paused ? "is-paused" : ""}`} key={album.albumId}>
+                <article className={`wanted-row ${album.fulfilled ? "is-fulfilled" : available ? "is-available" : "is-waiting"} ${album.paused ? "is-paused" : ""}`} key={album.albumId}>
                   <WantedArtwork album={album} />
                   <span className="wanted-identity">
                     <small>{album.firstReleaseDate.slice(0, 4) || "Year unknown"} · {album.artist}</small>
                     <strong>{album.title}</strong>
-                    <p>{relativeCheck(album.lastCheckedAtMs)}{album.paused ? " · Watch paused" : ""}</p>
+                    <p>{album.fulfilled ? "Fulfilled by Music Library" : relativeCheck(album.lastCheckedAtMs)}{album.paused && !album.fulfilled ? " · Watch paused" : ""}</p>
+                    {!album.fulfilled ? <em><Gauge size={12} /> {wantedPreferencesLabel(album.preferences)}</em> : null}
                   </span>
                   <span className="wanted-availability">
-                    <small>{checking ? "Listening now" : available ? "Sources found" : "Signal state"}</small>
-                    <strong>{checking ? <><CircleNotch className="search-spinner" size={14} /> Checking</> : available ? `${album.sourceCount} available` : "Still quiet"}</strong>
-                    <p>{available ? `${album.readySourceCount} ready now · ${album.completeSourceCount} fullest` : album.error ?? "No matching folders returned"}</p>
+                    <small>{album.fulfilled ? "Archive state" : checking ? "Listening now" : available ? "Smart Match" : "Signal state"}</small>
+                    <strong>{album.fulfilled ? <><CheckCircle size={14} weight="fill" /> Owned</> : checking ? <><CircleNotch className="search-spinner" size={14} /> Checking</> : available ? `${album.matchingSourceCount} matching` : "Still quiet"}</strong>
+                    <p>{album.fulfilled ? `${album.ownedTrackCount ?? "—"} tracks in your library` : available ? `${album.sourceCount} total · ${album.readySourceCount} ready now` : album.sourceCount ? `${album.sourceCount} sources miss your profile` : album.error ?? "No matching folders returned"}</p>
                   </span>
                   <span className="wanted-quality">
-                    <small>Best signal</small>
-                    <strong>{album.bestFormat ?? "—"}</strong>
-                    <p>{album.bestTrackCount ? `${album.bestTrackCount} tracks · ${album.bestSizeBytes ? formatAlbumBytes(album.bestSizeBytes) : "size unknown"}` : "Waiting for details"}</p>
+                    <small>{album.fulfilled ? "Ownership" : "Best match"}</small>
+                    <strong>{album.fulfilled ? "Archive" : album.bestFormat ?? "—"}</strong>
+                    <p>{album.fulfilled ? "Read-only source of truth" : album.bestTrackCount ? `${album.bestTrackCount} tracks · ${album.bestSizeBytes ? formatAlbumBytes(album.bestSizeBytes) : "size unknown"}` : "Waiting for a qualifying source"}</p>
                   </span>
                   <span className="wanted-speed">
-                    <small>Fastest source</small>
-                    <strong>{speed(album.bestSpeedBytesPerSecond)}</strong>
-                    {album.newSourceCount > 0 ? <b>+{album.newSourceCount} new</b> : null}
+                    <small>{album.fulfilled ? "Watch state" : "Recommended source"}</small>
+                    <strong>{album.fulfilled ? "Complete" : album.bestSource?.slotFree ? "Free slot" : album.bestSource ? `${album.bestSource.queueLength} queued` : speed(album.bestSpeedBytesPerSecond)}</strong>
+                    {!album.fulfilled && album.bestSource ? <p>{speed(album.bestSource.averageSpeedBytesPerSecond)}</p> : null}
+                    {!album.fulfilled && album.newSourceCount > 0 ? <b>+{album.newSourceCount} new match{album.newSourceCount === 1 ? "" : "es"}</b> : null}
                   </span>
                   <span className="wanted-actions">
-                    {available ? <button type="button" className="wanted-open" disabled={!online} onClick={() => onOpenWanted(album)} title={online ? "Run a fresh search and compare album sources" : "Reconnect before comparing sources"}><Eye size={16} /> Compare</button> : null}
-                    <button type="button" disabled={!online || checking || Boolean(wanted.activeAlbumId) || album.paused} onClick={() => void onCheckWanted(album.albumId).catch(() => undefined)} title={!online ? "Reconnect before checking" : "Check this album now"}><ArrowsClockwise size={15} /> Check</button>
-                    <button type="button" onClick={() => void onSetWantedPaused(album.albumId, !album.paused).catch(() => undefined)} title={album.paused ? "Resume automatic checks" : "Pause automatic checks"}>{album.paused ? <Play size={15} /> : <Pause size={15} />}</button>
-                    <button type="button" className="wanted-remove" onClick={() => void onRemoveWanted(album.albumId).catch(() => undefined)} title="Remove from Wanted"><Trash size={15} /></button>
+                    {available && !album.fulfilled ? <button type="button" className={`wanted-download-best ${queued ? "is-queued" : ""}`} disabled={!online || queued} onClick={() => onReviewBest(album)} title={online ? "Review and queue Forever's recommended source" : "Reconnect before downloading"}>{queued ? <CheckCircle size={16} weight="fill" /> : <DownloadSimple size={16} weight="bold" />} {queued ? "Queued" : "Download best"}</button> : null}
+                    {!album.fulfilled && album.sourceCount > 0 ? <button type="button" className="wanted-open" disabled={!online} onClick={() => onOpenWanted(album)} title={online ? "Run a fresh search and compare album sources" : "Reconnect before comparing sources"}><Eye size={16} /> Compare</button> : null}
+                    {!album.fulfilled ? <button type="button" aria-label={`Edit ${album.title} Smart Match profile`} onClick={() => onEditPreferences(album)} title="Edit Smart Match profile"><SlidersHorizontal size={15} /></button> : null}
+                    {!album.fulfilled ? <button type="button" aria-label={`Check ${album.title} now`} disabled={!online || checking || Boolean(wanted.activeAlbumId) || album.paused} onClick={() => void onCheckWanted(album.albumId).catch(() => undefined)} title={!online ? "Reconnect before checking" : "Check this album now"}><ArrowsClockwise size={15} /></button> : null}
+                    {!album.fulfilled ? <button type="button" aria-label={`${album.paused ? "Resume" : "Pause"} ${album.title} watch`} onClick={() => void onSetWantedPaused(album.albumId, !album.paused).catch(() => undefined)} title={album.paused ? "Resume automatic checks" : "Pause automatic checks"}>{album.paused ? <Play size={15} /> : <Pause size={15} />}</button> : null}
+                    <button type="button" className="wanted-remove" aria-label={`Remove ${album.title} from Wanted`} onClick={() => void onRemoveWanted(album.albumId).catch(() => undefined)} title="Remove from Wanted"><Trash size={15} /></button>
                   </span>
                 </article>
               );

@@ -6,9 +6,19 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AlbumReleaseGroup, WantedAlbum, WantedSnapshot } from "../types";
+import type {
+  AlbumReleaseGroup,
+  WantedAlbum,
+  WantedPreferences,
+  WantedSnapshot,
+} from "../types";
 
 const now = Date.now();
+export const defaultWantedPreferences: WantedPreferences = {
+  formatPreference: "preferLossless",
+  minimumBitrateKbps: 320,
+  minimumTrackCount: null,
+};
 
 const previewSnapshot: WantedSnapshot = {
   albums: [
@@ -19,9 +29,14 @@ const previewSnapshot: WantedSnapshot = {
       firstReleaseDate: "1981-07-11",
       coverArtUrl: "https://coverartarchive.org/release-group/419fa215-3740-3b1c-aa04-a209eab30789/front-250",
       paused: false,
+      fulfilled: false,
+      fulfilledAtMs: null,
+      ownedTrackCount: null,
+      preferences: defaultWantedPreferences,
       addedAtMs: now - 86_400_000,
       lastCheckedAtMs: now - 8 * 60_000,
       sourceCount: 7,
+      matchingSourceCount: 4,
       readySourceCount: 3,
       completeSourceCount: 4,
       newSourceCount: 2,
@@ -29,6 +44,18 @@ const previewSnapshot: WantedSnapshot = {
       bestTrackCount: 10,
       bestSizeBytes: 487_000_000,
       bestSpeedBytesPerSecond: 8_400_000,
+      bestSource: {
+        username: "audiophile92",
+        folder: "Music\\Def Leppard\\1981 - High 'n' Dry [FLAC]",
+        format: "FLAC",
+        trackCount: 10,
+        sizeBytes: 487_000_000,
+        slotFree: true,
+        averageSpeedBytesPerSecond: 8_400_000,
+        queueLength: 0,
+        minimumBitrateKbps: null,
+        score: 1_280,
+      },
       error: null,
     },
     {
@@ -38,9 +65,14 @@ const previewSnapshot: WantedSnapshot = {
       firstReleaseDate: "1992",
       coverArtUrl: null,
       paused: false,
+      fulfilled: false,
+      fulfilledAtMs: null,
+      ownedTrackCount: null,
+      preferences: { ...defaultWantedPreferences, minimumTrackCount: 11 },
       addedAtMs: now - 43_200_000,
       lastCheckedAtMs: now - 12 * 60_000,
       sourceCount: 0,
+      matchingSourceCount: 0,
       readySourceCount: 0,
       completeSourceCount: 0,
       newSourceCount: 0,
@@ -48,6 +80,7 @@ const previewSnapshot: WantedSnapshot = {
       bestTrackCount: null,
       bestSizeBytes: null,
       bestSpeedBytesPerSecond: null,
+      bestSource: null,
       error: null,
     },
     {
@@ -57,9 +90,14 @@ const previewSnapshot: WantedSnapshot = {
       firstReleaseDate: "1992",
       coverArtUrl: null,
       paused: true,
+      fulfilled: false,
+      fulfilledAtMs: null,
+      ownedTrackCount: null,
+      preferences: { formatPreference: "any", minimumBitrateKbps: 256, minimumTrackCount: 10 },
       addedAtMs: now - 172_800_000,
       lastCheckedAtMs: now - 86_400_000,
       sourceCount: 1,
+      matchingSourceCount: 1,
       readySourceCount: 0,
       completeSourceCount: 1,
       newSourceCount: 0,
@@ -67,6 +105,43 @@ const previewSnapshot: WantedSnapshot = {
       bestTrackCount: 11,
       bestSizeBytes: 114_000_000,
       bestSpeedBytesPerSecond: 2_100_000,
+      bestSource: {
+        username: "switchsignal",
+        folder: "Music\\Ronan\\Switch (1992) [320]",
+        format: "MP3",
+        trackCount: 11,
+        sizeBytes: 114_000_000,
+        slotFree: false,
+        averageSpeedBytesPerSecond: 2_100_000,
+        queueLength: 3,
+        minimumBitrateKbps: 320,
+        score: 650,
+      },
+      error: null,
+    },
+    {
+      albumId: "preview-fulfilled",
+      artist: "Def Leppard",
+      title: "Hysteria",
+      firstReleaseDate: "1987-08-03",
+      coverArtUrl: null,
+      paused: false,
+      fulfilled: true,
+      fulfilledAtMs: now - 3_600_000,
+      ownedTrackCount: 12,
+      preferences: defaultWantedPreferences,
+      addedAtMs: now - 259_200_000,
+      lastCheckedAtMs: now - 90_000_000,
+      sourceCount: 9,
+      matchingSourceCount: 6,
+      readySourceCount: 4,
+      completeSourceCount: 5,
+      newSourceCount: 0,
+      bestFormat: "FLAC",
+      bestTrackCount: 12,
+      bestSizeBytes: 612_000_000,
+      bestSpeedBytesPerSecond: 9_400_000,
+      bestSource: null,
       error: null,
     },
   ],
@@ -86,8 +161,10 @@ const notify = async (album: WantedAlbum) => {
   }
   if (!permissionGranted) return;
   sendNotification({
-    title: `${album.title} is transmitting`,
-    body: `${album.sourceCount} ${album.sourceCount === 1 ? "source" : "sources"} found for ${album.artist}. Open Forever to compare them.`,
+    title: `${album.title} has a Smart Match`,
+    body: album.bestSource
+      ? `${album.bestSource.format} · ${album.bestSource.trackCount} tracks · ${album.bestSource.slotFree ? "free slot" : `${album.bestSource.queueLength} queued`}. Open Forever to review it.`
+      : `${album.matchingSourceCount} matching sources found for ${album.artist}.`,
   });
 };
 
@@ -197,11 +274,16 @@ export function useWantedAlbums() {
       return {
         ...current,
         albums: [{
-          ...request,
+        ...request,
           paused: false,
+          fulfilled: false,
+          fulfilledAtMs: null,
+          ownedTrackCount: null,
+          preferences: defaultWantedPreferences,
           addedAtMs: Date.now(),
           lastCheckedAtMs: null,
           sourceCount: 0,
+          matchingSourceCount: 0,
           readySourceCount: 0,
           completeSourceCount: 0,
           newSourceCount: 0,
@@ -209,6 +291,7 @@ export function useWantedAlbums() {
           bestTrackCount: null,
           bestSizeBytes: null,
           bestSpeedBytesPerSecond: null,
+          bestSource: null,
           error: null,
         }, ...current.albums],
         updatedAtMs: Date.now(),
@@ -240,6 +323,44 @@ export function useWantedAlbums() {
       updatedAtMs: Date.now(),
     })), [invokeOrPreview]);
 
+  const setPreferences = useCallback(async (
+    albumId: string,
+    preferences: WantedPreferences,
+  ) => await invokeOrPreview("wanted_set_preferences", { albumId, preferences }, (current) => ({
+    ...current,
+    albums: current.albums.map((album) => album.albumId === albumId ? {
+      ...album,
+      preferences,
+      lastCheckedAtMs: null,
+      matchingSourceCount: 0,
+      newSourceCount: 0,
+      bestFormat: null,
+      bestTrackCount: null,
+      bestSizeBytes: null,
+      bestSpeedBytesPerSecond: null,
+      bestSource: null,
+    } : album),
+    updatedAtMs: Date.now(),
+  })), [invokeOrPreview]);
+
+  const syncFulfilled = useCallback(async (
+    fulfillments: Array<{ albumId: string; owned: boolean; trackCount: number | null }>,
+  ) => await invokeOrPreview("wanted_sync_fulfilled", { fulfillments }, (current) => ({
+    ...current,
+    albums: current.albums.map((album) => {
+      const fulfillment = fulfillments.find((item) => item.albumId === album.albumId);
+      if (!fulfillment) return album;
+      return {
+        ...album,
+        fulfilled: fulfillment.owned,
+        fulfilledAtMs: fulfillment.owned ? album.fulfilledAtMs ?? Date.now() : null,
+        ownedTrackCount: fulfillment.owned ? fulfillment.trackCount : null,
+        newSourceCount: fulfillment.owned ? 0 : album.newSourceCount,
+      };
+    }),
+    updatedAtMs: Date.now(),
+  })), [invokeOrPreview]);
+
   const check = useCallback(async (albumId: string) => {
     if (native) return await invokeOrPreview("wanted_check", { albumId }, (current) => current);
     const started: WantedSnapshot = { ...snapshot, activeAlbumId: albumId, updatedAtMs: Date.now() };
@@ -253,6 +374,7 @@ export function useWantedAlbums() {
           ...album,
           lastCheckedAtMs: Date.now(),
           sourceCount: album.sourceCount || 3,
+          matchingSourceCount: album.matchingSourceCount || 2,
           readySourceCount: album.readySourceCount || 1,
           completeSourceCount: album.completeSourceCount || 2,
           newSourceCount: album.sourceCount ? 0 : 3,
@@ -260,6 +382,18 @@ export function useWantedAlbums() {
           bestTrackCount: album.bestTrackCount || 10,
           bestSizeBytes: album.bestSizeBytes || 420_000_000,
           bestSpeedBytesPerSecond: album.bestSpeedBytesPerSecond || 6_200_000,
+          bestSource: album.bestSource || {
+            username: "audiophile92",
+            folder: `Music\\${album.artist}\\${album.title} [FLAC]`,
+            format: "FLAC",
+            trackCount: album.preferences.minimumTrackCount || 10,
+            sizeBytes: 420_000_000,
+            slotFree: true,
+            averageSpeedBytesPerSecond: 6_200_000,
+            queueLength: 0,
+            minimumBitrateKbps: null,
+            score: 1_240,
+          },
         } : album),
         updatedAtMs: Date.now(),
       };
@@ -284,8 +418,10 @@ export function useWantedAlbums() {
     remove,
     setPaused,
     setIntervalMinutes,
+    setPreferences,
+    syncFulfilled,
     check,
     dismissAlert: () => setAlert(null),
     clearError: () => setError(null),
-  }), [add, alert, byAlbumId, check, error, ready, remove, setIntervalMinutes, setPaused, snapshot]);
+  }), [add, alert, byAlbumId, check, error, ready, remove, setIntervalMinutes, setPaused, setPreferences, snapshot, syncFulfilled]);
 }

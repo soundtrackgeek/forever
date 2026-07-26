@@ -5,6 +5,7 @@ import type {
   ArchiveAlbumMatch,
   ArchiveMatchResponse,
   ArchiveStatus,
+  WantedAlbum,
 } from "../types";
 
 const previewStatus: ArchiveStatus = {
@@ -43,14 +44,31 @@ const previewMatch = (album: AlbumReleaseGroup): ArchiveAlbumMatch => {
 export function useArchiveInventory(
   artist: string | null,
   albums: AlbumReleaseGroup[],
+  wantedAlbums: WantedAlbum[],
 ) {
   const native = isTauri();
   const [status, setStatus] = useState<ArchiveStatus | null>(null);
   const [matches, setMatches] = useState<ArchiveAlbumMatch[]>([]);
+  const [wantedMatches, setWantedMatches] = useState<ArchiveAlbumMatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [matching, setMatching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const wantedQueryKey = useMemo(
+    () => wantedAlbums
+      .map((album) => `${album.albumId}\u0000${album.artist}\u0000${album.title}\u0000${album.firstReleaseDate}`)
+      .join("\u0001"),
+    [wantedAlbums],
+  );
+  const wantedQueries = useMemo(
+    () => wantedQueryKey
+      ? wantedQueryKey.split("\u0001").map((entry) => {
+          const [id, wantedArtist, title, firstReleaseDate] = entry.split("\u0000");
+          return { id, artist: wantedArtist, title, firstReleaseDate };
+        })
+      : [],
+    [wantedQueryKey],
+  );
 
   const readStatus = useCallback(
     async () => (native ? await invoke<ArchiveStatus>("archive_status") : previewStatus),
@@ -140,9 +158,53 @@ export function useArchiveInventory(
     };
   }, [albums, artist, native, revision]);
 
+  useEffect(() => {
+    let current = true;
+    if (!wantedQueryKey) {
+      void Promise.resolve().then(() => {
+        if (current) setWantedMatches([]);
+      });
+      return () => {
+        current = false;
+      };
+    }
+    void (native
+      ? invoke<ArchiveMatchResponse>("archive_match_wanted", { albums: wantedQueries })
+      : Promise.resolve({
+          source: previewStatus,
+          matches: wantedQueries.map((album) => {
+            const owned = album.title === "Hysteria";
+            return {
+              albumId: album.id,
+              ownership: owned ? "owned" as const : "notOwned" as const,
+              localAlbumId: owned ? `preview-${album.id}` : null,
+              localTitle: owned ? album.title : null,
+              localArtist: owned ? album.artist : null,
+              localYear: owned ? Number(album.firstReleaseDate.slice(0, 4)) || null : null,
+              trackCount: owned ? 12 : null,
+            };
+          }),
+        }))
+      .then((response) => {
+        if (!current) return;
+        setWantedMatches(response.matches);
+        setStatus(response.source);
+      })
+      .catch((cause) => {
+        if (current) setError(message(cause));
+      });
+    return () => {
+      current = false;
+    };
+  }, [native, revision, wantedQueries, wantedQueryKey]);
+
   const matchByAlbumId = useMemo(
     () => new Map(matches.map((match) => [match.albumId, match])),
     [matches],
+  );
+  const wantedMatchByAlbumId = useMemo(
+    () => new Map(wantedMatches.map((match) => [match.albumId, match])),
+    [wantedMatches],
   );
 
   return useMemo(
@@ -152,8 +214,9 @@ export function useArchiveInventory(
       matching,
       error,
       matchByAlbumId,
+      wantedMatchByAlbumId,
       refresh,
     }),
-    [error, loading, matchByAlbumId, matching, refresh, status],
+    [error, loading, matchByAlbumId, matching, refresh, status, wantedMatchByAlbumId],
   );
 }

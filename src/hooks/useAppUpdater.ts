@@ -30,19 +30,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.24",
-  version: "0.0.25",
-  body: `## What’s new in Forever 0.0.25
+  currentVersion: "0.0.25",
+  version: "0.0.26",
+  body: `## What’s new in Forever 0.0.26
 
 ### Added
 
-- Wanted Signals turns missing MusicBrainz albums into a persistent watchlist inside Archive.
-- Forever checks wanted albums in the background and alerts you when new Soulseek folders appear.
-- Compare sources opens the familiar grouped album view without downloading automatically.
+- Smart Match profiles let each wanted album prefer lossless audio, require lossless, or accept any format with optional bitrate and track-count limits.
+- Review best opens the recommended remote folder before download, showing its listener, format, track count, size, speed, and preserved companion files.
+- Wanted albums move to Fulfilled automatically when the read-only Music Library Archive reports that you own them.
 
 ### Changed
 
-- The Music Library database remains strictly read-only; Wanted data is stored separately by Forever.`,
+- Forever ranks qualifying sources by completeness, format, free upload slot, speed, and queue length, but never downloads one without confirmation.`,
   date: "2026-07-26",
 };
 

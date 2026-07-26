@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useCallback, useMemo, useState } from "react";
-import type { FolderInspection, SearchResult } from "../types";
+import type { FolderFile, FolderInspection, SearchResult } from "../types";
 
 const previewTracks = [
   ["01 - Thresholds.flac", 112_400_000, 321],
@@ -20,16 +20,19 @@ const errorMessage = (cause: unknown) =>
 
 const previewInspection = (result: SearchResult): FolderInspection => {
   const folder = result.folder ?? "Music\\Liminal Structures\\Night Geometry";
+  const smartMatchTrackSize = result.id.startsWith("wanted-") && result.sizeBytes
+    ? Math.floor(result.sizeBytes / previewTracks.length)
+    : null;
   return {
     token: 1,
     username: result.owner,
     requestedFolder: folder,
     receivedAtMs: Date.now(),
-    files: previewTracks.map(([filename, sizeBytes, durationSeconds]) => ({
+    files: [...previewTracks.map(([filename, sizeBytes, durationSeconds]): FolderFile => ({
       remoteFilename: `${folder}\\${filename}`,
       directory: folder,
       filename,
-      sizeBytes,
+      sizeBytes: smartMatchTrackSize ?? sizeBytes,
       extension: "flac",
       bitrate: 2_304,
       durationSeconds,
@@ -37,6 +40,31 @@ const previewInspection = (result: SearchResult): FolderInspection => {
       sampleRate: 96_000,
       bitDepth: 24,
     })),
+      {
+        remoteFilename: `${folder}\\cover.jpg`,
+        directory: folder,
+        filename: "cover.jpg",
+        sizeBytes: 1_800_000,
+        extension: "jpg",
+        bitrate: null,
+        durationSeconds: null,
+        vbr: null,
+        sampleRate: null,
+        bitDepth: null,
+      },
+      {
+        remoteFilename: `${folder}\\album.cue`,
+        directory: folder,
+        filename: "album.cue",
+        sizeBytes: 12_000,
+        extension: "cue",
+        bitrate: null,
+        durationSeconds: null,
+        vbr: null,
+        sampleRate: null,
+        bitDepth: null,
+      },
+    ],
   };
 };
 
