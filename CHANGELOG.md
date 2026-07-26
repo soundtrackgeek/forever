@@ -5,6 +5,34 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.21] - 2026-07-26
+
+### Added
+
+- A dedicated **Archive** workspace backed by Music Library's existing
+  `music-library.sqlite3` database, with its source path, latest completed
+  import, album total, track total, and refresh control.
+- **Owned** and **Don't own** markers on MusicBrainz discography cards and the
+  Soulseek album-source report, including local year and track-count detail for
+  owned matches.
+- A batched per-artist ownership matcher against Music Library's normalized
+  `albums` table, with punctuation-tolerant title comparison and closest-year
+  selection when duplicate local album titles exist.
+- Rust regression coverage proving the Archive connection rejects writes,
+  preserves source rows, reads import metadata without a full table count, and
+  distinguishes owned from missing releases.
+
+### Changed
+
+- The former **Library** navigation destination is now **Archive**, reflecting
+  that it inventories an existing external collection rather than adopting
+  Forever downloads.
+- The Music Library database is opened only with SQLite's read-only flag and
+  query-only mode; Forever exposes no command that mutates it and keeps all
+  Soulseek downloads in the independently configured download folder.
+- Application, MusicBrainz User-Agent, and updater preview metadata now
+  identify version `0.0.21` and describe the Archive release.
+
 ## [0.0.20] - 2026-07-26
 
 ### Added

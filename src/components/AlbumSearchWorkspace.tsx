@@ -9,6 +9,8 @@ import {
 } from "@phosphor-icons/react";
 import { useDeferredValue, useMemo, useState, type FormEvent } from "react";
 import type { AlbumArtist, AlbumCatalog, AlbumReleaseGroup, ConnectionSnapshot } from "../types";
+import type { ArchiveAlbumMatch } from "../types";
+import { ArchiveOwnershipBadge } from "./ArchiveOwnershipBadge";
 import { CountryFlag } from "./CountryFlag";
 import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
 
@@ -23,6 +25,9 @@ type AlbumSearchWorkspaceProps = {
   error: string | null;
   connection: ConnectionSnapshot;
   searchMode: SearchMode;
+  archiveConnected: boolean;
+  archiveLoading: boolean;
+  archiveMatches: ReadonlyMap<string, ArchiveAlbumMatch>;
   onQueryChange: (query: string) => void;
   onSearch: (query: string) => void;
   onSelectArtist: (artist: AlbumArtist) => void;
@@ -88,6 +93,9 @@ export function AlbumSearchWorkspace({
   error,
   connection,
   searchMode,
+  archiveConnected,
+  archiveLoading,
+  archiveMatches,
   onQueryChange,
   onSearch,
   onSelectArtist,
@@ -229,7 +237,15 @@ export function AlbumSearchWorkspace({
               <article className="album-card" key={album.id}>
                 <AlbumCover album={album} />
                 <div className="album-card-copy">
-                  <span>{album.firstReleaseDate.slice(0, 4) || "Year unknown"}</span>
+                  <div className="album-card-status">
+                    <span>{album.firstReleaseDate.slice(0, 4) || "Year unknown"}</span>
+                    <ArchiveOwnershipBadge
+                      match={archiveMatches.get(album.id)}
+                      archiveConnected={archiveConnected}
+                      loading={archiveLoading}
+                      compact
+                    />
+                  </div>
                   <h3>{album.title}</h3>
                   <p>{[album.primaryType, ...album.secondaryTypes].filter(Boolean).join(" · ")}</p>
                   <button

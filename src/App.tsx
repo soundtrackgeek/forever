@@ -3,6 +3,7 @@ import { useState } from "react";
 import "./App.css";
 import { AppSidebar } from "./components/AppSidebar";
 import { AlbumSearchWorkspace } from "./components/AlbumSearchWorkspace";
+import { ArchiveWorkspace } from "./components/ArchiveWorkspace";
 import { BrowseSharesHome } from "./components/BrowseSharesHome";
 import { ConnectionOnboarding } from "./components/ConnectionOnboarding";
 import { ConnectionSettings } from "./components/ConnectionSettings";
@@ -17,6 +18,7 @@ import { UserSharesWorkspace } from "./components/UserSharesWorkspace";
 import { UpdateExperience } from "./components/UpdateExperience";
 import { WindowControls } from "./components/WindowControls";
 import { useAppUpdater } from "./hooks/useAppUpdater";
+import { useArchiveInventory } from "./hooks/useArchiveInventory";
 import { useAlbumDiscovery } from "./hooks/useAlbumDiscovery";
 import { useSoulseekConnection } from "./hooks/useSoulseekConnection";
 import { useSoulseekFolders } from "./hooks/useSoulseekFolders";
@@ -26,7 +28,14 @@ import { useSoulseekShares } from "./hooks/useSoulseekShares";
 import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
 import { useLocalSharing } from "./hooks/useLocalSharing";
 import { usePrivateMessages } from "./hooks/usePrivateMessages";
-import type { AlbumSearchContext, AlbumSource, SearchResult } from "./types";
+import type {
+  AlbumReleaseGroup,
+  AlbumSearchContext,
+  AlbumSource,
+  SearchResult,
+} from "./types";
+
+const emptyAlbumCatalog: AlbumReleaseGroup[] = [];
 
 const viewDetails = {
   home: {
@@ -43,11 +52,6 @@ const viewDetails = {
     icon: DownloadSimple,
     title: "Every file, still in sight",
     copy: "Pause, resume, retry, or reveal a download from the live shelf below.",
-  },
-  library: {
-    icon: Radio,
-    title: "Your library comes next",
-    copy: "Playback, history, and playlists will follow the core download journey.",
   },
   settings: {
     icon: Sliders,
@@ -101,6 +105,8 @@ function App() {
   );
   const updater = useAppUpdater();
   const albums = useAlbumDiscovery();
+  const archiveAlbums = albums.catalog?.albums ?? emptyAlbumCatalog;
+  const archive = useArchiveInventory(albums.selectedArtist?.name ?? null, archiveAlbums);
   const connection = useSoulseekConnection();
   const search = useSoulseekSearch();
   const transfers = useSoulseekTransfers();
@@ -214,6 +220,13 @@ function App() {
               searchMode={searchMode}
               albumContext={albumContext}
               albumResultView={albumResultView}
+              archiveConnected={Boolean(archive.status?.connected)}
+              archiveLoading={archive.loading || archive.matching}
+              archiveMatch={
+                albumContext
+                  ? archive.matchByAlbumId.get(albumContext.albumId)
+                  : undefined
+              }
               query={query}
               results={search.results}
               selectedResult={selectedResult}
@@ -278,6 +291,9 @@ function App() {
             error={albums.error}
             connection={connection.snapshot}
             searchMode={searchMode}
+            archiveConnected={Boolean(archive.status?.connected)}
+            archiveLoading={archive.loading || archive.matching}
+            archiveMatches={archive.matchByAlbumId}
             onQueryChange={albums.setQuery}
             onSearch={(artistQuery) => {
               void albums.searchArtists(artistQuery).catch(() => undefined);
@@ -291,6 +307,7 @@ function App() {
               setQuery(nextQuery);
               setSelectedResultId(null);
               setAlbumContext({
+                albumId: album.id,
                 artist,
                 title: album.title,
                 coverArtUrl: album.coverArtUrl,
@@ -302,6 +319,13 @@ function App() {
             }}
             onOpenConnection={() => setActiveView("settings")}
             onDismissError={albums.clearError}
+          />
+        ) : activeView === "archive" ? (
+          <ArchiveWorkspace
+            status={archive.status}
+            loading={archive.loading}
+            error={archive.error}
+            onRefresh={archive.refresh}
           />
         ) : activeView === "messages" ? (
           <MessagesWorkspace

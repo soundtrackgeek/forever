@@ -7864,3 +7864,407 @@ form.settings-panel {
   align-items: center;
   gap: 6px;
 }
+
+/* v0.0.21 — Archive ownership from the read-only Music Library database. */
+.archive-ownership {
+  display: inline-flex;
+  width: max-content;
+  min-height: 24px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  color: #a8adbd;
+  font-size: 8px;
+  font-weight: 650;
+  line-height: 1;
+  background: rgba(19, 23, 36, 0.82);
+  border: 1px solid #353b50;
+  border-radius: 13px;
+  white-space: nowrap;
+}
+
+.archive-ownership.is-owned {
+  color: #9fe0a2;
+  background: rgba(70, 151, 84, 0.1);
+  border-color: rgba(94, 185, 106, 0.34);
+}
+
+.archive-ownership.is-not-owned {
+  color: #d5a85f;
+  background: rgba(201, 143, 50, 0.07);
+  border-color: rgba(206, 153, 65, 0.28);
+}
+
+.archive-ownership.is-loading,
+.archive-ownership.is-unknown {
+  color: #777d90;
+}
+
+.archive-ownership.is-compact {
+  min-height: 19px;
+  gap: 4px;
+  padding-inline: 6px;
+  font-size: 7px;
+}
+
+.album-card-status {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.album-card-status > span:first-child {
+  color: var(--amber);
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.live-search-card .archive-ownership {
+  margin-top: 12px;
+}
+
+.archive-workspace {
+  min-width: 0;
+  min-height: 0;
+  padding: 39px 44px 48px;
+  overflow: auto;
+  color: var(--text-soft);
+  background:
+    radial-gradient(circle at 74% 5%, rgba(97, 73, 150, 0.11), transparent 25%),
+    var(--bg);
+}
+
+.archive-heading {
+  display: flex;
+  max-width: 1220px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 auto;
+  padding-bottom: 28px;
+  border-bottom: 1px solid #252b3d;
+}
+
+.archive-heading > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 17px;
+}
+
+.archive-heading-mark,
+.archive-database-mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--amber);
+  background: #171628;
+  border: 1px solid #4c3b54;
+}
+
+.archive-heading-mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 9px;
+}
+
+.archive-heading h1 {
+  margin: 0 0 6px;
+  color: #f1eff7;
+  font-size: 28px;
+  font-weight: 440;
+  letter-spacing: -0.035em;
+}
+
+.archive-heading p {
+  margin: 0;
+  color: #858a9e;
+  font-size: 11px;
+}
+
+.archive-refresh {
+  display: inline-flex;
+  min-height: 38px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  color: #d6d3de;
+  font-size: 9px;
+  font-weight: 600;
+  background: #151a2a;
+  border: 1px solid #353b51;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.archive-refresh:hover:not(:disabled) {
+  color: white;
+  border-color: #59476d;
+}
+
+.archive-refresh:disabled {
+  cursor: wait;
+  opacity: 0.66;
+}
+
+.archive-source {
+  max-width: 1220px;
+  margin: 24px auto 0;
+  overflow: hidden;
+  background:
+    linear-gradient(118deg, rgba(32, 27, 49, 0.72), rgba(13, 17, 29, 0.95) 58%),
+    #0d111d;
+  border: 1px solid #373047;
+  border-radius: 10px;
+}
+
+.archive-source.is-disconnected {
+  border-color: rgba(190, 83, 91, 0.42);
+}
+
+.archive-source-intro {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 22px 24px;
+}
+
+.archive-database-mark {
+  width: 58px;
+  height: 58px;
+  color: #b296e7;
+  border-radius: 8px;
+}
+
+.archive-source-intro small {
+  color: var(--amber);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.archive-source-intro h2 {
+  margin: 4px 0 5px;
+  color: #eceaf2;
+  font-size: 18px;
+  font-weight: 520;
+}
+
+.archive-source-intro p {
+  max-width: 720px;
+  margin: 0;
+  overflow: hidden;
+  color: #777d90;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-source-intro > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #9ed9a1;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.archive-source.is-disconnected .archive-source-intro > strong {
+  color: #dda0a6;
+}
+
+.archive-source-intro > strong i {
+  width: 7px;
+  height: 7px;
+  background: currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 10px currentColor;
+}
+
+.archive-source-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 24px 18px;
+  padding: 11px 13px;
+  color: #e8a5aa;
+  font-size: 8px;
+  background: rgba(103, 35, 44, 0.18);
+  border: 1px solid rgba(187, 75, 85, 0.38);
+  border-radius: 6px;
+}
+
+.archive-source-error span {
+  display: grid;
+  gap: 2px;
+}
+
+.archive-source-error strong {
+  color: #f0c1c4;
+}
+
+.archive-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+  border-top: 1px solid #2a2e40;
+}
+
+.archive-stats > div {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 17px 24px 19px;
+}
+
+.archive-stats > div + div {
+  border-left: 1px solid #2a2e40;
+}
+
+.archive-stats dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #73798d;
+  font-size: 8px;
+  font-weight: 620;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.archive-stats dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #e7e4ed;
+  font-size: 20px;
+  font-weight: 430;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-principles {
+  display: grid;
+  max-width: 1220px;
+  margin: 22px auto 0;
+  border-top: 1px solid #252b3d;
+}
+
+.archive-principles article {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  min-height: 82px;
+  padding: 13px 7px;
+  border-bottom: 1px solid #202638;
+}
+
+.archive-principles article > svg {
+  color: #9a84c8;
+}
+
+.archive-principles h2 {
+  margin: 0 0 4px;
+  color: #d9d7e0;
+  font-size: 11px;
+  font-weight: 590;
+}
+
+.archive-principles p {
+  margin: 0;
+  color: #74798b;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.archive-principles article > strong {
+  padding: 5px 8px;
+  color: #96d79a;
+  font-size: 7px;
+  font-weight: 680;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(69, 139, 78, 0.1);
+  border: 1px solid rgba(87, 171, 97, 0.27);
+  border-radius: 4px;
+}
+
+@media (max-width: 1080px) {
+  .archive-workspace {
+    padding-inline: 28px;
+  }
+
+  .archive-heading h1 {
+    font-size: 24px;
+  }
+
+  .archive-source-intro {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .archive-database-mark {
+    width: 52px;
+    height: 52px;
+  }
+
+  .archive-source-intro > strong {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 760px), (max-height: 650px) {
+  .archive-workspace {
+    padding: 22px 20px 34px;
+  }
+
+  .archive-heading {
+    align-items: flex-start;
+  }
+
+  .archive-heading-mark {
+    display: none;
+  }
+
+  .archive-heading h1 {
+    font-size: 21px;
+  }
+
+  .archive-heading p {
+    max-width: 480px;
+    font-size: 9px;
+  }
+
+  .archive-refresh {
+    min-height: 34px;
+  }
+
+  .archive-source {
+    margin-top: 17px;
+  }
+
+  .archive-source-intro {
+    padding: 16px;
+  }
+
+  .archive-stats > div {
+    padding: 13px 16px;
+  }
+
+  .archive-stats dd {
+    font-size: 16px;
+  }
+
+  .archive-principles article {
+    min-height: 70px;
+  }
+}

@@ -1,3 +1,4 @@
+mod archive;
 mod connection;
 mod musicbrainz;
 
@@ -17,6 +18,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            archive::archive_status,
+            archive::archive_match_albums,
             connection::connection_bootstrap,
             connection::connection_save_profile,
             connection::connection_connect,

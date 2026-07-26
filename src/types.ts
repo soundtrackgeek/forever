@@ -28,6 +28,7 @@ export type SearchResult = {
 };
 
 export type AlbumSearchContext = {
+  albumId: string;
   artist: string;
   title: string;
   coverArtUrl: string;
@@ -284,6 +285,34 @@ export type AlbumCatalog = {
   artistId: string;
   albums: AlbumReleaseGroup[];
   truncated: boolean;
+};
+
+export type ArchiveStatus = {
+  path: string;
+  connected: boolean;
+  readOnly: boolean;
+  albumCount: number | null;
+  trackCount: number | null;
+  lastImportedAt: string | null;
+  lastModifiedAtMs: number | null;
+  error: string | null;
+};
+
+export type ArchiveOwnership = "owned" | "notOwned" | "unknown";
+
+export type ArchiveAlbumMatch = {
+  albumId: string;
+  ownership: ArchiveOwnership;
+  localAlbumId: string | null;
+  localTitle: string | null;
+  localArtist: string | null;
+  localYear: number | null;
+  trackCount: number | null;
+};
+
+export type ArchiveMatchResponse = {
+  source: ArchiveStatus;
+  matches: ArchiveAlbumMatch[];
 };
 
 export type TransferQueueSnapshot = {

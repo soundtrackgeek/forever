@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.20` turns MusicBrainz-guided Soulseek
-> searches into album sources with track previews and whole-folder download,
-> while retaining the compact transfer drawer and the `0.0.17` startup repair.
+> **Status:** pre-alpha. Version `0.0.21` adds a read-only Archive backed by the
+> existing Music Library database, with ownership markers throughout album
+> discovery and search while keeping Forever downloads separate.
 
-If `0.0.16` is installed, download and run the latest `0.0.20` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.21` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -34,6 +34,13 @@ configuration and transfers.
 - Album-source results grouped by listener and remote folder, with track count,
   formats, aggregate search size, readiness and speed, hover/focus track-list
   previews, an individual-file fallback, and complete-folder download
+- A dedicated Archive workspace that opens Music Library's
+  `music-library.sqlite3` database with SQLite read-only and query-only
+  enforcement, reports its latest import and inventory totals, and never adds
+  Forever downloads to the external collection
+- Batched **Owned** and **Don't own** markers across MusicBrainz discographies
+  and Soulseek album-source reports, matched from the Archive's normalized
+  artist, album, release-year, and track-count metadata
 - A dedicated top-level Browse workspace with exact-username entry and recent
   or favorite listener shortcuts, keeping full share trees separate from Search
 - A dedicated People workspace with live online/away/offline presence,
@@ -158,6 +165,16 @@ to **Individual files** for the original file-by-file results. **Download
 album** inspects the chosen folder and queues every file in it, including cover
 art, lyrics, cue sheets, and other companion files.
 
+Open **Archive** to inspect the external Music Library source. On Windows,
+Forever discovers it at
+`%APPDATA%\com.local.musiclibrary\music-library.sqlite3`, reads the latest
+completed import plus the normalized `albums` inventory, and uses that data to
+mark cataloged releases as **Owned** or **Don't own**. **Refresh Archive** picks
+up a newer Music Library import. Forever opens this database using SQLite's
+read-only flag and query-only mode; it has no Archive write command. Soulseek
+downloads continue to use the folder configured under Connection settings and
+are never imported into Archive.
+
 Open **Browse** for a dedicated exact-username entry point plus recent and
 favorite listeners. Browsing from Search, People, or Transfers opens the same
 workspace, and **Browse another** returns to its listener picker.
@@ -184,9 +201,9 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.20` intentionally keeps one active download at a time, even when an
+Version `0.0.21` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
-three. Edition/pressing lookup, Library management, playback, rooms, and public
+three. Edition/pressing lookup, playback, rooms, and public
 chat remain outside this release.
 
 Soulseek does not have a separate sign-up step. Connecting with a valid unused
@@ -221,6 +238,14 @@ Passwords are excluded from both. With “Remember
 password” enabled, Windows Credential Manager stores the password; otherwise it
 exists only for the current app session.
 
+Archive reads the external Music Library database at
+`%APPDATA%\com.local.musiclibrary\music-library.sqlite3`. Forever uses the
+`import_runs` and `albums` tables for source status and ownership matching. The
+connection is opened with `SQLITE_OPEN_READ_ONLY`, a two-second busy timeout,
+and `PRAGMA query_only = ON`; Forever never migrates, creates, updates, or
+deletes anything in this database. Album and track totals come from the latest
+completed import record rather than a scan of the 1.8 GB source.
+
 The legacy Soulseek protocol itself does not provide transport encryption.
 Credential protection described above applies to local storage, not the
 connection between the client and Soulseek server. Use a unique password that
@@ -246,7 +271,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.20 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.21 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

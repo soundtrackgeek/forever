@@ -25,6 +25,7 @@ import {
 import type {
   AlbumSearchContext,
   AlbumSource,
+  ArchiveAlbumMatch,
   ConnectionSnapshot,
   SearchResult,
   SearchSnapshot,
@@ -32,6 +33,7 @@ import type {
 } from "../types";
 import { groupAlbumSources } from "../utils/albumSources";
 import { AlbumSourceResults } from "./AlbumSourceResults";
+import { ArchiveOwnershipBadge } from "./ArchiveOwnershipBadge";
 import { CountryFlag } from "./CountryFlag";
 import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
 
@@ -43,6 +45,9 @@ type SearchWorkspaceProps = {
   searchMode: SearchMode;
   albumContext: AlbumSearchContext | null;
   albumResultView: AlbumResultView;
+  archiveConnected: boolean;
+  archiveLoading: boolean;
+  archiveMatch?: ArchiveAlbumMatch;
   query: string;
   results: SearchResult[];
   selectedResult: SearchResult | null;
@@ -124,6 +129,9 @@ export function SearchWorkspace({
   searchMode,
   albumContext,
   albumResultView,
+  archiveConnected,
+  archiveLoading,
+  archiveMatch,
   query,
   results,
   selectedResult,
@@ -425,6 +433,13 @@ export function SearchWorkspace({
                   : "Ready to listen"}
             </h2>
             <p>{searchError ?? search.message}</p>
+            {albumContext ? (
+              <ArchiveOwnershipBadge
+                match={archiveMatch}
+                archiveConnected={archiveConnected}
+                loading={archiveLoading}
+              />
+            ) : null}
           </div>
           <dl>
             <div>

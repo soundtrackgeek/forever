@@ -123,6 +123,11 @@ describe("Forever shell", () => {
     const hysteria = screen
       .getByRole("heading", { name: "Hysteria" })
       .closest("article") as HTMLElement;
+    expect(await within(hysteria).findByText("Owned")).toBeInTheDocument();
+    const slang = screen
+      .getByRole("heading", { name: "Slang" })
+      .closest("article") as HTMLElement;
+    expect(await within(slang).findByText("Don’t own")).toBeInTheDocument();
     fireEvent.click(
       within(hysteria).getByRole("button", { name: "Search Soulseek for Hysteria" }),
     );
@@ -144,6 +149,7 @@ describe("Forever shell", () => {
       .getByRole("heading", { name: "Hysteria — Def Leppard" })
       .closest("article") as HTMLElement;
     expect(within(albumReport).getAllByText("3")).toHaveLength(2);
+    expect(within(albumReport).getByText("Owned")).toBeInTheDocument();
     expect(screen.getByText("1987 - Hysteria [FLAC]")).toBeInTheDocument();
     expect(screen.getAllByText("12").length).toBeGreaterThan(0);
 
@@ -161,6 +167,26 @@ describe("Forever shell", () => {
       expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument(),
     );
     expect(screen.getAllByText("Hysteria").length).toBeGreaterThan(0);
+  });
+
+  it("uses Music Library as a read-only Archive without adopting downloads", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Your collection, without touching it." }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Archive connected")).toBeInTheDocument();
+    expect(
+      screen.getByText(/com\.local\.musiclibrary\\music-library\.sqlite3/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Read-only by construction")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Nothing downloaded from Soulseek is added to Archive/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("72,366")).toBeInTheDocument();
+    expect(screen.getByText("1,101,878")).toBeInTheDocument();
   });
 
   it("opens Browse as a dedicated workspace before requesting a user's shares", async () => {
@@ -473,16 +499,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.20 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.21 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "MusicBrainz-guided Soulseek searches now group matching files into album sources by listener and remote folder.",
+        "Archive connects to the existing Music Library SQLite database as a strictly read-only source of truth.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Download album now inspects the selected source folder first and queues its complete contents, including companion files.",
+        "SQLite read-only flags, query-only mode, and regression tests prevent Archive writes.",
       ),
     ).toBeInTheDocument();
   });

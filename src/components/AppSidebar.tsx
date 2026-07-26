@@ -1,5 +1,6 @@
 import {
   ArrowsClockwise,
+  Archive,
   AddressBook,
   ChatCircleDots,
   CaretDown,
@@ -8,7 +9,6 @@ import {
   FolderOpen,
   House,
   MagnifyingGlass,
-  MusicNotes,
   UsersThree,
 } from "@phosphor-icons/react";
 import type { UpdateStatus } from "../hooks/useAppUpdater";
@@ -32,7 +32,7 @@ const navItems = [
   { id: "people", label: "People", icon: AddressBook },
   { id: "rooms", label: "Rooms", icon: UsersThree },
   { id: "transfers", label: "Transfers", icon: DownloadSimple },
-  { id: "library", label: "Library", icon: MusicNotes },
+  { id: "archive", label: "Archive", icon: Archive },
 ];
 
 export function AppSidebar({
