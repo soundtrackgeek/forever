@@ -15,7 +15,7 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { useMemo, useState, type DragEvent } from "react";
+import { useMemo, useRef, useState, type MouseEvent } from "react";
 import type { PersonProfile, Transfer, Upload } from "../types";
 import {
   groupTransfers,
@@ -25,6 +25,11 @@ import {
 import { CountryFlag } from "./CountryFlag";
 
 type Filter = "all" | "active" | "queued" | "completed" | "failed";
+
+type QueueDropTarget = {
+  id: string;
+  placement: "before" | "after";
+};
 
 type TransfersWorkspaceProps = {
   transfers: Transfer[];
@@ -114,10 +119,8 @@ export function TransfersWorkspace({
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [draggedReleaseId, setDraggedReleaseId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{
-    id: string;
-    placement: "before" | "after";
-  } | null>(null);
+  const [dropTarget, setDropTarget] = useState<QueueDropTarget | null>(null);
+  const mouseDrag = useRef<{ releaseId: string } | null>(null);
   const [expansion, setExpansion] = useState<{
     touched: boolean;
     ids: Set<string>;
@@ -125,8 +128,13 @@ export function TransfersWorkspace({
   const defaultOpenId =
     groups.find((group) => group.status === "active")?.id ?? groups[0]?.id;
   const queueSummary = useMemo(() => summarizeTransferGroups(groups), [groups]);
-  const queuedGroups = groups.filter(
-    (group) => group.status === "queued" && group.releaseId,
+  const queuedGroups = useMemo(
+    () => groups.filter((group) => group.status === "queued" && group.releaseId),
+    [groups],
+  );
+  const queuedGroupById = useMemo(
+    () => new Map(queuedGroups.map((group) => [group.id, group])),
+    [queuedGroups],
   );
 
   const counts = {
@@ -194,8 +202,61 @@ export function TransfersWorkspace({
     onReorderRelease(sourceReleaseId, queuedTransferId(beforeGroup));
   };
 
+  const mouseTargetAt = (
+    element: EventTarget | null,
+    clientY: number,
+    sourceReleaseId: string,
+  ) => {
+    const card = element instanceof Element
+      ? element.closest<HTMLElement>("[data-queue-group-id]")
+      : null;
+    if (!card) return null;
+    const target = queuedGroupById.get(card.dataset.queueGroupId ?? "");
+    if (!target || target.releaseId === sourceReleaseId) return null;
+    const bounds = card.getBoundingClientRect();
+    const placement = clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+    return {
+      group: target,
+      marker: { id: target.id, placement } satisfies QueueDropTarget,
+    };
+  };
+
+  const updateMouseDrag = (event: MouseEvent<HTMLElement>) => {
+    const drag = mouseDrag.current;
+    if (!drag) return;
+    event.preventDefault();
+    const target = mouseTargetAt(event.target, event.clientY, drag.releaseId);
+    setDropTarget((current) => {
+      const next = target?.marker ?? null;
+      return current?.id === next?.id && current?.placement === next?.placement
+        ? current
+        : next;
+    });
+  };
+
+  const endMouseDrag = (event: MouseEvent<HTMLElement>) => {
+    const drag = mouseDrag.current;
+    if (!drag) return;
+    event.preventDefault();
+    const target = mouseTargetAt(event.target, event.clientY, drag.releaseId);
+    if (target) finishDrop(drag.releaseId, target.group, target.marker.placement);
+    mouseDrag.current = null;
+    setDraggedReleaseId(null);
+    setDropTarget(null);
+  };
+
   return (
-    <section className="transfers-workspace">
+    <section
+      className="transfers-workspace"
+      onMouseMove={updateMouseDrag}
+      onMouseUp={endMouseDrag}
+      onMouseLeave={() => {
+        if (!mouseDrag.current) return;
+        mouseDrag.current = null;
+        setDraggedReleaseId(null);
+        setDropTarget(null);
+      }}
+    >
       <header className="transfers-heading">
         <div>
           <h1>Transfers</h1>
@@ -339,29 +400,9 @@ export function TransfersWorkspace({
           const knownArt = group.title.toLocaleLowerCase().includes("night geometry");
           return (
             <article
-              className={`release-transfer-card is-${group.status}${dropTarget?.id === group.id ? ` is-drop-${dropTarget.placement}` : ""}`}
+              className={`release-transfer-card is-${group.status}${draggedReleaseId === group.releaseId ? " is-reordering" : ""}${dropTarget?.id === group.id ? ` is-drop-${dropTarget.placement}` : ""}`}
+              data-queue-group-id={group.status === "queued" && group.releaseId ? group.id : undefined}
               key={group.id}
-              onDragOver={group.status === "queued" && group.releaseId ? (event) => {
-                if (!draggedReleaseId || draggedReleaseId === group.releaseId) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-                const bounds = event.currentTarget.getBoundingClientRect();
-                setDropTarget({
-                  id: group.id,
-                  placement: event.clientY < bounds.top + bounds.height / 2 ? "before" : "after",
-                });
-              } : undefined}
-              onDrop={group.status === "queued" && group.releaseId ? (event) => {
-                event.preventDefault();
-                const sourceReleaseId = event.dataTransfer.getData("text/plain") || draggedReleaseId;
-                if (sourceReleaseId) {
-                  const bounds = event.currentTarget.getBoundingClientRect();
-                  const placement = event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
-                  finishDrop(sourceReleaseId, group, placement);
-                }
-                setDraggedReleaseId(null);
-                setDropTarget(null);
-              } : undefined}
             >
               <div className="release-transfer-summary">
                 {knownArt ? (
@@ -389,17 +430,25 @@ export function TransfersWorkspace({
                       <button
                         type="button"
                         className="release-drag-handle"
-                        draggable
                         aria-label={`Drag ${group.title} to reorder`}
-                        title="Drag to reorder"
-                        onDragStart={(event: DragEvent<HTMLButtonElement>) => {
+                        title="Hold and drag to reorder. Arrow keys also move this release."
+                        onMouseDown={(event) => {
+                          if (event.button !== 0 || !group.releaseId) return;
+                          event.preventDefault();
+                          mouseDrag.current = { releaseId: group.releaseId };
                           setDraggedReleaseId(group.releaseId);
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", group.releaseId ?? "");
                         }}
-                        onDragEnd={() => {
-                          setDraggedReleaseId(null);
-                          setDropTarget(null);
+                        onKeyDown={(event) => {
+                          if (event.key === "ArrowUp") {
+                            event.preventDefault();
+                            moveQueuedRelease(group, "up");
+                          } else if (event.key === "ArrowDown") {
+                            event.preventDefault();
+                            moveQueuedRelease(group, "down");
+                          } else if (event.key === "Home") {
+                            event.preventDefault();
+                            moveQueuedRelease(group, "next");
+                          }
                         }}
                       >
                         <DotsSixVertical size={15} weight="bold" />

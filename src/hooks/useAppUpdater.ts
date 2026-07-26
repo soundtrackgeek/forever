@@ -30,22 +30,18 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.22",
-  version: "0.0.23",
-  body: `## What’s new in Forever 0.0.23
-
-### Added
-
-- Signal Order controls let you drag queued albums, move them up or down, or choose Download next.
-- Transfers now summarizes unfinished releases, files, remaining size, and total queue ETA.
+  currentVersion: "0.0.23",
+  version: "0.0.24",
+  body: `## What’s new in Forever 0.0.24
 
 ### Changed
 
-- Queue order persists across restarts and Search labels queued album sources as Queued #1, Queued #2, and onward.
+- The Signal Order handle now follows your Windows mouse from press through release and clearly marks the drop position.
+- Arrow up, Arrow down, and Home can reorder a release while its drag handle is focused.
 
 ### Fixed
 
-- Forever prevents the exact same listener and remote folder from being queued twice while its earlier release remains unfinished.`,
+- Dragging queued releases now works reliably in Tauri's Windows WebView.`,
   date: "2026-07-26",
 };
 

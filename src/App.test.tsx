@@ -542,16 +542,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.23 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.24 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Signal Order controls let you drag queued albums, move them up or down, or choose Download next.",
+        "The Signal Order handle now follows your Windows mouse from press through release and clearly marks the drop position.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Queue order persists across restarts and Search labels queued album sources as Queued #1, Queued #2, and onward.",
+        "Arrow up, Arrow down, and Home can reorder a release while its drag handle is focused.",
       ),
     ).toBeInTheDocument();
   });

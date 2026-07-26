@@ -5234,6 +5234,14 @@ button:disabled {
   box-shadow: inset 2px 0 0 #9a78e4;
 }
 
+.release-transfer-card.is-reordering {
+  border-color: #7258a1;
+  box-shadow:
+    inset 2px 0 0 #b48af2,
+    0 9px 24px rgba(0, 0, 0, 0.24);
+  opacity: 0.78;
+}
+
 .release-transfer-card.is-failed {
   border-color: #5c3541;
 }
@@ -5344,6 +5352,8 @@ button:disabled {
 
 .release-drag-handle {
   cursor: grab !important;
+  touch-action: none;
+  user-select: none;
 }
 
 .release-drag-handle:active {

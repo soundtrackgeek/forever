@@ -91,13 +91,6 @@ describe("TransfersWorkspace signal order", () => {
     );
     expect(onReorderRelease).toHaveBeenLastCalledWith("release-b", null);
 
-    const dragData = new Map<string, string>();
-    const dataTransfer = {
-      effectAllowed: "none",
-      dropEffect: "none",
-      getData: (type: string) => dragData.get(type) ?? "",
-      setData: (type: string, value: string) => dragData.set(type, value),
-    };
     const releaseBCard = screen.getByText("Release B").closest("article");
     expect(releaseBCard).not.toBeNull();
     vi.spyOn(releaseBCard!, "getBoundingClientRect").mockReturnValue({
@@ -111,14 +104,26 @@ describe("TransfersWorkspace signal order", () => {
       y: 0,
       toJSON: () => ({}),
     });
-    fireEvent.dragStart(
-      screen.getByRole("button", { name: "Drag Release C to reorder" }),
-      { dataTransfer },
+    const dragHandle = screen.getByRole("button", {
+      name: "Drag Release C to reorder",
+    });
+    fireEvent.mouseDown(dragHandle, { button: 0 });
+    expect(releaseBCard!.parentElement?.querySelector(".is-reordering")).not.toBeNull();
+
+    const mouseMove = createEvent.mouseMove(releaseBCard!);
+    Object.defineProperty(mouseMove, "clientY", { value: 10 });
+    fireEvent(releaseBCard!, mouseMove);
+    expect(releaseBCard).toHaveClass("is-drop-before");
+
+    const mouseUp = createEvent.mouseUp(releaseBCard!);
+    Object.defineProperty(mouseUp, "clientY", { value: 10 });
+    fireEvent(releaseBCard!, mouseUp);
+    expect(onReorderRelease).toHaveBeenLastCalledWith(
+      "release-c",
+      "release-b-track",
     );
-    fireEvent.dragOver(releaseBCard!, { clientY: 10, dataTransfer });
-    const dropEvent = createEvent.drop(releaseBCard!, { dataTransfer });
-    Object.defineProperty(dropEvent, "clientY", { value: 10 });
-    fireEvent(releaseBCard!, dropEvent);
+
+    fireEvent.keyDown(dragHandle, { key: "ArrowUp" });
     expect(onReorderRelease).toHaveBeenLastCalledWith(
       "release-c",
       "release-b-track",

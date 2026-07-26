@@ -5,6 +5,23 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.24] - 2026-07-26
+
+### Changed
+
+- The Signal Order handle now follows an explicit Windows mouse
+  press/move/release gesture, shows the source card as lifted, and marks the
+  exact before/after destination while moving.
+- A focused drag handle also accepts Arrow up, Arrow down, and Home for direct
+  keyboard reordering alongside the existing ordering buttons.
+
+### Fixed
+
+- Queue drag-and-drop now works in Tauri's Windows WebView instead of depending
+  on HTML5 drag events that WebView2 did not consistently deliver from buttons.
+- The transfer interaction regression test now exercises the same mouse-event
+  path used by the desktop app.
+
 ## [0.0.23] - 2026-07-26
 
 ### Added
