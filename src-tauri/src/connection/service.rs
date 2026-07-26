@@ -11,6 +11,7 @@ use super::{
         LocalSharesError, LocalSharesHub, LocalSharesSnapshot, SearchResponseOrigin,
         SearchResponseTicket,
     },
+    people::{PeopleError, PeopleHub, PeopleSnapshot, PersonProfile, ProfileState, ProfileTicket},
     protocol::{
         accept_children_frame, branch_level_frame, branch_root_frame, cant_connect_to_peer_frame,
         connect_to_peer_frame, file_search_frame, file_search_response_frame,
@@ -21,20 +22,25 @@ use super::{
         parse_folder_contents_response, parse_login_response, parse_peer_address,
         parse_possible_parents, parse_queue_position, parse_search_response,
         parse_server_search_request, parse_shared_file_list_response, parse_transfer_request,
-        parse_transfer_response, parse_upload_denied, peer_init_frame, pierce_firewall_frame,
-        place_in_queue_request_frame, place_in_queue_response_frame, queue_upload_frame,
-        read_distributed_frame, read_frame, read_peer_frame, read_peer_init, server_ping_frame,
-        set_online_frame, set_wait_port_frame, shared_counts_frame, shared_file_list_request_frame,
+        parse_transfer_response, parse_upload_denied, parse_user_info_response,
+        parse_user_interests, parse_user_stats, parse_user_status, parse_watch_user,
+        peer_init_frame, pierce_firewall_frame, place_in_queue_request_frame,
+        place_in_queue_response_frame, queue_upload_frame, read_distributed_frame, read_frame,
+        read_peer_frame, read_peer_init, read_profile_frame, server_ping_frame, set_online_frame,
+        set_wait_port_frame, shared_counts_frame, shared_file_list_request_frame,
         shared_file_list_response_frame, transfer_request_frame, transfer_response_frame,
-        upload_denied_frame, write_raw_frame, ConnectToPeer, DistributedFrame, DistributedSearch,
-        Frame, LoginResponse, ParentCandidate, PeerAddress, PeerInit, ProtocolError,
-        CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE, DISTRIBUTED_BRANCH_LEVEL_CODE,
-        DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_SEARCH_CODE, EMBEDDED_MESSAGE_CODE,
-        FILE_SEARCH_CODE, FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_REQUEST_CODE,
-        FOLDER_CONTENTS_RESPONSE_CODE, GET_PEER_ADDRESS_CODE, PLACE_IN_QUEUE_REQUEST_CODE,
-        PLACE_IN_QUEUE_RESPONSE_CODE, POSSIBLE_PARENTS_CODE, QUEUE_UPLOAD_CODE, RELOGGED_CODE,
-        RESET_DISTRIBUTED_CODE, SHARED_FILE_LIST_REQUEST_CODE, SHARED_FILE_LIST_RESPONSE_CODE,
-        TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE, UPLOAD_FAILED_CODE,
+        unwatch_user_frame, upload_denied_frame, user_info_request_frame, user_info_response_frame,
+        user_interests_frame, user_stats_frame, watch_user_frame, write_raw_frame, ConnectToPeer,
+        DistributedFrame, DistributedSearch, Frame, LoginResponse, ParentCandidate, PeerAddress,
+        PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE,
+        DISTRIBUTED_BRANCH_LEVEL_CODE, DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_SEARCH_CODE,
+        EMBEDDED_MESSAGE_CODE, FILE_SEARCH_CODE, FILE_SEARCH_RESPONSE_CODE,
+        FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE, GET_PEER_ADDRESS_CODE,
+        PLACE_IN_QUEUE_REQUEST_CODE, PLACE_IN_QUEUE_RESPONSE_CODE, POSSIBLE_PARENTS_CODE,
+        QUEUE_UPLOAD_CODE, RELOGGED_CODE, RESET_DISTRIBUTED_CODE, SHARED_FILE_LIST_REQUEST_CODE,
+        SHARED_FILE_LIST_RESPONSE_CODE, TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE,
+        UPLOAD_FAILED_CODE, USER_INFO_REQUEST_CODE, USER_INFO_RESPONSE_CODE, USER_INTERESTS_CODE,
+        USER_STATS_CODE, USER_STATUS_CODE, WATCH_USER_CODE,
     },
     search::{SearchHub, SearchSnapshot, SearchState},
     settings::{ConnectionProfile, SettingsStore},
@@ -79,6 +85,7 @@ const MAX_SEARCH_USERNAME_BYTES: usize = 100;
 const TRANSFER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const FOLDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
 const SHARES_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
+const PROFILE_REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
 const PEER_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const FILE_BUFFER_SIZE: usize = 128 * 1024;
 const DISTRIBUTED_EVENT_QUEUE_SIZE: usize = 256;
@@ -291,6 +298,9 @@ enum ConnectionCommand {
     StartSearch { token: u32, query: String },
     InspectFolder { ticket: FolderTicket },
     BrowseShares { ticket: SharesTicket },
+    RequestProfile { ticket: ProfileTicket },
+    WatchPerson { username: String },
+    UnwatchPerson { username: String },
     PeerConnectionFailed { token: u32, username: String },
     ScheduleDownloads,
     ScheduleUploads,
@@ -303,6 +313,7 @@ struct PeerServices {
     search: SearchHub,
     folders: FolderHub,
     shares: SharesHub,
+    people: PeopleHub,
     transfers: TransferHub,
     local_shares: LocalSharesHub,
     uploads: UploadHub,
@@ -317,6 +328,7 @@ enum PeerMessagePurpose {
     Transfer,
     Folder,
     Shares(u32),
+    Profile(u32),
 }
 
 #[derive(Clone)]
@@ -336,6 +348,7 @@ pub struct ConnectionManager {
     search: SearchHub,
     folders: FolderHub,
     shares: SharesHub,
+    people: PeopleHub,
     transfers: TransferHub,
     local_shares: LocalSharesHub,
     uploads: UploadHub,
@@ -348,6 +361,7 @@ impl ConnectionManager {
         settings_path: PathBuf,
         transfers_path: PathBuf,
         sharing_path: PathBuf,
+        people_path: PathBuf,
         diagnostics_path: PathBuf,
         download_directory: PathBuf,
     ) -> Result<Self, ConnectionServiceError> {
@@ -363,6 +377,7 @@ impl ConnectionManager {
         let local_shares = LocalSharesHub::new(app.clone(), sharing_path)?;
         let uploads = UploadHub::new(app.clone());
         let distributed = DistributedHub::new(app.clone());
+        let people = PeopleHub::new(app.clone(), people_path)?;
 
         Ok(Self {
             app,
@@ -384,6 +399,7 @@ impl ConnectionManager {
             search,
             folders: FolderHub::default(),
             shares: SharesHub::default(),
+            people,
             transfers,
             local_shares,
             uploads,
@@ -520,6 +536,102 @@ impl ConnectionManager {
         self.local_shares.snapshot()
     }
 
+    pub fn current_people(&self) -> PeopleSnapshot {
+        self.people.snapshot()
+    }
+
+    pub async fn open_person_profile(
+        &self,
+        username: String,
+        refresh: bool,
+    ) -> Result<PersonProfile, ConnectionServiceError> {
+        let username = username.trim().to_owned();
+        if username.is_empty() || username.len() > MAX_SEARCH_USERNAME_BYTES {
+            return Err(ConnectionServiceError::InvalidPerson);
+        }
+        if !refresh {
+            if let Some(profile) = self.people.profile(&username) {
+                if profile.profile_state == ProfileState::Ready {
+                    self.people.remember(&username)?;
+                    return Ok(profile);
+                }
+            }
+        }
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::PeopleUnavailable);
+        }
+        let sender = self
+            .command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .ok_or(ConnectionServiceError::PeopleUnavailable)?;
+        let ticket = ProfileTicket {
+            connection_token: self.take_connection_token(),
+            username,
+        };
+        let connection_token = ticket.connection_token;
+        let receiver = self.people.start_profile(ticket.clone())?;
+        if sender
+            .send(ConnectionCommand::RequestProfile { ticket })
+            .is_err()
+        {
+            self.people.fail_profile(
+                connection_token,
+                "The Soulseek connection changed before the profile request could start."
+                    .to_owned(),
+            );
+            return Err(ConnectionServiceError::PeopleUnavailable);
+        }
+        match timeout(PROFILE_REQUEST_TIMEOUT, receiver).await {
+            Ok(Ok(result)) => result.map_err(Into::into),
+            Ok(Err(_)) => Err(ConnectionServiceError::PeopleUnavailable),
+            Err(_) => {
+                self.people.fail_profile(
+                    connection_token,
+                    "The user did not answer the profile request in time.".to_owned(),
+                );
+                Err(ConnectionServiceError::ProfileTimeout)
+            }
+        }
+    }
+
+    pub fn set_person_favorite(
+        &self,
+        username: &str,
+        favorite: bool,
+    ) -> Result<PeopleSnapshot, ConnectionServiceError> {
+        let snapshot = self.people.set_favorite(username, favorite)?;
+        if self.current_snapshot().state == ConnectionState::Online {
+            if let Some(sender) = self
+                .command_sender
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+            {
+                let command = if favorite {
+                    ConnectionCommand::WatchPerson {
+                        username: username.to_owned(),
+                    }
+                } else {
+                    ConnectionCommand::UnwatchPerson {
+                        username: username.to_owned(),
+                    }
+                };
+                let _ = sender.send(command);
+            }
+        }
+        Ok(snapshot)
+    }
+
+    pub fn set_person_blocked(
+        &self,
+        username: &str,
+        blocked: bool,
+    ) -> Result<PeopleSnapshot, ConnectionServiceError> {
+        Ok(self.people.set_blocked(username, blocked)?)
+    }
+
     pub fn add_local_share(
         &self,
         path: &str,
@@ -585,6 +697,7 @@ impl ConnectionManager {
             .settings
             .load()?
             .ok_or(ConnectionServiceError::NotConfigured)?;
+        self.people.remember(&request.username)?;
         let snapshot = self
             .transfers
             .enqueue(request, Path::new(&profile.download_directory))?;
@@ -600,6 +713,7 @@ impl ConnectionManager {
             .settings
             .load()?
             .ok_or(ConnectionServiceError::NotConfigured)?;
+        self.people.remember(&request.username)?;
         let snapshot = self
             .transfers
             .enqueue_release(request, Path::new(&profile.download_directory))?;
@@ -737,6 +851,7 @@ impl ConnectionManager {
         if username.is_empty() || username.len() > 64 {
             return Err(ConnectionServiceError::InvalidSharesRequest);
         }
+        self.people.remember(&username)?;
         if !refresh {
             if let Some(cached) = self.shares.cached(&username) {
                 return Ok(cached);
@@ -848,6 +963,7 @@ impl ConnectionManager {
             search: self.search.clone(),
             folders: self.folders.clone(),
             shares: self.shares.clone(),
+            people: self.people.clone(),
             transfers: self.transfers.clone(),
             local_shares: self.local_shares.clone(),
             uploads: self.uploads.clone(),
@@ -1090,6 +1206,7 @@ impl ConnectionManager {
             self.folders.connection_lost();
             self.shares.connection_lost();
             self.local_shares.connection_lost();
+            self.people.connection_lost();
             self.distributed.offline();
             self.search
                 .fail("Search stopped because the Soulseek connection was interrupted.");
@@ -1289,6 +1406,9 @@ impl ConnectionManager {
         });
         let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
         let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
+        for username in self.people.saved_users_to_watch() {
+            let _ = command_sender.send(ConnectionCommand::WatchPerson { username });
+        }
 
         let mut keepalive = tokio::time::interval(KEEPALIVE_INTERVAL);
         let mut search_tick = tokio::time::interval(Duration::from_millis(250));
@@ -1335,6 +1455,22 @@ impl ConnectionManager {
                                 DistributedSearch { username, token: search_token, query },
                                 SearchResponseOrigin::Server,
                             ).await?;
+                        }
+                    } else if frame.code == WATCH_USER_CODE {
+                        if let Ok(watched) = parse_watch_user(&frame) {
+                            self.people.update_watch(watched);
+                        }
+                    } else if frame.code == USER_STATUS_CODE {
+                        if let Ok((username, status, privileged)) = parse_user_status(&frame) {
+                            self.people.update_status(&username, status, privileged);
+                        }
+                    } else if frame.code == USER_STATS_CODE {
+                        if let Ok(stats) = parse_user_stats(&frame) {
+                            self.people.update_stats(stats);
+                        }
+                    } else if frame.code == USER_INTERESTS_CODE {
+                        if let Ok(interests) = parse_user_interests(&frame) {
+                            self.people.update_interests(interests);
                         }
                     } else if frame.code == POSSIBLE_PARENTS_CODE {
                         if let Ok(parents) = parse_possible_parents(&frame) {
@@ -1407,6 +1543,14 @@ impl ConnectionManager {
                                     self.peer_services(&profile.username, &command_sender),
                                     peer_limit.clone(),
                                 );
+                            } else if let Some(ticket) = self.people.requesting_for_username(&address.username) {
+                                spawn_outbound_profile_peer(
+                                    address,
+                                    ticket,
+                                    profile.username.clone(),
+                                    self.peer_services(&profile.username, &command_sender),
+                                    peer_limit.clone(),
+                                );
                             } else if let Some(ticket) = self.folders.requesting_for_username(&address.username) {
                                 spawn_outbound_folder_peer(
                                     address,
@@ -1453,6 +1597,10 @@ impl ConnectionManager {
                                 "The source could not establish a peer connection.".to_owned(),
                             );
                             self.local_shares.fail_search(token);
+                            self.people.fail_profile(
+                                token,
+                                "The user could not establish a profile connection.".to_owned(),
+                            );
                             if self.uploads.fail_connection(
                                 token,
                                 "The downloader could not establish a peer connection.".to_owned(),
@@ -1623,6 +1771,53 @@ impl ConnectionManager {
                                     "shares_address_failed",
                                 )
                             })?;
+                        }
+                        Some(ConnectionCommand::RequestProfile { ticket }) => {
+                            if self.people.mark_watched(&ticket.username) {
+                                write_raw_frame(
+                                    &mut server_writer,
+                                    &watch_user_frame(&ticket.username),
+                                ).await.map_err(|error| ConnectionFailure::retryable(
+                                    format!("The user presence request could not be sent: {error}"),
+                                    "people_watch_failed",
+                                ))?;
+                            }
+                            for frame in [
+                                user_stats_frame(&ticket.username),
+                                user_interests_frame(&ticket.username),
+                                connect_to_peer_frame(
+                                    ticket.connection_token,
+                                    &ticket.username,
+                                    "P",
+                                ),
+                                get_peer_address_frame(&ticket.username),
+                            ] {
+                                write_raw_frame(&mut server_writer, &frame).await.map_err(|error| {
+                                    ConnectionFailure::retryable(
+                                        format!("The user profile request could not be sent: {error}"),
+                                        "people_request_failed",
+                                    )
+                                })?;
+                            }
+                        }
+                        Some(ConnectionCommand::WatchPerson { username }) => {
+                            if self.people.mark_watched(&username) {
+                                write_raw_frame(&mut server_writer, &watch_user_frame(&username))
+                                    .await
+                                    .map_err(|error| ConnectionFailure::retryable(
+                                        format!("The user presence request could not be sent: {error}"),
+                                        "people_watch_failed",
+                                    ))?;
+                            }
+                        }
+                        Some(ConnectionCommand::UnwatchPerson { username }) => {
+                            self.people.mark_unwatched(&username);
+                            write_raw_frame(&mut server_writer, &unwatch_user_frame(&username))
+                                .await
+                                .map_err(|error| ConnectionFailure::retryable(
+                                    format!("The user presence update could not be sent: {error}"),
+                                    "people_watch_failed",
+                                ))?;
                         }
                         Some(ConnectionCommand::PeerConnectionFailed { token, username }) => {
                             write_raw_frame(
@@ -1797,6 +1992,7 @@ impl ConnectionManager {
         self.folders.connection_lost();
         self.shares.connection_lost();
         self.local_shares.connection_lost();
+        self.people.connection_lost();
         self.distributed.offline();
         if let Some(active) = self
             .task
@@ -1958,6 +2154,8 @@ async fn handle_direct_peer(
                 negotiate_upload_on_peer(&mut stream, ticket, services).await?;
             } else if let Some(ticket) = services.local_shares.claim_search(token) {
                 send_search_response_on_peer(&mut stream, ticket, &services).await?;
+            } else if let Some(ticket) = services.people.claim_profile(token) {
+                request_profile_on_peer(&mut stream, ticket, services).await?;
             } else if let Some(ticket) = services.transfers.claim_peer(token) {
                 if let Err(error) =
                     queue_download_on_peer(&mut stream, ticket.clone(), services.clone()).await
@@ -2060,6 +2258,9 @@ async fn handle_indirect_peer(
     }
     if let Some(ticket) = services.local_shares.claim_search(request.token) {
         return send_search_response_on_peer(&mut stream, ticket, &services).await;
+    }
+    if let Some(ticket) = services.people.claim_profile(request.token) {
+        return request_profile_on_peer(&mut stream, ticket, services).await;
     }
     if let Some(ticket) = services.folders.claim_peer(request.token) {
         return browse_folder_on_peer(&mut stream, ticket, services).await;
@@ -2283,6 +2484,7 @@ fn spawn_outbound_download_peer(
             search,
             folders,
             shares,
+            people,
             transfers,
             local_shares,
             uploads,
@@ -2316,6 +2518,7 @@ fn spawn_outbound_download_peer(
                 search,
                 folders,
                 shares,
+                people,
                 transfers: transfers.clone(),
                 local_shares,
                 uploads,
@@ -2354,6 +2557,7 @@ fn spawn_outbound_folder_peer(
             search,
             folders,
             shares,
+            people,
             transfers,
             local_shares,
             uploads,
@@ -2387,6 +2591,7 @@ fn spawn_outbound_folder_peer(
                 search,
                 folders: folders.clone(),
                 shares,
+                people,
                 transfers,
                 local_shares,
                 uploads,
@@ -2449,6 +2654,54 @@ fn spawn_outbound_shares_peer(
     });
 }
 
+fn spawn_outbound_profile_peer(
+    address: PeerAddress,
+    ticket: ProfileTicket,
+    own_username: String,
+    services: PeerServices,
+    limit: Arc<Semaphore>,
+) {
+    if address.port == 0 || address.port > u16::MAX.into() {
+        services.people.fail_profile(
+            ticket.connection_token,
+            "The user is not accepting profile connections.".to_owned(),
+        );
+        return;
+    }
+    let Ok(permit) = limit.try_acquire_owned() else {
+        services.people.fail_profile(
+            ticket.connection_token,
+            "Forever is handling too many peer connections to open this profile.".to_owned(),
+        );
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let _permit = permit;
+        let result = async {
+            let mut stream = timeout(
+                PEER_CONNECT_TIMEOUT,
+                TcpStream::connect((address.address, address.port as u16)),
+            )
+            .await
+            .map_err(|_| peer_timeout_error())??;
+            let _ = stream.set_nodelay(true);
+            write_raw_frame(&mut stream, &peer_init_frame(&own_username, "P")).await?;
+            let claimed = services
+                .people
+                .claim_profile(ticket.connection_token)
+                .ok_or_else(peer_timeout_error)?;
+            request_profile_on_peer(&mut stream, claimed, services.clone()).await
+        }
+        .await;
+        if let Err(error) = result {
+            services.people.fail_profile(
+                ticket.connection_token,
+                format!("The user profile connection ended before a response arrived: {error}"),
+            );
+        }
+    });
+}
+
 async fn queue_download_on_peer(
     stream: &mut TcpStream,
     ticket: TransferTicket,
@@ -2503,14 +2756,48 @@ async fn browse_shares_on_peer(
     .await
 }
 
+async fn request_profile_on_peer(
+    stream: &mut TcpStream,
+    ticket: ProfileTicket,
+    services: PeerServices,
+) -> Result<(), super::protocol::ProtocolError> {
+    write_raw_frame(stream, &user_info_request_frame()).await?;
+    handle_peer_messages(
+        stream,
+        &ticket.username,
+        services,
+        PeerMessagePurpose::Profile(ticket.connection_token),
+    )
+    .await
+}
+
 async fn handle_peer_messages(
     stream: &mut TcpStream,
     username: &str,
     services: PeerServices,
     purpose: PeerMessagePurpose,
 ) -> Result<(), super::protocol::ProtocolError> {
+    if !username.eq_ignore_ascii_case(&services.own_username) && services.people.observe(username) {
+        let _ = services
+            .command_sender
+            .send(ConnectionCommand::WatchPerson {
+                username: username.to_owned(),
+            });
+    }
     loop {
-        let frame = match timeout(PEER_IDLE_TIMEOUT, read_peer_frame(stream)).await {
+        let frame_result = match purpose {
+            PeerMessagePurpose::Profile(_) => {
+                timeout(PEER_IDLE_TIMEOUT, read_profile_frame(stream)).await
+            }
+            _ => timeout(PEER_IDLE_TIMEOUT, read_peer_frame(stream)).await,
+        };
+        let expects_response = matches!(
+            purpose,
+            PeerMessagePurpose::Folder
+                | PeerMessagePurpose::Shares(_)
+                | PeerMessagePurpose::Profile(_)
+        );
+        let frame = match frame_result {
             Ok(Ok(frame)) => frame,
             Ok(Err(ProtocolError::Io(error)))
                 if matches!(
@@ -2521,26 +2808,39 @@ async fn handle_peer_messages(
                         | std::io::ErrorKind::BrokenPipe
                 ) =>
             {
-                if matches!(
-                    purpose,
-                    PeerMessagePurpose::Folder | PeerMessagePurpose::Shares(_)
-                ) {
+                if expects_response {
                     return Err(error.into());
                 }
                 return Ok(());
             }
             Ok(Err(error)) => return Err(error),
-            Err(_)
-                if matches!(
-                    purpose,
-                    PeerMessagePurpose::Folder | PeerMessagePurpose::Shares(_)
-                ) =>
-            {
-                return Err(peer_timeout_error())
-            }
+            Err(_) if expects_response => return Err(peer_timeout_error()),
             Err(_) => return Ok(()),
         };
         match frame.code {
+            USER_INFO_REQUEST_CODE => {
+                let response = user_info_response_frame(
+                    "Sharing music with Forever.",
+                    None,
+                    u32::try_from(services.local_shares.upload_slots()).unwrap_or(u32::MAX),
+                    services.uploads.queued_count(),
+                    services
+                        .uploads
+                        .has_free_slot(services.local_shares.upload_slots()),
+                    1,
+                )?;
+                write_raw_frame(stream, &response).await?;
+            }
+            USER_INFO_RESPONSE_CODE => {
+                if let PeerMessagePurpose::Profile(connection_token) = purpose {
+                    services.people.resolve_user_info(
+                        connection_token,
+                        username,
+                        parse_user_info_response(&frame)?,
+                    );
+                    return Ok(());
+                }
+            }
             SHARED_FILE_LIST_REQUEST_CODE => {
                 let response =
                     shared_file_list_response_frame(&services.local_shares.share_list())?;
@@ -2594,7 +2894,15 @@ async fn handle_peer_messages(
                 }
             }
             FILE_SEARCH_RESPONSE_CODE => {
-                services.search.record(parse_search_response(&frame)?);
+                let response = parse_search_response(&frame)?;
+                if services.people.observe(&response.username) {
+                    let _ = services
+                        .command_sender
+                        .send(ConnectionCommand::WatchPerson {
+                            username: response.username.clone(),
+                        });
+                }
+                services.search.record(response);
                 if purpose == PeerMessagePurpose::General {
                     return Ok(());
                 }
@@ -3014,6 +3322,8 @@ pub enum ConnectionServiceError {
     LocalShares(#[from] LocalSharesError),
     #[error("{0}")]
     Upload(#[from] UploadError),
+    #[error("{0}")]
+    People(#[from] PeopleError),
     #[error("Add your Soulseek account before connecting.")]
     NotConfigured,
     #[error("Enter your Soulseek password.")]
@@ -3032,6 +3342,12 @@ pub enum ConnectionServiceError {
     InvalidSharesRequest,
     #[error("The user did not answer the share-list request in time.")]
     SharesTimeout,
+    #[error("Connect to Soulseek before opening a live user profile.")]
+    PeopleUnavailable,
+    #[error("Choose a valid Soulseek username.")]
+    InvalidPerson,
+    #[error("The user did not answer the profile request in time.")]
+    ProfileTimeout,
     #[error("{0}")]
     InvalidSearch(String),
     #[error("Could not initialize connection diagnostics: {0}")]

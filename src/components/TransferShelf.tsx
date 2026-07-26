@@ -8,7 +8,8 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import type { Transfer } from "../types";
+import type { PersonProfile, Transfer } from "../types";
+import { CountryFlag } from "./CountryFlag";
 import { groupTransfers, type TransferGroup } from "../utils/transfers";
 
 type TransferShelfProps = {
@@ -25,7 +26,8 @@ type TransferShelfProps = {
   onRevealRelease: (id: string) => void;
   onViewAll: () => void;
   onDismissError: () => void;
-  onBrowseUser: (username: string) => void;
+  personByUsername: (username: string) => PersonProfile | null;
+  onOpenPerson: (username: string) => void;
 };
 
 const formatBytes = (bytes: number) => {
@@ -64,7 +66,8 @@ export function TransferShelf({
   onRevealRelease,
   onViewAll,
   onDismissError,
-  onBrowseUser,
+  personByUsername,
+  onOpenPerson,
 }: TransferShelfProps) {
   const groups = groupTransfers(transfers);
   const visibleGroups = groups.slice(0, 3);
@@ -117,8 +120,9 @@ export function TransferShelf({
                   <button
                     type="button"
                     className="transfer-user-link"
-                    onClick={() => onBrowseUser(group.username)}
+                    onClick={() => onOpenPerson(group.username)}
                   >
+                    <CountryFlag code={personByUsername(group.username)?.countryCode} />
                     {group.username}
                   </button>{" "}
                   · {group.transfers.length} files

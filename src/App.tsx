@@ -5,6 +5,7 @@ import { AppSidebar } from "./components/AppSidebar";
 import { ConnectionOnboarding } from "./components/ConnectionOnboarding";
 import { ConnectionSettings } from "./components/ConnectionSettings";
 import { ReleaseInspector } from "./components/ReleaseInspector";
+import { PeopleWorkspace } from "./components/PeopleWorkspace";
 import { SearchWorkspace } from "./components/SearchWorkspace";
 import { TransferShelf } from "./components/TransferShelf";
 import { TransfersWorkspace } from "./components/TransfersWorkspace";
@@ -14,6 +15,7 @@ import { WindowControls } from "./components/WindowControls";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { useSoulseekConnection } from "./hooks/useSoulseekConnection";
 import { useSoulseekFolders } from "./hooks/useSoulseekFolders";
+import { useSoulseekPeople } from "./hooks/useSoulseekPeople";
 import { useSoulseekSearch } from "./hooks/useSoulseekSearch";
 import { useSoulseekShares } from "./hooks/useSoulseekShares";
 import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
@@ -94,7 +96,9 @@ function App() {
   const sharing = useLocalSharing();
   const folders = useSoulseekFolders();
   const shares = useSoulseekShares();
+  const people = useSoulseekPeople();
   const [sharesUsername, setSharesUsername] = useState("audiophile92");
+  const [selectedUsername, setSelectedUsername] = useState<string | null>("audiophile92");
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const onboardingOpen =
     connection.ready &&
@@ -118,6 +122,12 @@ function App() {
     setSharesUsername(username);
     setActiveView("shares");
     void shares.browse(username).catch(() => undefined);
+  };
+
+  const openPerson = (username: string, refresh = false) => {
+    setSelectedUsername(username);
+    setActiveView("people");
+    void people.openProfile(username, refresh).catch(() => undefined);
   };
 
   const isSearchView = activeView === "search";
@@ -163,6 +173,8 @@ function App() {
               }}
               onQueueDownload={queueDownload}
               onBrowseUser={browseUser}
+              personByUsername={people.personByUsername}
+              onOpenPerson={openPerson}
             />
             <ReleaseInspector
               result={selectedResult}
@@ -174,6 +186,8 @@ function App() {
               }}
               onQueueDownload={queueDownload}
               onBrowseUser={browseUser}
+              person={selectedResult ? people.personByUsername(selectedResult.owner) : null}
+              onOpenPerson={openPerson}
               onQueueRelease={(result, title, inspection, files) => {
                 void transfers
                   .enqueueRelease({
@@ -187,6 +201,22 @@ function App() {
               }}
             />
           </>
+        ) : activeView === "people" ? (
+          <PeopleWorkspace
+            snapshot={people.snapshot}
+            ready={people.ready}
+            error={people.error}
+            selectedUsername={selectedUsername}
+            onSelect={openPerson}
+            onBrowseUser={browseUser}
+            onSetFavorite={(username, favorite) =>
+              void people.setFavorite(username, favorite).catch(() => undefined)
+            }
+            onSetBlocked={(username, blocked) =>
+              void people.setBlocked(username, blocked).catch(() => undefined)
+            }
+            onDismissError={people.clearError}
+          />
         ) : activeView === "shares" ? (
           <UserSharesWorkspace
             key={sharesUsername}
@@ -196,6 +226,8 @@ function App() {
             results={shares.results}
             loading={shares.loading}
             error={shares.error}
+            person={people.personByUsername(sharesUsername)}
+            onOpenPerson={() => openPerson(sharesUsername)}
             onRefresh={() => void shares.browse(sharesUsername, true).catch(() => undefined)}
             onOpenFolder={(directory) =>
               void shares.openFolder(sharesUsername, directory).catch(() => undefined)
@@ -231,7 +263,8 @@ function App() {
             onRevealRelease={(id) => void transfers.revealRelease(id).catch(() => undefined)}
             onClearCompleted={() => void transfers.clearCompleted().catch(() => undefined)}
             onDismissError={transfers.clearError}
-            onBrowseUser={browseUser}
+            personByUsername={people.personByUsername}
+            onOpenPerson={openPerson}
             onCancelUpload={(id) => void sharing.cancelUpload(id).catch(() => undefined)}
             onClearFinishedUploads={() => void sharing.clearFinishedUploads().catch(() => undefined)}
             onDismissUploadError={sharing.clearError}
@@ -289,7 +322,8 @@ function App() {
         onRevealRelease={(id) => void transfers.revealRelease(id).catch(() => undefined)}
         onViewAll={() => setActiveView("transfers")}
         onDismissError={transfers.clearError}
-        onBrowseUser={browseUser}
+        personByUsername={people.personByUsername}
+        onOpenPerson={openPerson}
       />
 
       <UpdateExperience {...updater} />

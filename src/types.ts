@@ -27,6 +27,48 @@ export type SearchResult = {
   isPrivate?: boolean;
 };
 
+export type PersonStatus = "unknown" | "offline" | "away" | "online";
+
+export type ProfileState =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "unavailable"
+  | "error";
+
+export type PersonProfile = {
+  username: string;
+  status: PersonStatus;
+  profileState: ProfileState;
+  countryCode: string | null;
+  description: string | null;
+  pictureDataUrl: string | null;
+  averageSpeed: number;
+  uploadCount: number;
+  sharedFileCount: number;
+  sharedDirectoryCount: number;
+  uploadSlots: number | null;
+  queueSize: number | null;
+  slotsFree: boolean | null;
+  uploadPermission: number | null;
+  likes: string[];
+  hates: string[];
+  privileged: boolean;
+  favorite: boolean;
+  blocked: boolean;
+  error: string | null;
+  lastSeenAtMs: number | null;
+  lastInteractionAtMs: number;
+  updatedAtMs: number;
+};
+
+export type PeopleSnapshot = {
+  users: PersonProfile[];
+  favoriteCount: number;
+  onlineFavoriteCount: number;
+  updatedAtMs: number;
+};
+
 export type SearchState =
   | "idle"
   | "searching"

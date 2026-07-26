@@ -5,6 +5,41 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.13] - 2026-07-26
+
+### Added
+
+- A dedicated Midnight Radio People workspace with exact-username lookup,
+  live online/away/offline presence, country identity, profile descriptions
+  and raster images, interests, supporter state, share statistics, upload
+  availability, loading/error/empty states, and responsive desktop layouts.
+- Persistent favorites, blocked listeners, and bounded recent-source history,
+  with favorites automatically watched again after reconnecting.
+- Bundled SVG country flags and profile entry points across search results,
+  the source inspector, User Shares, downloads, uploads, and the transfer shelf.
+- An initial private-conversation shell that keeps future messaging anchored to
+  the selected listener without implying that message delivery is available.
+- Protocol and frontend regression coverage for presence, country parsing,
+  profile round trips, content bounds, favorites, flags, and conversation flow.
+
+### Changed
+
+- Transfer source names now open People profiles; complete share browsing is
+  available from each profile and remains directly available from Search.
+- Profile images and live profile fields are session-only, while intentional
+  local relationships persist in a separate `people.json` store.
+- Country SVGs load on demand and framework, icon, and Tauri dependencies are
+  split from the main interface bundle to keep startup work bounded.
+- Application and updater preview metadata now identify version `0.0.13`.
+
+### Security
+
+- Profile frames, descriptions, pictures, interest counts, interest lengths,
+  usernames, concurrent requests, saved relationships, recent history, and
+  runtime profile state are bounded before allocation or persistence.
+- Only validated PNG, JPEG, and WebP profile pictures become local data URLs;
+  SVG and unknown formats are ignored.
+
 ## [0.0.12] - 2026-07-26
 
 ### Added

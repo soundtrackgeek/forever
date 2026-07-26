@@ -4,6 +4,7 @@ mod distributed;
 mod downloads;
 mod folders;
 mod local_shares;
+mod people;
 mod protocol;
 mod search;
 mod service;
@@ -31,10 +32,52 @@ pub fn initialize(app: &AppHandle) -> Result<ConnectionManager, String> {
         config_directory.join("connection.json"),
         config_directory.join("transfers.json"),
         config_directory.join("sharing.json"),
+        config_directory.join("people.json"),
         config_directory.join("logs").join("connection.log"),
         download_directory,
     )
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn people_snapshot(
+    manager: State<'_, ConnectionManager>,
+) -> Result<people::PeopleSnapshot, String> {
+    Ok(manager.current_people())
+}
+
+#[tauri::command]
+pub async fn people_profile(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+    refresh: bool,
+) -> Result<people::PersonProfile, String> {
+    manager
+        .open_person_profile(username, refresh)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn people_set_favorite(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+    favorite: bool,
+) -> Result<people::PeopleSnapshot, String> {
+    manager
+        .set_person_favorite(&username, favorite)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn people_set_blocked(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+    blocked: bool,
+) -> Result<people::PeopleSnapshot, String> {
+    manager
+        .set_person_blocked(&username, blocked)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

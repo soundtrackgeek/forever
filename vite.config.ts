@@ -29,4 +29,16 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/@phosphor-icons")) return "icons";
+          if (id.includes("node_modules/@tauri-apps")) return "tauri";
+          if (id.includes("node_modules/react")) return "react";
+          return undefined;
+        },
+      },
+    },
+  },
 }));

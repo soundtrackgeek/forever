@@ -49,6 +49,10 @@ pub fn run() {
             connection::uploads_snapshot,
             connection::upload_cancel,
             connection::upload_clear_finished,
+            connection::people_snapshot,
+            connection::people_profile,
+            connection::people_set_favorite,
+            connection::people_set_blocked,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

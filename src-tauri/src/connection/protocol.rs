@@ -11,12 +11,17 @@ use zeroize::Zeroizing;
 pub const LOGIN_CODE: u32 = 1;
 pub const SET_WAIT_PORT_CODE: u32 = 2;
 pub const GET_PEER_ADDRESS_CODE: u32 = 3;
+pub const WATCH_USER_CODE: u32 = 5;
+pub const UNWATCH_USER_CODE: u32 = 6;
+pub const USER_STATUS_CODE: u32 = 7;
 pub const CONNECT_TO_PEER_CODE: u32 = 18;
 pub const FILE_SEARCH_CODE: u32 = 26;
 pub const SET_STATUS_CODE: u32 = 28;
 pub const SERVER_PING_CODE: u32 = 32;
 pub const SHARED_COUNTS_CODE: u32 = 35;
+pub const USER_STATS_CODE: u32 = 36;
 pub const RELOGGED_CODE: u32 = 41;
+pub const USER_INTERESTS_CODE: u32 = 57;
 pub const HAVE_NO_PARENT_CODE: u32 = 71;
 pub const EMBEDDED_MESSAGE_CODE: u32 = 93;
 pub const ACCEPT_CHILDREN_CODE: u32 = 100;
@@ -28,6 +33,8 @@ pub const CANT_CONNECT_TO_PEER_CODE: u32 = 1001;
 pub const SHARED_FILE_LIST_REQUEST_CODE: u32 = 4;
 pub const SHARED_FILE_LIST_RESPONSE_CODE: u32 = 5;
 pub const FILE_SEARCH_RESPONSE_CODE: u32 = 9;
+pub const USER_INFO_REQUEST_CODE: u32 = 15;
+pub const USER_INFO_RESPONSE_CODE: u32 = 16;
 pub const FOLDER_CONTENTS_REQUEST_CODE: u32 = 36;
 pub const FOLDER_CONTENTS_RESPONSE_CODE: u32 = 37;
 pub const TRANSFER_REQUEST_CODE: u32 = 40;
@@ -44,6 +51,7 @@ pub const EXPERIMENTAL_MAJOR_VERSION: u32 = 177;
 pub const FOREVER_MINOR_VERSION: u32 = 3;
 const MAX_MESSAGE_LENGTH: usize = 16 * 1024 * 1024;
 const MAX_PEER_MESSAGE_LENGTH: usize = 64 * 1024 * 1024;
+const MAX_PROFILE_MESSAGE_LENGTH: usize = 3 * 1024 * 1024;
 const MAX_PEER_INIT_LENGTH: usize = 64 * 1024;
 const MAX_DISTRIBUTED_MESSAGE_LENGTH: usize = 16 * 1024;
 const MAX_POSSIBLE_PARENTS: usize = 10;
@@ -59,6 +67,10 @@ const MAX_FOLDER_FILES_TOTAL: usize = 50_000;
 const MAX_SHARE_DIRECTORIES: usize = 100_000;
 const MAX_SHARE_FILES_TOTAL: usize = 500_000;
 const MAX_FILE_ATTRIBUTES: usize = 64;
+const MAX_PROFILE_DESCRIPTION_BYTES: usize = 8 * 1024;
+const MAX_PROFILE_PICTURE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_USER_INTERESTS: usize = 500;
+const MAX_USER_INTEREST_BYTES: usize = 250;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Frame {
@@ -92,6 +104,44 @@ pub struct PeerAddress {
     pub username: String,
     pub address: Ipv4Addr,
     pub port: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WatchedUser {
+    pub username: String,
+    pub exists: bool,
+    pub status: u32,
+    pub average_speed: u32,
+    pub upload_count: u32,
+    pub shared_file_count: u32,
+    pub shared_directory_count: u32,
+    pub country_code: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserStats {
+    pub username: String,
+    pub average_speed: u32,
+    pub upload_count: u32,
+    pub shared_file_count: u32,
+    pub shared_directory_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserInterests {
+    pub username: String,
+    pub likes: Vec<String>,
+    pub hates: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserInfoResponse {
+    pub description: String,
+    pub picture: Option<Vec<u8>>,
+    pub upload_slots: u32,
+    pub queue_size: u32,
+    pub slots_free: bool,
+    pub upload_permission: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -212,6 +262,30 @@ pub fn set_wait_port_frame(port: u16) -> Vec<u8> {
     encode_message(SET_WAIT_PORT_CODE, &u32::from(port).to_le_bytes())
 }
 
+pub fn watch_user_frame(username: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(username.len() + 4);
+    push_string(&mut payload, username);
+    encode_message(WATCH_USER_CODE, &payload)
+}
+
+pub fn unwatch_user_frame(username: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(username.len() + 4);
+    push_string(&mut payload, username);
+    encode_message(UNWATCH_USER_CODE, &payload)
+}
+
+pub fn user_stats_frame(username: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(username.len() + 4);
+    push_string(&mut payload, username);
+    encode_message(USER_STATS_CODE, &payload)
+}
+
+pub fn user_interests_frame(username: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(username.len() + 4);
+    push_string(&mut payload, username);
+    encode_message(USER_INTERESTS_CODE, &payload)
+}
+
 pub fn have_no_parent_frame(has_no_parent: bool) -> Vec<u8> {
     encode_message(HAVE_NO_PARENT_CODE, &[u8::from(has_no_parent)])
 }
@@ -239,6 +313,37 @@ pub fn file_search_frame(token: u32, query: &str) -> Vec<u8> {
 
 pub fn shared_file_list_request_frame() -> Vec<u8> {
     encode_message(SHARED_FILE_LIST_REQUEST_CODE, &[])
+}
+
+pub fn user_info_request_frame() -> Vec<u8> {
+    encode_message(USER_INFO_REQUEST_CODE, &[])
+}
+
+pub fn user_info_response_frame(
+    description: &str,
+    picture: Option<&[u8]>,
+    upload_slots: u32,
+    queue_size: u32,
+    slots_free: bool,
+    upload_permission: u32,
+) -> Result<Vec<u8>, ProtocolError> {
+    if description.len() > MAX_PROFILE_DESCRIPTION_BYTES
+        || picture.is_some_and(|bytes| bytes.len() > MAX_PROFILE_PICTURE_BYTES)
+    {
+        return Err(ProtocolError::InvalidUserInfo);
+    }
+    let mut payload = Vec::new();
+    push_string(&mut payload, description);
+    payload.push(u8::from(picture.is_some()));
+    if let Some(picture) = picture {
+        push_u32(&mut payload, checked_count(picture.len())?);
+        payload.extend_from_slice(picture);
+    }
+    push_u32(&mut payload, upload_slots);
+    push_u32(&mut payload, queue_size);
+    payload.push(u8::from(slots_free));
+    push_u32(&mut payload, upload_permission);
+    Ok(encode_message(USER_INFO_RESPONSE_CODE, &payload))
 }
 
 pub fn folder_contents_request_frame(token: u32, folder: &str) -> Vec<u8> {
@@ -647,6 +752,174 @@ pub fn parse_peer_address(frame: &Frame) -> Result<PeerAddress, ProtocolError> {
         address,
         port,
     })
+}
+
+pub fn parse_watch_user(frame: &Frame) -> Result<WatchedUser, ProtocolError> {
+    if frame.code != WATCH_USER_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: WATCH_USER_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let username = read_network_username(&mut reader)?;
+    let exists = reader.read_bool()?;
+    if !exists {
+        return Ok(WatchedUser {
+            username,
+            exists,
+            status: 0,
+            average_speed: 0,
+            upload_count: 0,
+            shared_file_count: 0,
+            shared_directory_count: 0,
+            country_code: None,
+        });
+    }
+    let status = reader.read_u32()?;
+    let average_speed = reader.read_u32()?;
+    let upload_count = reader.read_u32()?;
+    let _unknown = reader.read_u32()?;
+    let shared_file_count = reader.read_u32()?;
+    let shared_directory_count = reader.read_u32()?;
+    let country_code = if status != 0 && reader.remaining() >= 4 {
+        normalize_country_code(reader.read_string_lossy()?)
+    } else {
+        None
+    };
+    Ok(WatchedUser {
+        username,
+        exists,
+        status,
+        average_speed,
+        upload_count,
+        shared_file_count,
+        shared_directory_count,
+        country_code,
+    })
+}
+
+pub fn parse_user_status(frame: &Frame) -> Result<(String, u32, bool), ProtocolError> {
+    if frame.code != USER_STATUS_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: USER_STATUS_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    Ok((
+        read_network_username(&mut reader)?,
+        reader.read_u32()?,
+        reader.read_bool()?,
+    ))
+}
+
+pub fn parse_user_stats(frame: &Frame) -> Result<UserStats, ProtocolError> {
+    if frame.code != USER_STATS_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: USER_STATS_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let username = read_network_username(&mut reader)?;
+    let average_speed = reader.read_u32()?;
+    let upload_count = reader.read_u32()?;
+    let _unknown = reader.read_u32()?;
+    Ok(UserStats {
+        username,
+        average_speed,
+        upload_count,
+        shared_file_count: reader.read_u32()?,
+        shared_directory_count: reader.read_u32()?,
+    })
+}
+
+pub fn parse_user_interests(frame: &Frame) -> Result<UserInterests, ProtocolError> {
+    if frame.code != USER_INTERESTS_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: USER_INTERESTS_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let username = read_network_username(&mut reader)?;
+    let likes = read_interests(&mut reader, "liked interests")?;
+    let hates = read_interests(&mut reader, "hated interests")?;
+    Ok(UserInterests {
+        username,
+        likes,
+        hates,
+    })
+}
+
+pub fn parse_user_info_response(frame: &Frame) -> Result<UserInfoResponse, ProtocolError> {
+    if frame.code != USER_INFO_RESPONSE_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: USER_INFO_RESPONSE_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let description = reader.read_string_lossy()?;
+    if description.len() > MAX_PROFILE_DESCRIPTION_BYTES {
+        return Err(ProtocolError::InvalidUserInfo);
+    }
+    let picture = if reader.read_bool()? {
+        let length = reader.read_u32()? as usize;
+        if length > MAX_PROFILE_PICTURE_BYTES {
+            return Err(ProtocolError::InvalidUserInfo);
+        }
+        Some(reader.read_bytes(length)?.to_vec())
+    } else {
+        None
+    };
+    let upload_slots = reader.read_u32()?;
+    let queue_size = reader.read_u32()?;
+    let slots_free = reader.read_bool()?;
+    let upload_permission = (reader.remaining() >= 4)
+        .then(|| reader.read_u32())
+        .transpose()?;
+    Ok(UserInfoResponse {
+        description,
+        picture,
+        upload_slots,
+        queue_size,
+        slots_free,
+        upload_permission,
+    })
+}
+
+fn read_network_username(reader: &mut PayloadReader<'_>) -> Result<String, ProtocolError> {
+    let username = reader.read_string_lossy()?;
+    if username.is_empty() || username.len() > MAX_NETWORK_USERNAME_BYTES {
+        return Err(ProtocolError::InvalidUserData);
+    }
+    Ok(username)
+}
+
+fn normalize_country_code(value: String) -> Option<String> {
+    let value = value.trim().to_ascii_uppercase();
+    (value.len() == 2 && value.bytes().all(|byte| byte.is_ascii_alphabetic())).then_some(value)
+}
+
+fn read_interests(
+    reader: &mut PayloadReader<'_>,
+    kind: &'static str,
+) -> Result<Vec<String>, ProtocolError> {
+    let count = reader.read_u32()? as usize;
+    if count > MAX_USER_INTERESTS {
+        return Err(ProtocolError::InvalidCount { kind, count });
+    }
+    let mut interests = Vec::with_capacity(count);
+    for _ in 0..count {
+        let interest = reader.read_string_lossy()?;
+        if interest.is_empty() || interest.len() > MAX_USER_INTEREST_BYTES {
+            return Err(ProtocolError::InvalidUserData);
+        }
+        interests.push(interest);
+    }
+    Ok(interests)
 }
 
 pub fn parse_cant_connect_token(frame: &Frame) -> Result<u32, ProtocolError> {
@@ -1104,6 +1377,13 @@ where
     read_frame_with_limit(reader, MAX_PEER_MESSAGE_LENGTH).await
 }
 
+pub async fn read_profile_frame<R>(reader: &mut R) -> Result<Frame, ProtocolError>
+where
+    R: AsyncRead + Unpin,
+{
+    read_frame_with_limit(reader, MAX_PROFILE_MESSAGE_LENGTH).await
+}
+
 pub async fn read_distributed_frame<R>(reader: &mut R) -> Result<DistributedFrame, ProtocolError>
 where
     R: AsyncRead + Unpin,
@@ -1360,6 +1640,10 @@ pub enum ProtocolError {
     InvalidDistributedBranchLevel(i32),
     #[error("Soulseek distributed branch root is invalid")]
     InvalidDistributedBranchRoot,
+    #[error("Soulseek user data is invalid")]
+    InvalidUserData,
+    #[error("Soulseek user profile exceeds the safety limits")]
+    InvalidUserInfo,
     #[error("Unexpected Soulseek peer initialization code {0}")]
     UnexpectedPeerInitCode(u8),
     #[error("Soulseek {kind} count {count} exceeds the safety limit")]
@@ -1468,6 +1752,131 @@ mod tests {
         );
         assert_eq!(u32::from_le_bytes(search[8..12].try_into().unwrap()), 91);
         assert!(search.ends_with(b"night geometry"));
+    }
+
+    #[test]
+    fn parses_people_presence_stats_and_country() {
+        let mut watch_payload = encoded_string("audiophile92");
+        watch_payload.push(1);
+        watch_payload.extend(2_u32.to_le_bytes());
+        watch_payload.extend(8_200_000_u32.to_le_bytes());
+        watch_payload.extend(18_402_u32.to_le_bytes());
+        watch_payload.extend(0_u32.to_le_bytes());
+        watch_payload.extend(23_941_u32.to_le_bytes());
+        watch_payload.extend(1_284_u32.to_le_bytes());
+        watch_payload.extend(encoded_string("nl"));
+        let watched = parse_watch_user(&Frame {
+            code: WATCH_USER_CODE,
+            payload: watch_payload,
+        })
+        .unwrap();
+        assert_eq!(watched.username, "audiophile92");
+        assert_eq!(watched.status, 2);
+        assert_eq!(watched.average_speed, 8_200_000);
+        assert_eq!(watched.shared_file_count, 23_941);
+        assert_eq!(watched.country_code.as_deref(), Some("NL"));
+
+        let mut status_payload = encoded_string("audiophile92");
+        status_payload.extend(1_u32.to_le_bytes());
+        status_payload.push(1);
+        assert_eq!(
+            parse_user_status(&Frame {
+                code: USER_STATUS_CODE,
+                payload: status_payload,
+            })
+            .unwrap(),
+            ("audiophile92".to_owned(), 1, true)
+        );
+
+        let mut stats_payload = encoded_string("audiophile92");
+        stats_payload.extend(8_200_000_u32.to_le_bytes());
+        stats_payload.extend(18_402_u32.to_le_bytes());
+        stats_payload.extend(0_u32.to_le_bytes());
+        stats_payload.extend(23_941_u32.to_le_bytes());
+        stats_payload.extend(1_284_u32.to_le_bytes());
+        let stats = parse_user_stats(&Frame {
+            code: USER_STATS_CODE,
+            payload: stats_payload,
+        })
+        .unwrap();
+        assert_eq!(stats.upload_count, 18_402);
+        assert_eq!(stats.shared_directory_count, 1_284);
+    }
+
+    #[test]
+    fn parses_bounded_user_interests() {
+        let mut payload = encoded_string("resonant");
+        payload.extend(2_u32.to_le_bytes());
+        payload.extend(encoded_string("minimalism"));
+        payload.extend(encoded_string("sound art"));
+        payload.extend(1_u32.to_le_bytes());
+        payload.extend(encoded_string("transcodes"));
+        let interests = parse_user_interests(&Frame {
+            code: USER_INTERESTS_CODE,
+            payload,
+        })
+        .unwrap();
+        assert_eq!(interests.likes, vec!["minimalism", "sound art"]);
+        assert_eq!(interests.hates, vec!["transcodes"]);
+
+        let mut oversized = encoded_string("resonant");
+        oversized.extend(u32::try_from(MAX_USER_INTERESTS + 1).unwrap().to_le_bytes());
+        assert!(matches!(
+            parse_user_interests(&Frame {
+                code: USER_INTERESTS_CODE,
+                payload: oversized,
+            }),
+            Err(ProtocolError::InvalidCount { .. })
+        ));
+    }
+
+    #[test]
+    fn user_info_response_round_trips_and_rejects_oversized_content() {
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let frame =
+            user_info_response_frame("Sharing careful rips.", Some(&png), 3, 2, true, 1).unwrap();
+        let response = parse_user_info_response(&decoded_frame(&frame)).unwrap();
+        assert_eq!(response.description, "Sharing careful rips.");
+        assert_eq!(response.picture.as_deref(), Some(png.as_slice()));
+        assert_eq!(response.upload_slots, 3);
+        assert_eq!(response.queue_size, 2);
+        assert!(response.slots_free);
+        assert_eq!(response.upload_permission, Some(1));
+
+        assert!(matches!(
+            user_info_response_frame(
+                &"x".repeat(MAX_PROFILE_DESCRIPTION_BYTES + 1),
+                None,
+                1,
+                0,
+                true,
+                1,
+            ),
+            Err(ProtocolError::InvalidUserInfo)
+        ));
+        assert!(matches!(
+            user_info_response_frame(
+                "profile",
+                Some(&vec![0; MAX_PROFILE_PICTURE_BYTES + 1]),
+                1,
+                0,
+                true,
+                1,
+            ),
+            Err(ProtocolError::InvalidUserInfo)
+        ));
+    }
+
+    #[tokio::test]
+    async fn profile_reader_rejects_frames_above_its_dedicated_limit() {
+        let bytes = u32::try_from(MAX_PROFILE_MESSAGE_LENGTH + 1)
+            .unwrap()
+            .to_le_bytes();
+        let mut source = bytes.as_slice();
+        assert!(matches!(
+            read_profile_frame(&mut source).await,
+            Err(ProtocolError::InvalidLength(_))
+        ));
     }
 
     #[test]

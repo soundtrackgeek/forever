@@ -19,12 +19,14 @@ import {
 import { useMemo, useState, type FormEvent } from "react";
 import type {
   FolderFile,
+  PersonProfile,
   ShareFile,
   ShareDirectorySummary,
   ShareFolderSnapshot,
   ShareSearchSnapshot,
   UserSharesOverview,
 } from "../types";
+import { CountryFlag } from "./CountryFlag";
 
 type ShareTreeNode = {
   path: string;
@@ -135,6 +137,8 @@ type UserSharesWorkspaceProps = {
   results: ShareSearchSnapshot | null;
   loading: boolean;
   error: string | null;
+  person: PersonProfile | null;
+  onOpenPerson: () => void;
   onRefresh: () => void;
   onOpenFolder: (directory: string) => void;
   onSearch: (query: string, extension: string | null) => void;
@@ -176,6 +180,8 @@ export function UserSharesWorkspace({
   results,
   loading,
   error,
+  person,
+  onOpenPerson,
   onRefresh,
   onOpenFolder,
   onSearch,
@@ -281,12 +287,15 @@ export function UserSharesWorkspace({
       <header className="shares-heading">
         <div>
           <span className="shares-kicker"><UserCircle size={15} /> User shares</span>
-          <h1>{username}’s shares</h1>
-          <p><i aria-hidden="true" /> Online · Shared directly from this listener</p>
+          <h1><CountryFlag code={person?.countryCode} />{username}’s shares</h1>
+          <p><i aria-hidden="true" /> {person?.status === "away" ? "Away" : person?.status === "offline" ? "Offline" : "Online"} · Shared directly from this listener</p>
         </div>
-        <button type="button" className="shares-refresh" onClick={onRefresh} disabled={loading}>
-          <ArrowClockwise className={loading ? "is-spinning" : ""} size={16} /> Refresh
-        </button>
+        <div className="shares-heading-actions">
+          <button type="button" onClick={onOpenPerson}><UserCircle size={16} /> View profile</button>
+          <button type="button" className="shares-refresh" onClick={onRefresh} disabled={loading}>
+            <ArrowClockwise className={loading ? "is-spinning" : ""} size={16} /> Refresh
+          </button>
+        </div>
       </header>
 
       <form className="shares-toolbar" onSubmit={submitSearch}>
@@ -441,7 +450,7 @@ export function UserSharesWorkspace({
         <aside className="shares-inspector">
           <section className="share-user-card">
             <span className="share-avatar">{username.slice(0, 1).toUpperCase()}</span>
-            <div><strong>{username}</strong><small><i /> Online now</small><small><ShieldCheck size={11} weight="fill" /> Soulseek listener</small></div>
+            <div><strong><CountryFlag code={person?.countryCode} />{username}</strong><small><i /> {person?.status === "away" ? "Away" : person?.status === "offline" ? "Offline" : "Online now"}</small><small><ShieldCheck size={11} weight="fill" /> Soulseek listener</small></div>
           </section>
           <section className="share-summary">
             <span><small>Shared files</small><strong>{overview?.totalFileCount.toLocaleString() ?? "—"}</strong></span>

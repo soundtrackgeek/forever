@@ -8,10 +8,10 @@ import {
   GridFour,
   ListBullets,
   MagnifyingGlass,
-  Plus,
   ShieldCheck,
   Star,
   Stop,
+  UserCircle,
   XCircle,
 } from "@phosphor-icons/react";
 import {
@@ -24,7 +24,9 @@ import type {
   ConnectionSnapshot,
   SearchResult,
   SearchSnapshot,
+  PersonProfile,
 } from "../types";
+import { CountryFlag } from "./CountryFlag";
 
 type Filter = "all" | "lossless" | "compressed";
 type Sort = "best" | "ready" | "fast" | "small";
@@ -43,6 +45,8 @@ type SearchWorkspaceProps = {
   onSelectResult: (result: SearchResult) => void;
   onQueueDownload: (result: SearchResult) => void;
   onBrowseUser: (username: string) => void;
+  personByUsername: (username: string) => PersonProfile | null;
+  onOpenPerson: (username: string) => void;
 };
 
 const losslessFormats = new Set(["FLAC", "ALAC", "WAV", "AIFF", "APE", "WV"]);
@@ -103,6 +107,8 @@ export function SearchWorkspace({
   onSelectResult,
   onQueueDownload,
   onBrowseUser,
+  personByUsername,
+  onOpenPerson,
 }: SearchWorkspaceProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -435,6 +441,7 @@ export function SearchWorkspace({
           ) : (
             visibleResults.map((result) => {
               const live = result.source === "live";
+              const person = personByUsername(result.owner);
               return (
                 <article
                   className={`result-row ${
@@ -461,7 +468,7 @@ export function SearchWorkspace({
                     </span>
 
                     <span className="source-user">
-                      <strong>{result.owner}</strong>
+                      <strong><CountryFlag code={person?.countryCode} />{result.owner}</strong>
                       <small>
                         <ShieldCheck size={11} weight="fill" aria-hidden="true" />{" "}
                         {result.trust}% <em aria-label="Online" />
@@ -503,15 +510,11 @@ export function SearchWorkspace({
                     </button>
                     <button
                       type="button"
-                      aria-label={
-                        live
-                          ? `Add ${result.title} to the download queue`
-                          : `Add ${result.title} to queue`
-                      }
-                      title="Add to queue"
-                      onClick={() => onQueueDownload(result)}
+                      aria-label={`View ${result.owner}'s profile`}
+                      title="View user profile"
+                      onClick={() => onOpenPerson(result.owner)}
                     >
-                      <Plus size={16} />
+                      <UserCircle size={17} />
                     </button>
                     <button
                       type="button"

@@ -110,7 +110,7 @@ describe("Forever shell", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByRole("heading", { name: "audiophile92’s shares" }),
+        screen.getByRole("heading", { name: /audiophile92’s shares/ }),
       ).toBeInTheDocument(),
     );
 
@@ -186,7 +186,7 @@ describe("Forever shell", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Uploads 1" }));
 
     expect(screen.getByText("04 Endorphin.flac")).toBeInTheDocument();
-    expect(screen.getByText(/to lowlight.fm/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /lowlight.fm/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel upload 04 Endorphin.flac" })).toBeInTheDocument();
   });
 
@@ -194,13 +194,55 @@ describe("Forever shell", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
-    fireEvent.click(screen.getAllByRole("button", { name: "audiophile92" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /audiophile92/ })[0]);
 
     await waitFor(() =>
       expect(
-        screen.getByRole("heading", { name: "audiophile92’s shares" }),
+        screen.getByRole("heading", { name: "Your corner of the network" }),
       ).toBeInTheDocument(),
     );
+    expect(screen.getByRole("heading", { name: "audiophile92" })).toBeInTheDocument();
+  });
+
+  it("opens People with live presence, country flags, favorites, and profile details", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "People" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Your corner of the network" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Netherlands").length).toBeGreaterThan(0);
+    expect(screen.getByText("24K")).toBeInTheDocument();
+    expect(screen.getByText("8.2 MB/s")).toBeInTheDocument();
+    expect(screen.getByText("field recordings")).toBeInTheDocument();
+
+    const saved = screen.getByRole("button", { name: "Saved" });
+    fireEvent.click(saved);
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+
+  it("opens the private conversation shell from a person profile", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "People" }));
+    fireEvent.click(screen.getByRole("button", { name: "Message" }));
+
+    const conversation = screen.getByRole("dialog", { name: "audiophile92" });
+    expect(within(conversation).getByText("A quiet line is ready")).toBeInTheDocument();
+    expect(within(conversation).getByRole("textbox", { name: "Private messages are not available yet" })).toBeDisabled();
+  });
+
+  it("opens a user profile directly from a search result", () => {
+    render(<App />);
+
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "View audiophile92's profile" })[0],
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Your corner of the network" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "audiophile92" })).toBeInTheDocument();
   });
 
   it("opens the live connection settings from the sidebar", () => {
@@ -252,15 +294,15 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.12 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.13 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Full participation in Soulseek’s distributed search network, including relay discovery and branch-root delivery.",
+        "A dedicated People workspace with live online, away, and offline presence.",
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Locally shared files can now appear in ordinary global searches from other Soulseek clients."),
+      screen.getByText("Country flags beside listeners throughout Search, People, Shares, and Transfers."),
     ).toBeInTheDocument();
   });
 

@@ -1,5 +1,6 @@
 import {
   ArrowsClockwise,
+  AddressBook,
   CaretDown,
   DownloadSimple,
   GearSix,
@@ -23,6 +24,7 @@ type AppSidebarProps = {
 const navItems = [
   { id: "home", label: "Home", icon: House },
   { id: "search", label: "Search", icon: MagnifyingGlass },
+  { id: "people", label: "People", icon: AddressBook },
   { id: "rooms", label: "Rooms", icon: UsersThree },
   { id: "transfers", label: "Transfers", icon: DownloadSimple },
   { id: "library", label: "Library", icon: MusicNotes },

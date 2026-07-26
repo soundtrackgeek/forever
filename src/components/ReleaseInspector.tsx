@@ -12,7 +12,8 @@ import {
   Waves,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
-import type { FolderFile, FolderInspection, SearchResult } from "../types";
+import type { FolderFile, FolderInspection, PersonProfile, SearchResult } from "../types";
+import { CountryFlag } from "./CountryFlag";
 
 type ReleaseInspectorProps = {
   result: SearchResult | null;
@@ -22,6 +23,8 @@ type ReleaseInspectorProps = {
   onInspectFolder: (result: SearchResult) => void;
   onQueueDownload: (result: SearchResult) => void;
   onBrowseUser: (username: string) => void;
+  person: PersonProfile | null;
+  onOpenPerson: (username: string) => void;
   onQueueRelease: (
     result: SearchResult,
     title: string,
@@ -67,6 +70,8 @@ export function ReleaseInspector({
   onInspectFolder,
   onQueueDownload,
   onBrowseUser,
+  person,
+  onOpenPerson,
   onQueueRelease,
 }: ReleaseInspectorProps) {
   const [selection, setSelection] = useState<{
@@ -264,17 +269,20 @@ export function ReleaseInspector({
                 <img src="/assets/listener-avatar.png" alt="" />
               )}
               <span>
-                <strong>{result.owner}</strong>
+                <strong><CountryFlag code={person?.countryCode} />{result.owner}</strong>
                 <small><ShieldCheck size={11} weight="fill" aria-hidden="true" /> {live ? "Live Soulseek response" : `${result.trust}% · 2,341 shares`}</small>
                 <small><i aria-hidden="true" /> Online now</small>
               </span>
-              <button
-                type="button"
-                className="browse-user-shares"
-                onClick={() => onBrowseUser(result.owner)}
-              >
-                Browse shares
-              </button>
+              <span className="source-profile-actions">
+                <button type="button" onClick={() => onOpenPerson(result.owner)}>View profile</button>
+                <button
+                  type="button"
+                  className="browse-user-shares"
+                  onClick={() => onBrowseUser(result.owner)}
+                >
+                  Browse shares
+                </button>
+              </span>
             </section>
 
             {folderError && (

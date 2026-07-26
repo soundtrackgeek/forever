@@ -3,9 +3,9 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.12` completes distributed-search
-> participation so locally shared music can appear in ordinary global searches
-> from other Soulseek clients, with indexed matching and live relay status.
+> **Status:** pre-alpha. Version `0.0.13` adds People and Presence: live
+> listener profiles, country identity, favorites, blocked/recent people, and
+> profile entry points throughout the download journey.
 
 ![Forever Midnight Radio user shares interface](design/implementation/release-user-shares-0.0.9.png)
 
@@ -23,6 +23,11 @@ Rust, Tauri 2, React, and TypeScript.
   protocol parsing
 - Working lossless/compressed filters, ready/speed/size sorting, stop control,
   and a live file inspector with source speed, queue, and share visibility
+- A dedicated People workspace with live online/away/offline presence,
+  country flags, profile descriptions and images, interests, share/upload
+  statistics, persistent favorites and blocked listeners, and recent sources
+- Profile entry points and country flags in Search, User Shares, Transfers,
+  uploads, and the transfer shelf, plus an initial private-conversation shell
 - Real single-file downloads from live results using direct and indirect peer
   connections, with one active file at a time
 - Live source-folder inspection using Soulseek Folder Contents requests, with
@@ -110,10 +115,17 @@ Forever creates a safe release folder beneath the download location configured
 in Connection settings and adds the files in their displayed order. Choose the
 folder icon on any result—or **Browse shares** in the source inspector—to open
 that listener's complete shares. Source names in the transfer shelf and full
-Transfers workspace open the same explorer. Expand or collapse branches in the
+Transfers workspace open the listener's People profile, where complete shares
+remain one action away. Expand or collapse branches in the
 folder rail. Share-list search returns matching folders and files locally after
 the list is received; choose a folder result to open it directly. **Refresh**
 explicitly asks the peer again.
+
+Open **People** to revisit recent sources and favorites, see their live
+presence and country, inspect profile notes and interests, or browse everything
+they share. Listener names in Search and Transfers open the same profile. The
+Message action currently opens the conversation shell; sending and receiving
+private messages arrives in a later release.
 
 Add music under **Settings → Your shared music**. Forever gives each selected
 root a virtual alias, indexes supported audio in the background, and announces
@@ -124,7 +136,7 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.12` intentionally keeps one active download at a time, even when an
+Version `0.0.13` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
 three. Library management, metadata/cover lookup, playback, rooms, and chat
 remain outside this release.
@@ -144,7 +156,10 @@ Automatic update checks**.
 Forever writes non-secret account preferences to the Tauri application
 configuration directory and connection events to
 `logs/connection.log`. Release grouping, file order, and transfer metadata are
-stored in `transfers.json` in the same configuration directory. Shared-root
+stored in `transfers.json` in the same configuration directory. Favorites,
+blocked listeners, and recent source usernames are stored in `people.json`;
+profile notes, profile images, interests, country, presence, and statistics
+remain in memory for the current session. Shared-root
 configuration and upload-slot count are stored separately in `sharing.json`;
 the file contains local folder paths because Forever must reopen those roots,
 but it never leaves the device. Peer IP
@@ -172,7 +187,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.12 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.13 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

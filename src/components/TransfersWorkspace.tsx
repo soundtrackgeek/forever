@@ -13,8 +13,9 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
-import type { Transfer, Upload } from "../types";
+import type { PersonProfile, Transfer, Upload } from "../types";
 import { groupTransfers, type TransferGroup } from "../utils/transfers";
+import { CountryFlag } from "./CountryFlag";
 
 type Filter = "all" | "active" | "queued" | "completed" | "failed";
 
@@ -33,7 +34,8 @@ type TransfersWorkspaceProps = {
   onRevealRelease: (id: string) => void;
   onClearCompleted: () => void;
   onDismissError: () => void;
-  onBrowseUser: (username: string) => void;
+  personByUsername: (username: string) => PersonProfile | null;
+  onOpenPerson: (username: string) => void;
   onCancelUpload: (id: string) => void;
   onClearFinishedUploads: () => void;
   onDismissUploadError: () => void;
@@ -92,7 +94,8 @@ export function TransfersWorkspace({
   onRevealRelease,
   onClearCompleted,
   onDismissError,
-  onBrowseUser,
+  personByUsername,
+  onOpenPerson,
   onCancelUpload,
   onClearFinishedUploads,
   onDismissUploadError,
@@ -226,7 +229,7 @@ export function TransfersWorkspace({
                 <span className="upload-signal-icon"><UploadSimple size={19} weight="light" /></span>
                 <span className="upload-transfer-name">
                   <strong>{upload.filename}</strong>
-                  <small>to {upload.username} · {formatBytes(upload.sizeBytes)}</small>
+                  <small>to <button type="button" className="transfer-user-link" onClick={() => onOpenPerson(upload.username)}><CountryFlag code={personByUsername(upload.username)?.countryCode} />{upload.username}</button> · {formatBytes(upload.sizeBytes)}</small>
                   <em title={upload.remoteFilename}>{upload.remoteFilename}</em>
                 </span>
                 <span className="upload-transfer-progress">
@@ -272,9 +275,9 @@ export function TransfersWorkspace({
                     <button
                       type="button"
                       className="transfer-user-link"
-                      onClick={() => onBrowseUser(group.username)}
+                      onClick={() => onOpenPerson(group.username)}
                     >
-                      {group.username}
+                      <CountryFlag code={personByUsername(group.username)?.countryCode} />{group.username}
                     </button>
                     <i aria-label="Online" />
                   </small>

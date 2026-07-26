@@ -30,23 +30,25 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.11",
-  version: "0.0.12",
-  body: `## What’s new in Forever 0.0.12
+  currentVersion: "0.0.12",
+  version: "0.0.13",
+  body: `## What’s new in Forever 0.0.13
 
 ### Added
 
-- Full participation in Soulseek’s distributed search network, including relay discovery and branch-root delivery.
-- Live global-search status and received/answered counters in Connection settings.
+- A dedicated People workspace with live online, away, and offline presence.
+- Soulseek profiles with descriptions, interests, share statistics, upload availability, favorites, blocked listeners, and recent sources.
+- Country flags beside listeners throughout Search, People, Shares, and Transfers.
+- A polished private-conversation shell that prepares the profile-to-message flow for the next release.
 
 ### Changed
 
-- Shared-file matching now uses a word index with required, excluded, and partial query terms.
-- Incoming searches are deduplicated and rate-limited before matching.
+- Search and transfer source names now open the listener’s profile, with complete share browsing one action away.
+- Profile images remain session-only while favorites, blocked listeners, and recent sources persist locally.
 
 ### Fixed
 
-- Locally shared files can now appear in ordinary global searches from other Soulseek clients.`,
+- Profile descriptions, images, interests, and server statistics are bounded before entering app state.`,
   date: "2026-07-26",
 };
 
