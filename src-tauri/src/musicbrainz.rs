@@ -8,7 +8,7 @@ use tauri::State;
 use tokio::sync::{Mutex, RwLock};
 
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "Forever/0.0.17 (https://github.com/soundtrackgeek/soulseek_forever)";
+const USER_AGENT: &str = "Forever/0.0.18 (https://github.com/soundtrackgeek/soulseek_forever)";
 const REQUEST_INTERVAL: Duration = Duration::from_millis(1_050);
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const MAX_CATALOG_PAGES: usize = 3;
@@ -56,7 +56,9 @@ pub struct AlbumReleaseGroup {
 
 #[derive(Clone, Debug, Deserialize)]
 struct ReleaseGroupResponse {
+    #[serde(rename = "release-group-count")]
     count: usize,
+    #[serde(rename = "release-group-offset")]
     offset: usize,
     #[serde(rename = "release-groups")]
     release_groups: Vec<AlbumReleaseGroup>,
@@ -302,8 +304,8 @@ mod tests {
     fn parses_musicbrainz_release_groups() {
         let response: ReleaseGroupResponse = serde_json::from_str(
             r#"{
-              "count": 1,
-              "offset": 0,
+              "release-group-count": 1,
+              "release-group-offset": 0,
               "release-groups": [{
                 "id": "album-id",
                 "title": "Hysteria",
@@ -314,6 +316,8 @@ mod tests {
             }"#,
         )
         .unwrap();
+        assert_eq!(response.count, 1);
+        assert_eq!(response.offset, 0);
         assert_eq!(response.release_groups[0].title, "Hysteria");
         assert_eq!(
             response.release_groups[0].primary_type.as_deref(),

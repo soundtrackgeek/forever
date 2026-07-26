@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.17` is a startup hotfix for the `0.0.16`
-> MusicBrainz TLS regression. It retains complete-release sharing, the dedicated
-> Browse workspace, and catalog-guided album discovery.
+> **Status:** pre-alpha. Version `0.0.18` fixes MusicBrainz album-catalog
+> compatibility while retaining the `0.0.17` startup repair, complete-release
+> sharing, the dedicated Browse workspace, and catalog-guided discovery.
 
-If `0.0.16` is installed, download and run the `0.0.17` Windows installer
+If `0.0.16` is installed, download and run the `0.0.18` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -175,7 +175,7 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.17` intentionally keeps one active download at a time, even when an
+Version `0.0.18` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
 three. Edition/pressing lookup, Library management, playback, rooms, and public
 chat remain outside this release.
@@ -237,7 +237,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.17 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.18 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

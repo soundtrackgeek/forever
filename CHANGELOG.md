@@ -5,6 +5,26 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.18] - 2026-07-26
+
+### Added
+
+- Regression assertions for MusicBrainz release-group count and offset metadata
+  alongside the existing album-field coverage.
+
+### Changed
+
+- The MusicBrainz release-group fixture now mirrors the field names returned by
+  the production API instead of using simplified local-only names.
+- Application and updater preview metadata now identify version `0.0.18` and
+  describe the album-catalog compatibility fix.
+
+### Fixed
+
+- Album catalogs now decode MusicBrainz's `release-group-count` and
+  `release-group-offset` response fields, so valid searches such as Def Leppard
+  no longer fail after artist matching.
+
 ## [0.0.17] - 2026-07-26
 
 ### Added

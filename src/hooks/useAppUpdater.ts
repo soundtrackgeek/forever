@@ -30,24 +30,23 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.16",
-  version: "0.0.17",
-  body: `## What’s new in Forever 0.0.17
+  currentVersion: "0.0.17",
+  version: "0.0.18",
+  body: `## What’s new in Forever 0.0.18
 
 ### Fixed
 
-- Forever starts normally again after the 0.0.16 MusicBrainz networking regression.
-- Album discovery can report its own setup error without taking down the rest of the application.
+- Album catalogs now decode MusicBrainz's real release-group count and offset field names.
+- Searches such as Def Leppard no longer fail after the artist match succeeds.
 
 ### Changed
 
-- Forever now installs an explicit Rustls crypto provider before constructing HTTPS clients.
-- Windows releases must pass a packaged startup smoke test before publication.
-- Computers already on 0.0.16 must install this hotfix manually because that build cannot open its updater.
+- The MusicBrainz parser fixture now mirrors the production API response envelope.
+- Computers still on 0.0.16 must install this latest hotfix manually because that build cannot open its updater.
 
 ### Added
 
-- Regression coverage now constructs the real MusicBrainz HTTP client during Rust tests.`,
+- Regression assertions now cover release-group pagination metadata as well as album fields.`,
   date: "2026-07-26",
 };
 

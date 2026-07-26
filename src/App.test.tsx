@@ -398,16 +398,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.17 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.18 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Forever starts normally again after the 0.0.16 MusicBrainz networking regression.",
+        "Album catalogs now decode MusicBrainz's real release-group count and offset field names.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Windows releases must pass a packaged startup smoke test before publication.",
+        "The MusicBrainz parser fixture now mirrors the production API response envelope.",
       ),
     ).toBeInTheDocument();
   });
