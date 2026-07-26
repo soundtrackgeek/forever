@@ -398,16 +398,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.16 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.17 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Complete-release sharing for artwork, lyrics, cue sheets, logs, booklets, and other companion files beside audio.",
+        "Forever starts normally again after the 0.0.16 MusicBrainz networking regression.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Companion files no longer disappear from local share lists, search responses, selections, or downloads.",
+        "Windows releases must pass a packaged startup smoke test before publication.",
       ),
     ).toBeInTheDocument();
   });

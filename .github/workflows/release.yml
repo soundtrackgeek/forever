@@ -86,6 +86,28 @@ jobs:
           cargo clippy --all-targets --all-features -- -D warnings
           cargo test --all-targets --all-features
 
+      - name: Build release executable for startup smoke test
+        run: npx tauri build --no-bundle
+
+      - name: Verify the packaged app stays running
+        shell: pwsh
+        run: |
+          $executable = Resolve-Path "src-tauri/target/release/forever.exe"
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $executable -PassThru -WindowStyle Hidden
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Forever exited during the packaged startup smoke test with code $($process.ExitCode)."
+            }
+            Write-Host "Forever remained running through the startup smoke window."
+          } finally {
+            if ($process -and -not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+            }
+          }
+
       - name: Build installers and create GitHub Release
         uses: tauri-apps/tauri-action@v1
         env:

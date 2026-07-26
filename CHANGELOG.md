@@ -5,6 +5,32 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.17] - 2026-07-26
+
+### Added
+
+- A Rust regression test that constructs the real MusicBrainz HTTPS client and
+  verifies that a TLS crypto provider is available.
+- A Windows release smoke test that launches the packaged executable and fails
+  publication if Forever exits during its startup window.
+
+### Changed
+
+- MusicBrainz HTTP-client construction now retains an initialization error for
+  the Albums workspace instead of preventing the rest of Forever from opening.
+- Application and updater preview metadata now identify hotfix version
+  `0.0.17` and explain the manual repair path from `0.0.16`.
+
+### Fixed
+
+- Fixed the immediate startup exit in `0.0.16` by installing the Rustls `ring`
+  crypto provider before Reqwest constructs the MusicBrainz HTTPS client.
+
+### Security
+
+- Forever now selects its Rustls crypto provider explicitly instead of relying
+  on transitive dependency initialization order.
+
 ## [0.0.16] - 2026-07-26
 
 ### Added

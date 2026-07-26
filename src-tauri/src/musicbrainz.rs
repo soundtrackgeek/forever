@@ -8,7 +8,7 @@ use tauri::State;
 use tokio::sync::{Mutex, RwLock};
 
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "Forever/0.0.16 (https://github.com/soundtrackgeek/soulseek_forever)";
+const USER_AGENT: &str = "Forever/0.0.17 (https://github.com/soundtrackgeek/soulseek_forever)";
 const REQUEST_INTERVAL: Duration = Duration::from_millis(1_050);
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const MAX_CATALOG_PAGES: usize = 3;
@@ -77,20 +77,25 @@ struct CacheEntry<T> {
 }
 
 pub struct MusicBrainzClient {
-    client: reqwest::Client,
+    client: Result<reqwest::Client, String>,
     request_gate: Arc<Mutex<Instant>>,
     artist_cache: RwLock<HashMap<String, CacheEntry<Vec<AlbumArtist>>>>,
     catalog_cache: RwLock<HashMap<String, CacheEntry<AlbumCatalog>>>,
 }
 
 impl MusicBrainzClient {
-    pub fn new() -> Result<Self, String> {
+    pub fn new() -> Self {
+        // Reqwest's rustls-no-provider feature deliberately panics while building a
+        // client unless the host application installs a provider first. Keep that
+        // requirement beside the only client that needs it so startup ordering
+        // cannot accidentally regress again.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let client = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .timeout(Duration::from_secs(15))
             .build()
-            .map_err(|error| format!("Could not prepare album discovery: {error}"))?;
-        Ok(Self {
+            .map_err(|error| format!("Could not prepare album discovery: {error}"));
+        Self {
             client,
             request_gate: Arc::new(Mutex::new(
                 Instant::now()
@@ -99,7 +104,11 @@ impl MusicBrainzClient {
             )),
             artist_cache: RwLock::new(HashMap::new()),
             catalog_cache: RwLock::new(HashMap::new()),
-        })
+        }
+    }
+
+    fn client(&self) -> Result<&reqwest::Client, String> {
+        self.client.as_ref().map_err(Clone::clone)
     }
 
     async fn wait_for_request_slot(&self) {
@@ -129,7 +138,7 @@ impl MusicBrainzClient {
         self.wait_for_request_slot().await;
         let escaped = query.replace('\\', "\\\\").replace('"', "\\\"");
         let response = self
-            .client
+            .client()?
             .get(format!("{MUSICBRAINZ_API}/artist"))
             .query(&[
                 ("query", format!("artist:\"{escaped}\"")),
@@ -175,7 +184,7 @@ impl MusicBrainzClient {
         for _ in 0..MAX_CATALOG_PAGES {
             self.wait_for_request_slot().await;
             let response = self
-                .client
+                .client()?
                 .get(format!("{MUSICBRAINZ_API}/release-group"))
                 .query(&[
                     ("artist", artist_id.to_owned()),
@@ -327,5 +336,13 @@ mod tests {
         assert!(is_musicbrainz_id("7249b899-8db8-43e7-9e6e-22f1e736024e"));
         assert!(!is_musicbrainz_id("../../not-an-artist"));
         assert!(!is_musicbrainz_id("7249b899-8db8-43e7-9e6e"));
+    }
+
+    #[test]
+    fn constructs_the_album_client_with_a_tls_provider() {
+        let client = MusicBrainzClient::new();
+
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+        assert!(client.client.is_ok());
     }
 }

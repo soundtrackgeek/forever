@@ -30,25 +30,24 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.15",
-  version: "0.0.16",
-  body: `## What’s new in Forever 0.0.16
-
-### Added
-
-- Complete-release sharing for artwork, lyrics, cue sheets, logs, booklets, and other companion files beside audio.
-- A dedicated Browse workspace with exact-username entry and shortcuts to recent or favorite listeners.
-- MusicBrainz-guided album discovery with catalog filters, cover artwork, and one-click Soulseek search.
-
-### Changed
-
-- Browse actions from Search, People, and Transfers now land in the dedicated Browse workspace.
-- Sharing settings and file presentation now describe complete releases instead of audio-only roots.
+  currentVersion: "0.0.16",
+  version: "0.0.17",
+  body: `## What’s new in Forever 0.0.17
 
 ### Fixed
 
-- Companion files no longer disappear from local share lists, search responses, selections, or downloads.
-- Browsing another listener no longer leaves Search highlighted around an unrelated share view.`,
+- Forever starts normally again after the 0.0.16 MusicBrainz networking regression.
+- Album discovery can report its own setup error without taking down the rest of the application.
+
+### Changed
+
+- Forever now installs an explicit Rustls crypto provider before constructing HTTPS clients.
+- Windows releases must pass a packaged startup smoke test before publication.
+- Computers already on 0.0.16 must install this hotfix manually because that build cannot open its updater.
+
+### Added
+
+- Regression coverage now constructs the real MusicBrainz HTTP client during Rust tests.`,
   date: "2026-07-26",
 };
 

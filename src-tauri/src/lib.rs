@@ -8,7 +8,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(connection::initialize(app.handle())?);
-            app.manage(musicbrainz::MusicBrainzClient::new()?);
+            app.manage(musicbrainz::MusicBrainzClient::new());
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
