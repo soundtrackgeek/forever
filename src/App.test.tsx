@@ -18,6 +18,51 @@ describe("Forever shell", () => {
     ).toHaveLength(2);
   });
 
+  it("keeps the transfer shelf collapsed by default and toggles it on demand", () => {
+    render(<App />);
+
+    const transferPanel = screen
+      .getByRole("region", { name: "Transfer activity" })
+      .querySelector("#transfer-shelf-panel") as HTMLElement;
+    const expand = screen.getByRole("button", {
+      name: "Expand transfer activity",
+    });
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+    expect(transferPanel).not.toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Pause Night Geometry" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(expand);
+
+    expect(transferPanel).toBeVisible();
+    expect(screen.getByText("Release queue")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Pause Night Geometry" }),
+    ).toBeInTheDocument();
+    const collapse = screen.getByRole("button", {
+      name: "Collapse transfer activity",
+    });
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(collapse);
+    expect(
+      screen.getByRole("button", { name: "Expand transfer activity" }),
+    ).toBeInTheDocument();
+    expect(transferPanel).not.toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand transfer activity" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "View all transfers" }));
+    expect(
+      screen.getByRole("heading", { name: "Transfers" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Expand transfer activity" }),
+    ).toBeInTheDocument();
+  });
+
   it("navigates to a staged view and back to search", () => {
     render(<App />);
 
@@ -119,6 +164,9 @@ describe("Forever shell", () => {
   it("browses a folder, selects files, and queues a complete release", async () => {
     render(<App />);
 
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand transfer activity" }),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Pause Night Geometry" }),
     );
@@ -398,16 +446,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.18 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.19 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Album catalogs now decode MusicBrainz's real release-group count and offset field names.",
+        "The bottom transfer queue now has explicit Expand and Collapse controls with accessible state.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "The MusicBrainz parser fixture now mirrors the production API response envelope.",
+        "Sidebar navigation rows and spacing are tighter, leaving more room for the signed-in profile.",
       ),
     ).toBeInTheDocument();
   });

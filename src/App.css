@@ -25,7 +25,8 @@
   --online: #71ce76;
   --danger: #e76a72;
   --titlebar-height: 33px;
-  --transfer-height: 154px;
+  --transfer-height: 44px;
+  --transfer-expanded-height: 154px;
 }
 
 /* v0.0.13 — People and presence */
@@ -1869,6 +1870,11 @@ button:disabled {
     radial-gradient(circle at 55% 15%, rgba(47, 42, 90, 0.13), transparent 35%),
     linear-gradient(135deg, #070a13, #080b15 52%, #070a12);
   border: 1px solid #252a3a;
+  transition: grid-template-rows 180ms ease-out;
+}
+
+.app-frame.is-transfer-shelf-expanded {
+  grid-template-rows: var(--titlebar-height) minmax(0, 1fr) var(--transfer-expanded-height);
 }
 
 .titlebar {
@@ -1940,7 +1946,7 @@ button:disabled {
 
 .wordmark {
   display: flex;
-  min-height: 64px;
+  min-height: 58px;
   align-items: center;
   padding: 0 10px;
   color: var(--amber);
@@ -1951,13 +1957,13 @@ button:disabled {
 
 .primary-nav {
   display: grid;
-  gap: 5px;
-  margin-top: 3px;
+  gap: 3px;
+  margin-top: 1px;
 }
 
 .nav-item {
   display: flex;
-  height: 53px;
+  height: 46px;
   align-items: center;
   gap: 17px;
   padding: 0 18px;
@@ -1999,14 +2005,14 @@ button:disabled {
 }
 
 .sidebar-spacer {
-  min-height: 20px;
+  min-height: 12px;
   flex: 1;
 }
 
 .sidebar-actions {
   display: flex;
   gap: 7px;
-  padding: 0 8px 12px;
+  padding: 0 8px 8px;
 }
 
 .sidebar-icon-button {
@@ -3461,13 +3467,98 @@ button:disabled {
 .transfer-shelf {
   position: relative;
   z-index: 30;
-  display: grid;
-  grid-template-columns: 304px minmax(0, 1fr);
   min-height: 0;
   background:
     linear-gradient(90deg, rgba(35, 22, 38, 0.32), rgba(8, 12, 22, 0.95) 33%),
     #090d18;
   border-top: 1px solid #292e41;
+}
+
+.transfer-shelf-panel {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: 304px minmax(0, 1fr);
+}
+
+.transfer-shelf-expand {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 21px;
+  color: #aeb1c0;
+  text-align: left;
+  background:
+    linear-gradient(90deg, rgba(35, 22, 38, 0.3), rgba(8, 12, 22, 0.96) 25%),
+    #090d18;
+  border: 0;
+  cursor: pointer;
+}
+
+.transfer-shelf-expand:hover {
+  color: #f0edf7;
+  background:
+    linear-gradient(90deg, rgba(56, 35, 58, 0.42), rgba(11, 15, 26, 0.98) 28%),
+    #0b0f1b;
+}
+
+.transfer-shelf-expand-copy,
+.transfer-shelf-expand-action {
+  display: flex;
+  align-items: center;
+}
+
+.transfer-shelf-expand-copy {
+  min-width: 0;
+  gap: 10px;
+}
+
+.transfer-shelf-expand-copy > i {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  color: var(--amber);
+  background: rgba(241, 179, 81, 0.08);
+  border: 1px solid rgba(241, 179, 81, 0.24);
+  border-radius: 6px;
+  place-items: center;
+}
+
+.transfer-shelf-expand-copy strong {
+  color: #e8e6ee;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.transfer-shelf-expand-copy small {
+  overflow: hidden;
+  color: #858a9d;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-shelf-expand-copy > svg {
+  color: var(--danger);
+}
+
+.transfer-shelf-expand-action {
+  gap: 5px;
+  color: #8d91a3;
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
+.transfer-shelf-expand:hover .transfer-shelf-expand-action {
+  color: var(--amber);
+}
+
+.transfer-shelf-panel[hidden],
+.transfer-shelf-expand[hidden] {
+  display: none;
 }
 
 .transfer-summary {
@@ -3547,6 +3638,12 @@ button:disabled {
 
 .transfer-list > header button:hover {
   color: #c9cad4;
+}
+
+.transfer-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 
 .transfer-row {
@@ -4082,7 +4179,7 @@ button:disabled {
 
 @media (max-width: 1080px) {
   :root {
-    --transfer-height: 139px;
+    --transfer-expanded-height: 139px;
   }
 
   .app-shell {
@@ -4163,7 +4260,7 @@ button:disabled {
     display: none;
   }
 
-  .transfer-shelf {
+  .transfer-shelf-panel {
     grid-template-columns: 205px minmax(0, 1fr);
   }
 

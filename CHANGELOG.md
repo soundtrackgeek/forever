@@ -5,6 +5,28 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.19] - 2026-07-26
+
+### Added
+
+- Explicit, accessible Expand and Collapse controls for the bottom transfer
+  queue, including active and release counts in its compact state.
+
+### Changed
+
+- The bottom transfer queue now starts as a 44-pixel status handle and expands
+  only when requested, returning to its compact state when the dedicated
+  Transfers workspace opens.
+- Sidebar navigation rows, gaps, and supporting spacing are more compact so the
+  account identity remains visible at the bottom of the window.
+- Application and updater preview metadata now identify version `0.0.19` and
+  describe the compact transfer-drawer release.
+
+### Fixed
+
+- The signed-in username and online status are no longer clipped behind the
+  transfer area at common desktop window heights.
+
 ## [0.0.18] - 2026-07-26
 
 ### Added

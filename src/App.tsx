@@ -91,6 +91,7 @@ function PlaceholderView({
 
 function App() {
   const [activeView, setActiveView] = useState("search");
+  const [transferShelfExpanded, setTransferShelfExpanded] = useState(false);
   const [searchMode, setSearchMode] = useState<SearchMode>("files");
   const [query, setQuery] = useState("night geometry");
   const [selectedResultId, setSelectedResultId] = useState<string | null>(
@@ -129,6 +130,9 @@ function App() {
   };
 
   const navigate = (view: string) => {
+    if (view === "transfers") {
+      setTransferShelfExpanded(false);
+    }
     if (view === "messages") {
       const unread = messages.snapshot.conversations.find(
         (conversation) => conversation.unreadCount > 0,
@@ -167,7 +171,11 @@ function App() {
   const isFileSearchView = activeView === "search" && searchMode === "files";
 
   return (
-    <div className="app-frame">
+    <div
+      className={
+        transferShelfExpanded ? "app-frame is-transfer-shelf-expanded" : "app-frame"
+      }
+    >
       <header className="titlebar" data-tauri-drag-region>
         <span data-tauri-drag-region>Forever pre-alpha</span>
         <WindowControls />
@@ -233,7 +241,7 @@ function App() {
                     remoteFolder: inspection.requestedFolder,
                     files,
                   })
-                  .then(() => setActiveView("transfers"))
+                  .then(() => navigate("transfers"))
                   .catch(() => undefined);
               }}
             />
@@ -358,7 +366,7 @@ function App() {
                     remoteFolder,
                     files,
                   })
-                  .then(() => setActiveView("transfers"))
+                  .then(() => navigate("transfers"))
                   .catch(() => undefined);
               }}
             />
@@ -434,6 +442,7 @@ function App() {
       </div>
 
       <TransferShelf
+        expanded={transferShelfExpanded}
         transfers={transfers.snapshot.transfers}
         activeCount={transfers.snapshot.activeCount}
         error={transfers.error}
@@ -445,10 +454,11 @@ function App() {
         onResumeRelease={(id) => void transfers.resumeRelease(id).catch(() => undefined)}
         onCancelRelease={(id) => void transfers.cancelRelease(id).catch(() => undefined)}
         onRevealRelease={(id) => void transfers.revealRelease(id).catch(() => undefined)}
-        onViewAll={() => setActiveView("transfers")}
+        onViewAll={() => navigate("transfers")}
         onDismissError={transfers.clearError}
         personByUsername={people.personByUsername}
         onOpenPerson={openPerson}
+        onToggle={() => setTransferShelfExpanded((expanded) => !expanded)}
       />
 
       <UpdateExperience {...updater} />

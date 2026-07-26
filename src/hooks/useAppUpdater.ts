@@ -30,23 +30,22 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.17",
-  version: "0.0.18",
-  body: `## What’s new in Forever 0.0.18
-
-### Fixed
-
-- Album catalogs now decode MusicBrainz's real release-group count and offset field names.
-- Searches such as Def Leppard no longer fail after the artist match succeeds.
-
-### Changed
-
-- The MusicBrainz parser fixture now mirrors the production API response envelope.
-- Computers still on 0.0.16 must install this latest hotfix manually because that build cannot open its updater.
+  currentVersion: "0.0.18",
+  version: "0.0.19",
+  body: `## What’s new in Forever 0.0.19
 
 ### Added
 
-- Regression assertions now cover release-group pagination metadata as well as album fields.`,
+- The bottom transfer queue now has explicit Expand and Collapse controls with accessible state.
+
+### Changed
+
+- The transfer queue starts as a compact 44-pixel status handle and automatically folds away when the full Transfers workspace opens.
+- Sidebar navigation rows and spacing are tighter, leaving more room for the signed-in profile.
+
+### Fixed
+
+- The username and online status at the bottom of the sidebar are no longer clipped behind the transfer area on common desktop window sizes.`,
   date: "2026-07-26",
 };
 

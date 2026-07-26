@@ -1,6 +1,8 @@
 import {
   ArrowClockwise,
+  CaretDown,
   CaretRight,
+  CaretUp,
   DownloadSimple,
   FolderOpen,
   Pause,
@@ -13,6 +15,7 @@ import { CountryFlag } from "./CountryFlag";
 import { groupTransfers, type TransferGroup } from "../utils/transfers";
 
 type TransferShelfProps = {
+  expanded: boolean;
   transfers: Transfer[];
   activeCount: number;
   error: string | null;
@@ -28,6 +31,7 @@ type TransferShelfProps = {
   onDismissError: () => void;
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
+  onToggle: () => void;
 };
 
 const formatBytes = (bytes: number) => {
@@ -53,6 +57,7 @@ const groupStatus = (group: TransferGroup) => {
 };
 
 export function TransferShelf({
+  expanded,
   transfers,
   activeCount,
   error,
@@ -68,6 +73,7 @@ export function TransferShelf({
   onDismissError,
   personByUsername,
   onOpenPerson,
+  onToggle,
 }: TransferShelfProps) {
   const groups = groupTransfers(transfers);
   const visibleGroups = groups.slice(0, 3);
@@ -82,70 +88,147 @@ export function TransferShelf({
   };
 
   return (
-    <section className="transfer-shelf" aria-label="Transfer activity">
-      <div className="transfer-summary">
-        <img src="/assets/night-geometry-cover.png" alt="" />
-        <span>
-          <strong>Transfers</strong>
-          <small><DownloadSimple size={14} weight="bold" />{activeCount} active · one at a time</small>
-        </span>
-      </div>
+    <section
+      className={`transfer-shelf ${expanded ? "is-expanded" : "is-collapsed"}`}
+      aria-label="Transfer activity"
+    >
+      <div
+        className="transfer-shelf-panel"
+        id="transfer-shelf-panel"
+        hidden={!expanded}
+      >
+        <div className="transfer-summary">
+          <img src="/assets/night-geometry-cover.png" alt="" />
+          <span>
+            <strong>Transfers</strong>
+            <small>
+              <DownloadSimple size={14} weight="bold" />
+              {activeCount} active · one at a time
+            </small>
+          </span>
+        </div>
 
-      <div className="transfer-list">
-        <header>
-          <span>Release queue <b>{groups.length}</b></span>
-          <button type="button" onClick={onViewAll}>View all transfers <CaretRight size={12} weight="bold" /></button>
-        </header>
-
-        {error && (
-          <div className="transfer-error" role="alert">
-            <WarningCircle size={14} weight="fill" /><span>{error}</span>
-            <button type="button" aria-label="Dismiss transfer error" onClick={onDismissError}><X size={12} weight="bold" /></button>
-          </div>
-        )}
-
-        {groups.length === 0 ? (
-          <div className="transfer-empty">Browse a source folder to make your first release download.</div>
-        ) : visibleGroups.map((group) => {
-          const progress = group.sizeBytes
-            ? Math.min(100, (group.transferredBytes / group.sizeBytes) * 100)
-            : 0;
-          const resumable = group.status === "paused" || group.status === "failed";
-          const completed = group.status === "completed";
-          return (
-            <article className={`transfer-row is-${group.status}`} key={group.id}>
-              <span className="transfer-name">
-                <strong>{group.title}</strong>
-                <small>
-                  <button
-                    type="button"
-                    className="transfer-user-link"
-                    onClick={() => onOpenPerson(group.username)}
-                  >
-                    <CountryFlag code={personByUsername(group.username)?.countryCode} />
-                    {group.username}
-                  </button>{" "}
-                  · {group.transfers.length} files
-                </small>
-              </span>
-              <span className="transfer-progress"><i><b style={{ width: `${progress}%` }} /></i><small>{formatBytes(group.transferredBytes)} / {formatBytes(group.sizeBytes)}</small></span>
-              <span className="transfer-meta"><strong>{groupStatus(group)}</strong><small>{Math.round(progress)}%</small></span>
-              <button
-                type="button"
-                aria-label={completed ? `Reveal ${group.title}` : resumable ? `Resume ${group.title}` : `Pause ${group.title}`}
-                onClick={() => completed ? invokeGroup(group, onRevealRelease, onReveal) : resumable ? invokeGroup(group, onResumeRelease, onResume) : invokeGroup(group, onPauseRelease, onPause)}
-              >
-                {completed ? <FolderOpen size={15} /> : group.status === "failed" ? <ArrowClockwise size={14} weight="bold" /> : resumable ? <Play size={14} weight="fill" /> : <Pause size={14} weight="fill" />}
+        <div className="transfer-list">
+          <header>
+            <span>Release queue <b>{groups.length}</b></span>
+            <span className="transfer-list-actions">
+              <button type="button" onClick={onViewAll}>
+                View all transfers <CaretRight size={12} weight="bold" />
               </button>
               <button
                 type="button"
-                aria-label={`${completed ? "Remove" : "Cancel"} ${group.title}`}
-                onClick={() => invokeGroup(group, onCancelRelease, onCancel)}
-              ><X size={14} weight="bold" /></button>
-            </article>
-          );
-        })}
+                aria-expanded="true"
+                aria-controls="transfer-shelf-panel"
+                aria-label="Collapse transfer activity"
+                onClick={onToggle}
+              >
+                Collapse <CaretDown size={12} weight="bold" />
+              </button>
+            </span>
+          </header>
+
+          {error ? (
+            <div className="transfer-error" role="alert">
+              <WarningCircle size={14} weight="fill" /><span>{error}</span>
+              <button
+                type="button"
+                aria-label="Dismiss transfer error"
+                onClick={onDismissError}
+              >
+                <X size={12} weight="bold" />
+              </button>
+            </div>
+          ) : null}
+
+          {groups.length === 0 ? (
+            <div className="transfer-empty">
+              Browse a source folder to make your first release download.
+            </div>
+          ) : visibleGroups.map((group) => {
+            const progress = group.sizeBytes
+              ? Math.min(100, (group.transferredBytes / group.sizeBytes) * 100)
+              : 0;
+            const resumable = group.status === "paused" || group.status === "failed";
+            const completed = group.status === "completed";
+            return (
+              <article className={`transfer-row is-${group.status}`} key={group.id}>
+                <span className="transfer-name">
+                  <strong>{group.title}</strong>
+                  <small>
+                    <button
+                      type="button"
+                      className="transfer-user-link"
+                      onClick={() => onOpenPerson(group.username)}
+                    >
+                      <CountryFlag code={personByUsername(group.username)?.countryCode} />
+                      {group.username}
+                    </button>{" "}
+                    · {group.transfers.length} files
+                  </small>
+                </span>
+                <span className="transfer-progress">
+                  <i><b style={{ width: `${progress}%` }} /></i>
+                  <small>
+                    {formatBytes(group.transferredBytes)} / {formatBytes(group.sizeBytes)}
+                  </small>
+                </span>
+                <span className="transfer-meta">
+                  <strong>{groupStatus(group)}</strong>
+                  <small>{Math.round(progress)}%</small>
+                </span>
+                <button
+                  type="button"
+                  aria-label={completed ? `Reveal ${group.title}` : resumable ? `Resume ${group.title}` : `Pause ${group.title}`}
+                  onClick={() => completed
+                    ? invokeGroup(group, onRevealRelease, onReveal)
+                    : resumable
+                      ? invokeGroup(group, onResumeRelease, onResume)
+                      : invokeGroup(group, onPauseRelease, onPause)}
+                >
+                  {completed
+                    ? <FolderOpen size={15} />
+                    : group.status === "failed"
+                      ? <ArrowClockwise size={14} weight="bold" />
+                      : resumable
+                        ? <Play size={14} weight="fill" />
+                        : <Pause size={14} weight="fill" />}
+                </button>
+                <button
+                  type="button"
+                  aria-label={`${completed ? "Remove" : "Cancel"} ${group.title}`}
+                  onClick={() => invokeGroup(group, onCancelRelease, onCancel)}
+                >
+                  <X size={14} weight="bold" />
+                </button>
+              </article>
+            );
+          })}
+        </div>
       </div>
+
+      <button
+        type="button"
+        className={`transfer-shelf-expand ${error ? "has-error" : ""}`}
+        aria-expanded="false"
+        aria-controls="transfer-shelf-panel"
+        aria-label="Expand transfer activity"
+        onClick={onToggle}
+        hidden={expanded}
+      >
+        <span className="transfer-shelf-expand-copy">
+          <i><DownloadSimple size={16} weight="bold" /></i>
+          <strong>Transfers</strong>
+          <small>
+            {activeCount} active · {groups.length} {groups.length === 1 ? "release" : "releases"}
+          </small>
+          {error ? (
+            <WarningCircle size={14} weight="fill" aria-label="Transfer needs attention" />
+          ) : null}
+        </span>
+        <span className="transfer-shelf-expand-action">
+          Expand <CaretUp size={12} weight="bold" />
+        </span>
+      </button>
     </section>
   );
 }
