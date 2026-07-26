@@ -30,6 +30,10 @@ const previewTrackNames = [
   "08 - Afterglow.flac",
   "09 - Silent Constellations.flac",
   "10 - Return Vector.flac",
+  "cover.jpg",
+  "Night Geometry.cue",
+  "rip.log",
+  "booklet.pdf",
 ];
 
 const previewFiles = (directory: string): ShareFile[] => {

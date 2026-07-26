@@ -3,9 +3,9 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.15` adds the dedicated Midnight Inbox,
-> searchable conversations, persistent drafts, incoming-message notifications,
-> and retryable queued/sent/failed delivery states.
+> **Status:** pre-alpha. Version `0.0.16` adds complete-release sharing, a
+> dedicated Browse workspace, and MusicBrainz-guided album discovery that hands
+> selected releases into live Soulseek search.
 
 ![Forever Midnight Radio user shares interface](design/implementation/release-user-shares-0.0.9.png)
 
@@ -23,6 +23,11 @@ Rust, Tauri 2, React, and TypeScript.
   protocol parsing
 - Working lossless/compressed filters, ready/speed/size sorting, stop control,
   and a live file inspector with source speed, queue, and share visibility
+- A Files/Albums search switch with MusicBrainz artist matching, artist
+  disambiguation, studio/live/compilation/EP catalog filters, Cover Art Archive
+  artwork, and one-click artist-plus-album handoff to live Soulseek file search
+- A dedicated top-level Browse workspace with exact-username entry and recent
+  or favorite listener shortcuts, keeping full share trees separate from Search
 - A dedicated People workspace with live online/away/offline presence,
   country flags, profile descriptions and images, interests, share/upload
   statistics, persistent favorites, ignored and banned listeners, and recent
@@ -61,8 +66,10 @@ Rust, Tauri 2, React, and TypeScript.
   notifications
 - Persistent local shared-folder configuration with native selection,
   enable/disable, removal, rescanning, virtual aliases, and indexed totals
-- Bounded background indexing for supported audio formats, excluding hidden
-  entries, symbolic links, partial/temporary files, and unsafe root overlaps
+- Bounded background indexing for complete release folders—including audio,
+  artwork, lyrics, cue sheets, logs, booklets, checksums, playlists, archives,
+  and extensionless files—while excluding hidden entries, symbolic links,
+  zero-byte or partial/temporary files, and unsafe root overlaps
 - Live Soulseek browse and folder responses for local shares without exposing
   absolute filesystem paths
 - Full leaf participation in Soulseek's distributed search network, including
@@ -130,6 +137,17 @@ folder rail. Share-list search returns matching folders and files locally after
 the list is received; choose a folder result to open it directly. **Refresh**
 explicitly asks the peer again.
 
+Switch Search from **Files** to **Albums** to enter an artist name. Forever
+uses MusicBrainz to resolve the artist and show cataloged studio albums, live
+albums, compilations, and EPs. Choosing **Search Soulseek** returns to Files and
+starts a normal live Soulseek search for that artist and album title. MusicBrainz
+identifies the release; it does not claim that a specific rip or edition is
+available. Soulseek results remain the source of truth for actual files.
+
+Open **Browse** for a dedicated exact-username entry point plus recent and
+favorite listeners. Browsing from Search, People, or Transfers opens the same
+workspace, and **Browse another** returns to its listener picker.
+
 Open **People** to revisit recent sources and favorites, see their live
 presence and country, inspect profile notes and interests, or browse everything
 they share. Listener names in Search and Transfers open the same profile. The
@@ -141,18 +159,20 @@ that listener's new private messages and search activity on this device. **Ban
 User** prevents that listener from browsing, queuing, or downloading your
 shares until the ban is removed.
 
-Add music under **Settings → Your shared music**. Forever gives each selected
-root a virtual alias, indexes supported audio in the background, and announces
-the resulting public counts to Soulseek. Disable a root without forgetting it,
+Add releases under **Settings → Your shared releases**. Forever gives each
+selected root a virtual alias, indexes every safe, non-empty regular file in the
+background, and announces the resulting public counts to Soulseek. This keeps
+cover artwork, lyrics, cue sheets, logs, booklets, checksums, playlists, and
+other companion files beside the audio. Disable a root without forgetting it,
 rescan after changing files, and choose one to three outgoing upload slots.
 Incoming browse, folder, global-search, queue, and download requests are then
 served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.15` intentionally keeps one active download at a time, even when an
+Version `0.0.16` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
-three. Library management, metadata/cover lookup, playback, rooms, and public
+three. Edition/pressing lookup, Library management, playback, rooms, and public
 chat remain outside this release.
 
 Soulseek does not have a separate sign-up step. Connecting with a valid unused
@@ -192,6 +212,13 @@ Credential protection described above applies to local storage, not the
 connection between the client and Soulseek server. Use a unique password that
 you do not reuse for another service.
 
+Album discovery sends the artist name over HTTPS to MusicBrainz and loads
+available release artwork from the Cover Art Archive. Artist and release-group
+responses are held in bounded memory caches for up to six hours and are not
+written to Forever's configuration files. Requests use Forever's identifying
+User-Agent, a 15-second timeout, and a rate below one MusicBrainz request per
+second.
+
 Live searches are sent to the Soulseek server, and responding peers connect to
 Forever’s temporary listening port or receive an indirect connection attempt.
 Forever limits concurrent peer connections, message sizes, decompressed
@@ -205,7 +232,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.15 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.16 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

@@ -66,6 +66,56 @@ describe("Forever shell", () => {
     expect(screen.getByText("320 kbps")).toBeInTheDocument();
   });
 
+  it("discovers an artist's albums and hands a release into Soulseek search", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
+    expect(
+      screen.getByRole("heading", { name: "Find the record. Then find the files." }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Def Leppard/ })).toBeInTheDocument();
+
+    const hysteria = screen
+      .getByRole("heading", { name: "Hysteria" })
+      .closest("article") as HTMLElement;
+    fireEvent.click(
+      within(hysteria).getByRole("button", { name: "Search Soulseek for Hysteria" }),
+    );
+
+    expect(
+      screen.getByDisplayValue("Def Leppard Hysteria"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("opens Browse as a dedicated workspace before requesting a user's shares", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse" }));
+    expect(
+      screen.getByRole("heading", { name: "Browse a listener’s shelves." }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Browse" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Soulseek username to browse" }),
+      { target: { value: "audiophile92" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Browse shares" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: /audiophile92’s shares/ }),
+      ).toBeInTheDocument(),
+    );
+  });
+
   it("browses a folder, selects files, and queues a complete release", async () => {
     render(<App />);
 
@@ -117,11 +167,11 @@ describe("Forever shell", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Select folder" }));
-    expect(screen.getByText("10 files selected")).toBeInTheDocument();
+    expect(screen.getByText("14 files selected")).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", { name: "Deselect 01 - Thresholds.flac" }),
     );
-    expect(screen.getByText("9 files selected")).toBeInTheDocument();
+    expect(screen.getByText("13 files selected")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Download selection" }));
 
     await waitFor(() =>
@@ -305,7 +355,7 @@ describe("Forever shell", () => {
     expect(screen.getByText("Global search connected")).toBeInTheDocument();
     expect(screen.getByText("128 received · 7 answered")).toBeInTheDocument();
     expect(screen.getByDisplayValue("SignalLevel")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Your shared music" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your shared releases" })).toBeInTheDocument();
     expect(screen.getByText("Midnight Archive")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Upload slots" })).toHaveValue("1");
     const notifications = screen.getByRole("checkbox", {
@@ -348,16 +398,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.15 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.16 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "A dedicated Midnight Inbox with conversation search, exact-username starts, unread controls, and presence details.",
+        "Complete-release sharing for artwork, lyrics, cue sheets, logs, booklets, and other companion files beside audio.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Interrupted outgoing messages become failed and retryable instead of remaining stuck or disappearing.",
+        "Companion files no longer disappear from local share lists, search responses, selections, or downloads.",
       ),
     ).toBeInTheDocument();
   });

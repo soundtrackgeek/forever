@@ -147,7 +147,7 @@ export function ConnectionSettings({
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "Choose a music folder to share",
+      title: "Choose a release folder to share",
     });
     if (typeof selected === "string") await onAddShare(selected);
   };
@@ -377,8 +377,8 @@ export function ConnectionSettings({
               <HardDrives size={19} weight="light" />
             </div>
             <div>
-              <h2>Your shared music</h2>
-              <p>Only supported audio files are indexed. Local paths never leave Forever.</p>
+              <h2>Your shared releases</h2>
+              <p>Audio, artwork, lyrics, cue sheets, logs, and other release files are indexed. Local paths never leave Forever.</p>
             </div>
             <span className="sharing-total">
               <strong>{localShares.totalFileCount.toLocaleString()}</strong>
@@ -390,7 +390,7 @@ export function ConnectionSettings({
             {localShares.roots.length === 0 ? (
               <div className="share-empty">
                 <HardDrives size={22} weight="thin" />
-                <span><strong>No music shared yet</strong><small>Add a folder to let other Soulseek users browse and download from you.</small></span>
+                <span><strong>No releases shared yet</strong><small>Add a folder to let other Soulseek users browse and download complete releases from you.</small></span>
               </div>
             ) : localShares.roots.map((root) => (
               <div className={`share-root-row ${root.enabled ? "" : "is-disabled"}`} key={root.id}>
@@ -477,7 +477,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.15</h2>
+              <h2>Forever 0.0.16</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="update-interval-field">
                 <span>Automatic update checks</span>

@@ -1,4 +1,5 @@
 mod connection;
+mod musicbrainz;
 
 use tauri::Manager;
 
@@ -7,6 +8,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(connection::initialize(app.handle())?);
+            app.manage(musicbrainz::MusicBrainzClient::new()?);
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -62,6 +64,8 @@ pub fn run() {
             connection::messages_mark_unread,
             connection::messages_clear,
             connection::messages_remove,
+            musicbrainz::album_artists_search,
+            musicbrainz::album_catalog,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

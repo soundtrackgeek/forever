@@ -4,9 +4,12 @@ import {
   CaretRight,
   Check,
   DownloadSimple,
+  FileArchive,
   FileAudio,
+  File as FileGeneric,
   FileImage,
   FileText,
+  FileVideo,
   FolderOpen,
   FolderSimple,
   LockSimple,
@@ -139,6 +142,7 @@ type UserSharesWorkspaceProps = {
   error: string | null;
   person: PersonProfile | null;
   onOpenPerson: () => void;
+  onBrowseAnother: () => void;
   onRefresh: () => void;
   onOpenFolder: (directory: string) => void;
   onSearch: (query: string, extension: string | null) => void;
@@ -168,9 +172,22 @@ const titleFromPath = (path: string) => {
 };
 
 const FileIcon = ({ extension }: { extension: string }) => {
-  if (["jpg", "jpeg", "png", "webp"].includes(extension)) return <FileImage size={17} />;
-  if (["txt", "log", "nfo", "pdf"].includes(extension)) return <FileText size={17} />;
-  return <FileAudio size={17} />;
+  if (["aac", "aif", "aiff", "alac", "ape", "flac", "m4a", "mp3", "mpc", "ogg", "opus", "wav", "wma", "wv"].includes(extension)) {
+    return <FileAudio size={17} />;
+  }
+  if (["jpg", "jpeg", "png", "webp", "gif", "bmp", "tif", "tiff", "avif"].includes(extension)) {
+    return <FileImage size={17} />;
+  }
+  if (["txt", "log", "nfo", "pdf", "cue", "lrc", "md", "rtf"].includes(extension)) {
+    return <FileText size={17} />;
+  }
+  if (["zip", "rar", "7z", "tar", "gz", "bz2", "xz"].includes(extension)) {
+    return <FileArchive size={17} />;
+  }
+  if (["mp4", "mkv", "avi", "mov", "webm", "mpeg", "mpg"].includes(extension)) {
+    return <FileVideo size={17} />;
+  }
+  return <FileGeneric size={17} />;
 };
 
 export function UserSharesWorkspace({
@@ -182,6 +199,7 @@ export function UserSharesWorkspace({
   error,
   person,
   onOpenPerson,
+  onBrowseAnother,
   onRefresh,
   onOpenFolder,
   onSearch,
@@ -291,6 +309,7 @@ export function UserSharesWorkspace({
           <p><i aria-hidden="true" /> {person?.status === "away" ? "Away" : person?.status === "offline" ? "Offline" : "Online"} · Shared directly from this listener</p>
         </div>
         <div className="shares-heading-actions">
+          <button type="button" onClick={onBrowseAnother}><MagnifyingGlass size={16} /> Browse another</button>
           <button type="button" onClick={onOpenPerson}><UserCircle size={16} /> View profile</button>
           <button type="button" className="shares-refresh" onClick={onRefresh} disabled={loading}>
             <ArrowClockwise className={loading ? "is-spinning" : ""} size={16} /> Refresh
@@ -322,6 +341,12 @@ export function UserSharesWorkspace({
             <option value="mp3">MP3</option>
             <option value="m4a">M4A</option>
             <option value="wav">WAV</option>
+            <option value="jpg">JPG artwork</option>
+            <option value="png">PNG artwork</option>
+            <option value="pdf">PDF booklets</option>
+            <option value="cue">CUE sheets</option>
+            <option value="log">Rip logs</option>
+            <option value="lrc">LRC lyrics</option>
           </select>
           <CaretDown size={11} />
         </label>

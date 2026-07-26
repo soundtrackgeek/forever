@@ -30,25 +30,25 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.14",
-  version: "0.0.15",
-  body: `## What’s new in Forever 0.0.15
+  currentVersion: "0.0.15",
+  version: "0.0.16",
+  body: `## What’s new in Forever 0.0.16
 
 ### Added
 
-- A dedicated Midnight Inbox with conversation search, exact-username starts, unread controls, and presence details.
-- Persistent message drafts and configurable Windows notifications for incoming private messages.
-- Queued, sent, and failed delivery states with one-click retry for interrupted transmissions.
+- Complete-release sharing for artwork, lyrics, cue sheets, logs, booklets, and other companion files beside audio.
+- A dedicated Browse workspace with exact-username entry and shortcuts to recent or favorite listeners.
+- MusicBrainz-guided album discovery with catalog filters, cover artwork, and one-click Soulseek search.
 
 ### Changed
 
-- The People workspace now opens private conversations in the full Messages workspace.
-- Ignore, ban, clear-history, and remove-conversation controls are available beside each thread.
+- Browse actions from Search, People, and Transfers now land in the dedicated Browse workspace.
+- Sharing settings and file presentation now describe complete releases instead of audio-only roots.
 
 ### Fixed
 
-- Interrupted outgoing messages become failed and retryable instead of remaining stuck or disappearing.
-- New messages follow the bottom of the thread without pulling you away while reading older history.`,
+- Companion files no longer disappear from local share lists, search responses, selections, or downloads.
+- Browsing another listener no longer leaves Search highlighted around an unrelated share view.`,
   date: "2026-07-26",
 };
 

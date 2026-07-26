@@ -238,6 +238,30 @@ export type ShareSearchSnapshot = {
   truncated: boolean;
 };
 
+export type AlbumArtist = {
+  id: string;
+  name: string;
+  disambiguation: string | null;
+  country: string | null;
+  artistType: string | null;
+  score: number;
+};
+
+export type AlbumReleaseGroup = {
+  id: string;
+  title: string;
+  firstReleaseDate: string;
+  primaryType: string | null;
+  secondaryTypes: string[];
+  coverArtUrl: string;
+};
+
+export type AlbumCatalog = {
+  artistId: string;
+  albums: AlbumReleaseGroup[];
+  truncated: boolean;
+};
+
 export type TransferQueueSnapshot = {
   transfers: Transfer[];
   activeCount: number;

@@ -2,18 +2,22 @@ import { DownloadSimple, MagnifyingGlass, Radio, Sliders } from "@phosphor-icons
 import { useState } from "react";
 import "./App.css";
 import { AppSidebar } from "./components/AppSidebar";
+import { AlbumSearchWorkspace } from "./components/AlbumSearchWorkspace";
+import { BrowseSharesHome } from "./components/BrowseSharesHome";
 import { ConnectionOnboarding } from "./components/ConnectionOnboarding";
 import { ConnectionSettings } from "./components/ConnectionSettings";
 import { MessagesWorkspace } from "./components/MessagesWorkspace";
 import { ReleaseInspector } from "./components/ReleaseInspector";
 import { PeopleWorkspace } from "./components/PeopleWorkspace";
 import { SearchWorkspace } from "./components/SearchWorkspace";
+import type { SearchMode } from "./components/SearchModeSwitch";
 import { TransferShelf } from "./components/TransferShelf";
 import { TransfersWorkspace } from "./components/TransfersWorkspace";
 import { UserSharesWorkspace } from "./components/UserSharesWorkspace";
 import { UpdateExperience } from "./components/UpdateExperience";
 import { WindowControls } from "./components/WindowControls";
 import { useAppUpdater } from "./hooks/useAppUpdater";
+import { useAlbumDiscovery } from "./hooks/useAlbumDiscovery";
 import { useSoulseekConnection } from "./hooks/useSoulseekConnection";
 import { useSoulseekFolders } from "./hooks/useSoulseekFolders";
 import { useSoulseekPeople } from "./hooks/useSoulseekPeople";
@@ -87,11 +91,13 @@ function PlaceholderView({
 
 function App() {
   const [activeView, setActiveView] = useState("search");
+  const [searchMode, setSearchMode] = useState<SearchMode>("files");
   const [query, setQuery] = useState("night geometry");
   const [selectedResultId, setSelectedResultId] = useState<string | null>(
     "night-geometry",
   );
   const updater = useAppUpdater();
+  const albums = useAlbumDiscovery();
   const connection = useSoulseekConnection();
   const search = useSoulseekSearch();
   const transfers = useSoulseekTransfers();
@@ -100,7 +106,7 @@ function App() {
   const shares = useSoulseekShares();
   const people = useSoulseekPeople();
   const messages = usePrivateMessages();
-  const [sharesUsername, setSharesUsername] = useState("audiophile92");
+  const [sharesUsername, setSharesUsername] = useState<string | null>(null);
   const [selectedUsername, setSelectedUsername] = useState<string | null>("audiophile92");
   const [selectedMessageUsername, setSelectedMessageUsername] = useState<string | null>(
     "audiophile92",
@@ -142,7 +148,7 @@ function App() {
 
   const browseUser = (username: string) => {
     setSharesUsername(username);
-    setActiveView("shares");
+    setActiveView("browse");
     void shares.browse(username).catch(() => undefined);
   };
 
@@ -158,7 +164,7 @@ function App() {
     void messages.openConversation(username).catch(() => undefined);
   };
 
-  const isSearchView = activeView === "search";
+  const isFileSearchView = activeView === "search" && searchMode === "files";
 
   return (
     <div className="app-frame">
@@ -167,9 +173,9 @@ function App() {
         <WindowControls />
       </header>
 
-      <div className={`app-shell ${isSearchView ? "" : "is-single-view"}`}>
+      <div className={`app-shell ${isFileSearchView ? "" : "is-single-view"}`}>
         <AppSidebar
-          activeView={activeView === "shares" ? "search" : activeView}
+          activeView={activeView}
           updateStatus={updater.status}
           username={connection.snapshot.username}
           connectionState={connection.snapshot.state}
@@ -178,9 +184,10 @@ function App() {
           onCheckForUpdates={() => void updater.checkForUpdates(true)}
         />
 
-        {isSearchView ? (
+        {activeView === "search" && searchMode === "files" ? (
           <>
             <SearchWorkspace
+              searchMode={searchMode}
               query={query}
               results={search.results}
               selectedResult={selectedResult}
@@ -204,6 +211,7 @@ function App() {
               onBrowseUser={browseUser}
               personByUsername={people.personByUsername}
               onOpenPerson={openPerson}
+              onSearchModeChange={setSearchMode}
             />
             <ReleaseInspector
               result={selectedResult}
@@ -230,6 +238,34 @@ function App() {
               }}
             />
           </>
+        ) : activeView === "search" ? (
+          <AlbumSearchWorkspace
+            query={albums.query}
+            artists={albums.artists}
+            selectedArtist={albums.selectedArtist}
+            catalog={albums.catalog}
+            loading={albums.loading}
+            error={albums.error}
+            connection={connection.snapshot}
+            searchMode={searchMode}
+            onQueryChange={albums.setQuery}
+            onSearch={(artistQuery) => {
+              void albums.searchArtists(artistQuery).catch(() => undefined);
+            }}
+            onSelectArtist={(artist) => {
+              void albums.selectArtist(artist).catch(() => undefined);
+            }}
+            onSearchModeChange={setSearchMode}
+            onSearchSoulseek={(artist, album) => {
+              const nextQuery = `${artist} ${album}`;
+              setQuery(nextQuery);
+              setSelectedResultId(null);
+              setSearchMode("files");
+              void search.startSearch(nextQuery).catch(() => undefined);
+            }}
+            onOpenConnection={() => setActiveView("settings")}
+            onDismissError={albums.clearError}
+          />
         ) : activeView === "messages" ? (
           <MessagesWorkspace
             snapshot={messages.snapshot}
@@ -291,36 +327,49 @@ function App() {
               messages.clearError();
             }}
           />
-        ) : activeView === "shares" ? (
-          <UserSharesWorkspace
-            key={sharesUsername}
-            username={sharesUsername}
-            overview={shares.overview}
-            folder={shares.folder}
-            results={shares.results}
-            loading={shares.loading}
-            error={shares.error}
-            person={people.personByUsername(sharesUsername)}
-            onOpenPerson={() => openPerson(sharesUsername)}
-            onRefresh={() => void shares.browse(sharesUsername, true).catch(() => undefined)}
-            onOpenFolder={(directory) =>
-              void shares.openFolder(sharesUsername, directory).catch(() => undefined)
-            }
-            onSearch={(shareQuery, extension) =>
-              void shares.search(sharesUsername, shareQuery, extension).catch(() => undefined)
-            }
-            onDownload={(title, remoteFolder, files) => {
-              void transfers
-                .enqueueRelease({
-                  title,
-                  username: sharesUsername,
-                  remoteFolder,
-                  files,
-                })
-                .then(() => setActiveView("transfers"))
-                .catch(() => undefined);
-            }}
-          />
+        ) : activeView === "browse" ? (
+          sharesUsername ? (
+            <UserSharesWorkspace
+              key={sharesUsername}
+              username={sharesUsername}
+              overview={shares.overview}
+              folder={shares.folder}
+              results={shares.results}
+              loading={shares.loading}
+              error={shares.error}
+              person={people.personByUsername(sharesUsername)}
+              onBrowseAnother={() => {
+                setSharesUsername(null);
+                shares.clear();
+              }}
+              onOpenPerson={() => openPerson(sharesUsername)}
+              onRefresh={() => void shares.browse(sharesUsername, true).catch(() => undefined)}
+              onOpenFolder={(directory) =>
+                void shares.openFolder(sharesUsername, directory).catch(() => undefined)
+              }
+              onSearch={(shareQuery, extension) =>
+                void shares.search(sharesUsername, shareQuery, extension).catch(() => undefined)
+              }
+              onDownload={(title, remoteFolder, files) => {
+                void transfers
+                  .enqueueRelease({
+                    title,
+                    username: sharesUsername,
+                    remoteFolder,
+                    files,
+                  })
+                  .then(() => setActiveView("transfers"))
+                  .catch(() => undefined);
+              }}
+            />
+          ) : (
+            <BrowseSharesHome
+              people={people.snapshot}
+              connection={connection.snapshot}
+              onBrowse={browseUser}
+              onOpenConnection={() => setActiveView("settings")}
+            />
+          )
         ) : activeView === "transfers" ? (
           <TransfersWorkspace
             transfers={transfers.snapshot.transfers}

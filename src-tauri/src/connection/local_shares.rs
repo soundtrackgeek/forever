@@ -23,11 +23,6 @@ const MAX_SEARCH_RESULTS: usize = 100;
 const MAX_PENDING_SEARCH_RESPONSES: usize = 256;
 const SEARCH_RESPONSE_TTL: Duration = Duration::from_secs(30);
 
-const AUDIO_EXTENSIONS: &[&str] = &[
-    "aac", "aif", "aiff", "alac", "ape", "flac", "m4a", "mp3", "mp4", "mpc", "ogg", "opus", "wav",
-    "wma", "wv",
-];
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SharedRootConfig {
@@ -596,14 +591,6 @@ fn scan_root(
             if !file_type.is_file() || is_temporary_file(&path) {
                 continue;
             }
-            let Some(extension) = path
-                .extension()
-                .and_then(|value| value.to_str())
-                .map(str::to_ascii_lowercase)
-                .filter(|extension| AUDIO_EXTENSIONS.contains(&extension.as_str()))
-            else {
-                continue;
-            };
             if metadata.len() == 0 {
                 continue;
             }
@@ -618,6 +605,11 @@ fn scan_root(
             else {
                 continue;
             };
+            let extension = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(str::to_ascii_lowercase)
+                .unwrap_or_default();
             let relative_directory = relative.parent().unwrap_or_else(|| Path::new(""));
             let directory = if relative_directory.as_os_str().is_empty() {
                 root.alias.clone()
@@ -912,7 +904,7 @@ mod tests {
     }
 
     #[test]
-    fn scanner_indexes_only_safe_supported_files() {
+    fn scanner_indexes_complete_release_folders_safely() {
         let root_path = std::env::temp_dir().join(format!(
             "forever-share-test-{}-{}",
             std::process::id(),
@@ -922,6 +914,8 @@ mod tests {
         fs::write(root_path.join("Album").join("track.flac"), [1_u8, 2, 3]).unwrap();
         fs::write(root_path.join("Album").join("partial.flac.part"), [1_u8]).unwrap();
         fs::write(root_path.join("Album").join("cover.jpg"), [1_u8]).unwrap();
+        fs::write(root_path.join("Album").join("booklet.pdf"), [1_u8]).unwrap();
+        fs::write(root_path.join("Album").join("rip log"), [1_u8]).unwrap();
         fs::write(root_path.join(".hidden.flac"), [1_u8]).unwrap();
 
         let root = SharedRootConfig {
@@ -944,9 +938,12 @@ mod tests {
         let mut index = ShareIndex::default();
         scan_root(&root, &mut snapshot, &mut index).unwrap();
 
-        assert_eq!(snapshot.file_count, 1);
+        assert_eq!(snapshot.file_count, 4);
         assert!(index.files.contains_key("safe music\\album\\track.flac"));
-        assert_eq!(index.files.len(), 1);
+        assert!(index.files.contains_key("safe music\\album\\cover.jpg"));
+        assert!(index.files.contains_key("safe music\\album\\booklet.pdf"));
+        assert!(index.files.contains_key("safe music\\album\\rip log"));
+        assert_eq!(index.files.len(), 4);
         fs::remove_dir_all(root_path).unwrap();
     }
 

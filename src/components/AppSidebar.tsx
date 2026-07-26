@@ -5,6 +5,7 @@ import {
   CaretDown,
   DownloadSimple,
   GearSix,
+  FolderOpen,
   House,
   MagnifyingGlass,
   MusicNotes,
@@ -26,6 +27,7 @@ type AppSidebarProps = {
 const navItems = [
   { id: "home", label: "Home", icon: House },
   { id: "search", label: "Search", icon: MagnifyingGlass },
+  { id: "browse", label: "Browse", icon: FolderOpen },
   { id: "messages", label: "Messages", icon: ChatCircleDots },
   { id: "people", label: "People", icon: AddressBook },
   { id: "rooms", label: "Rooms", icon: UsersThree },

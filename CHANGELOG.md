@@ -5,6 +5,47 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.16] - 2026-07-26
+
+### Added
+
+- A Files/Albums search switch with MusicBrainz artist matching and
+  disambiguation, studio/live/compilation/EP catalog filters, Cover Art Archive
+  artwork, and one-click handoff from a selected album to live Soulseek search.
+- A dedicated top-level Browse workspace with exact-username entry, recent and
+  favorite listener shortcuts, and a clear return path for browsing another
+  listener.
+- Complete-release sharing for artwork, lyrics, cue sheets, logs, booklets,
+  checksums, playlists, archives, extensionless files, and other regular files
+  beside audio, with corresponding file icons and share-browser format filters.
+- Rust and frontend regression coverage for MusicBrainz response parsing and ID
+  validation, complete-folder indexing, dedicated Browse navigation, and the
+  album-to-Soulseek handoff.
+
+### Changed
+
+- Browse actions in Search, People, and Transfers now open the dedicated Browse
+  workspace instead of leaving Search highlighted around an unrelated view.
+- Sharing settings now describe complete releases and public counts include
+  every safe, non-empty file beneath enabled roots.
+- Application and updater preview metadata now identify version `0.0.16` and
+  show this release's actual additions in the in-app What's New view.
+
+### Fixed
+
+- User-share browsing now has its own persistent navigation state and a polished
+  listener-picker empty state instead of masquerading as a Search subview.
+- Non-audio companion files no longer disappear from local share lists, folder
+  responses, global search responses, selections, or downloads.
+
+### Security
+
+- MusicBrainz queries are length/control-character checked, artist IDs are
+  validated as UUID-shaped identifiers, requests have a 15-second timeout and
+  one-per-second gate, and bounded in-memory caches evict their oldest entries.
+- Complete-folder indexing retains existing hidden/system, symlink, zero-byte,
+  partial/temporary-file, depth, count, and overlapping-root protections.
+
 ## [0.0.15] - 2026-07-26
 
 ### Added

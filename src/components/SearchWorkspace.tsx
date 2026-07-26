@@ -27,11 +27,13 @@ import type {
   PersonProfile,
 } from "../types";
 import { CountryFlag } from "./CountryFlag";
+import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
 
 type Filter = "all" | "lossless" | "compressed";
 type Sort = "best" | "ready" | "fast" | "small";
 
 type SearchWorkspaceProps = {
+  searchMode: SearchMode;
   query: string;
   results: SearchResult[];
   selectedResult: SearchResult | null;
@@ -47,6 +49,7 @@ type SearchWorkspaceProps = {
   onBrowseUser: (username: string) => void;
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
+  onSearchModeChange: (mode: SearchMode) => void;
 };
 
 const losslessFormats = new Set(["FLAC", "ALAC", "WAV", "AIFF", "APE", "WV"]);
@@ -94,6 +97,7 @@ const sortLabels: Record<Sort, string> = {
 };
 
 export function SearchWorkspace({
+  searchMode,
   query,
   results,
   selectedResult,
@@ -109,6 +113,7 @@ export function SearchWorkspace({
   onBrowseUser,
   personByUsername,
   onOpenPerson,
+  onSearchModeChange,
 }: SearchWorkspaceProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -196,6 +201,7 @@ export function SearchWorkspace({
               <MagnifyingGlass size={18} weight="light" />
             )}
           </button>
+          <SearchModeSwitch mode={searchMode} onChange={onSearchModeChange} />
           <input
             name="network-query"
             value={query}
