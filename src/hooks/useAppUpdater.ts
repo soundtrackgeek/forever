@@ -30,20 +30,23 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.10",
-  version: "0.0.11",
-  body: `## What’s new in Forever 0.0.11
+  currentVersion: "0.0.11",
+  version: "0.0.12",
+  body: `## What’s new in Forever 0.0.12
 
 ### Added
 
-- Safe local music sharing with folder controls and bounded indexing.
-- Real Soulseek browse, search, queue, and resumable upload responses.
-- A live Uploads view with progress, speed, queue state, and cancellation.
+- Full participation in Soulseek’s distributed search network, including relay discovery and branch-root delivery.
+- Live global-search status and received/answered counters in Connection settings.
 
 ### Changed
 
-- Upload slots are configurable from one to three, with one as the safe default.
-- Local filesystem paths remain private behind virtual share aliases.`,
+- Shared-file matching now uses a word index with required, excluded, and partial query terms.
+- Incoming searches are deduplicated and rate-limited before matching.
+
+### Fixed
+
+- Locally shared files can now appear in ordinary global searches from other Soulseek clients.`,
   date: "2026-07-26",
 };
 

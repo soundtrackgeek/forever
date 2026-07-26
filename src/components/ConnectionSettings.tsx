@@ -18,6 +18,7 @@ import type {
   ConnectionProfile,
   ConnectionSnapshot,
   DiagnosticEntry,
+  DistributedSnapshot,
   LocalSharesSnapshot,
 } from "../types";
 
@@ -25,6 +26,7 @@ type ConnectionSettingsProps = {
   profile: ConnectionProfile;
   hasPassword: boolean;
   snapshot: ConnectionSnapshot;
+  searchNetwork: DistributedSnapshot;
   diagnostics: DiagnosticEntry[];
   diagnosticsPath: string;
   error: string | null;
@@ -62,6 +64,20 @@ const statusLabels: Record<ConnectionSnapshot["state"], string> = {
   error: "Needs attention",
 };
 
+const searchNetworkLabels: Record<DistributedSnapshot["state"], string> = {
+  offline: "Global search offline",
+  discovering: "Finding search relay",
+  connected: "Global search connected",
+  branchRoot: "Global search connected",
+};
+
+const searchNetworkDetail = (snapshot: DistributedSnapshot) => {
+  if (snapshot.state === "connected" || snapshot.state === "branchRoot") {
+    return `${snapshot.searchesReceived} received · ${snapshot.searchesAnswered} answered`;
+  }
+  return snapshot.message;
+};
+
 function formatTime(timestampMs: number) {
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
@@ -74,6 +90,7 @@ export function ConnectionSettings({
   profile,
   hasPassword,
   snapshot,
+  searchNetwork,
   diagnostics: initialDiagnostics,
   diagnosticsPath,
   error,
@@ -107,7 +124,7 @@ export function ConnectionSettings({
     void onLoadDiagnostics()
       .then(setDiagnostics)
       .catch(() => undefined);
-  }, [onLoadDiagnostics, snapshot.updatedAtMs]);
+  }, [onLoadDiagnostics, searchNetwork.updatedAtMs, snapshot.updatedAtMs]);
 
   const chooseFolder = async () => {
     const selected = await open({
@@ -154,12 +171,23 @@ export function ConnectionSettings({
           <h1>Connection</h1>
           <p>Account, network, and startup preferences for Soulseek.</p>
         </div>
-        <div className={`connection-state-badge is-${snapshot.state}`}>
-          <i aria-hidden="true" />
-          <span>
-            <strong>{statusLabels[snapshot.state]}</strong>
-            <small>{snapshot.server || "Soulseek network"}</small>
-          </span>
+        <div className="settings-status-cluster">
+          <div className={`connection-state-badge is-${snapshot.state}`}>
+            <i aria-hidden="true" />
+            <span>
+              <strong>{statusLabels[snapshot.state]}</strong>
+              <small>{snapshot.server || "Soulseek network"}</small>
+            </span>
+          </div>
+          <div
+            className={`connection-state-badge search-network-badge is-${searchNetwork.state}`}
+          >
+            <i aria-hidden="true" />
+            <span>
+              <strong>{searchNetworkLabels[searchNetwork.state]}</strong>
+              <small>{searchNetworkDetail(searchNetwork)}</small>
+            </span>
+          </div>
         </div>
       </header>
 
@@ -444,7 +472,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.11</h2>
+              <h2>Forever 0.0.12</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="update-interval-field">
                 <span>Automatic update checks</span>

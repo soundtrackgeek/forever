@@ -1,14 +1,14 @@
 use super::protocol::{FolderFile, FolderListing, SearchFile, ShareListing};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex, RwLock,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
@@ -20,6 +20,8 @@ const MAX_SHARED_FILES: usize = 250_000;
 const MAX_SHARED_DIRECTORIES: usize = 50_000;
 const MAX_SCAN_DEPTH: usize = 64;
 const MAX_SEARCH_RESULTS: usize = 100;
+const MAX_PENDING_SEARCH_RESPONSES: usize = 256;
+const SEARCH_RESPONSE_TTL: Duration = Duration::from_secs(30);
 
 const AUDIO_EXTENSIONS: &[&str] = &[
     "aac", "aif", "aiff", "alac", "ape", "flac", "m4a", "mp3", "mp4", "mpc", "ogg", "opus", "wav",
@@ -119,8 +121,10 @@ impl IndexedFile {
 
 #[derive(Default)]
 struct ShareIndex {
-    files: HashMap<String, IndexedFile>,
-    directories: BTreeMap<String, Vec<IndexedFile>>,
+    files: HashMap<String, usize>,
+    indexed_files: Vec<IndexedFile>,
+    directories: BTreeMap<String, Vec<usize>>,
+    word_index: HashMap<String, Vec<usize>>,
     roots: Vec<SharedRootSnapshot>,
     total_size_bytes: u64,
     last_scan_at_ms: Option<u64>,
@@ -143,6 +147,14 @@ pub struct SearchResponseTicket {
     pub username: String,
     pub search_token: u32,
     pub files: Vec<SearchFile>,
+    pub origin: SearchResponseOrigin,
+    queued_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchResponseOrigin {
+    Server,
+    Distributed,
 }
 
 impl LocalSharesHub {
@@ -194,7 +206,7 @@ impl LocalSharesHub {
             roots: index.roots.clone(),
             upload_slots: store.upload_slots,
             scanning: index.scanning,
-            total_file_count: index.files.len().try_into().unwrap_or(u32::MAX),
+            total_file_count: index.indexed_files.len().try_into().unwrap_or(u32::MAX),
             total_directory_count: index.directories.len().try_into().unwrap_or(u32::MAX),
             total_size_bytes: index.total_size_bytes,
             last_scan_at_ms: index.last_scan_at_ms,
@@ -350,6 +362,18 @@ impl LocalSharesHub {
             }
             next.roots.push(root_snapshot);
         }
+        let ShareIndex {
+            indexed_files,
+            directories,
+            ..
+        } = &mut next;
+        for files in directories.values_mut() {
+            files.sort_by(|left, right| {
+                indexed_files[*left]
+                    .filename
+                    .cmp(&indexed_files[*right].filename)
+            });
+        }
 
         *self
             .index
@@ -360,46 +384,45 @@ impl LocalSharesHub {
     }
 
     pub fn resolve_file(&self, remote_filename: &str) -> Option<IndexedFile> {
-        self.index
+        let index = self
+            .index
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        index
             .files
             .get(&remote_key(remote_filename))
+            .and_then(|file_index| index.indexed_files.get(*file_index))
             .cloned()
     }
 
     pub fn search(&self, query: &str) -> Vec<SearchFile> {
-        let terms: Vec<String> = query
-            .split_whitespace()
-            .map(str::to_ascii_lowercase)
-            .filter(|term| !term.is_empty())
-            .collect();
-        if terms.is_empty() {
-            return Vec::new();
-        }
-        self.index
+        let terms = SearchTerms::parse(query);
+        let index = self
+            .index
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .files
-            .values()
-            .filter(|file| {
-                let name = file.remote_filename.to_ascii_lowercase();
-                terms.iter().all(|term| name.contains(term))
-            })
-            .take(MAX_SEARCH_RESULTS)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        matching_file_indices(&index, &terms)
+            .into_iter()
+            .filter_map(|file_index| index.indexed_files.get(file_index))
             .map(IndexedFile::search_file)
             .collect()
     }
 
     pub fn share_list(&self) -> Vec<ShareListing> {
-        self.index
+        let index = self
+            .index
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        index
             .directories
             .iter()
             .map(|(directory, files)| ShareListing {
                 directory: directory.clone(),
-                files: files.iter().map(IndexedFile::folder_file).collect(),
+                files: files
+                    .iter()
+                    .filter_map(|file_index| index.indexed_files.get(*file_index))
+                    .map(IndexedFile::folder_file)
+                    .collect(),
                 is_private: false,
             })
             .collect()
@@ -408,9 +431,11 @@ impl LocalSharesHub {
     pub fn folder_list(&self, requested: &str) -> Vec<FolderListing> {
         let normalized = normalize_remote_path(requested);
         let normalized_key = remote_key(&normalized);
-        self.index
+        let index = self
+            .index
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        index
             .directories
             .iter()
             .filter(|(directory, _)| {
@@ -419,7 +444,11 @@ impl LocalSharesHub {
             })
             .map(|(directory, files)| FolderListing {
                 directory: directory.clone(),
-                files: files.iter().map(IndexedFile::folder_file).collect(),
+                files: files
+                    .iter()
+                    .filter_map(|file_index| index.indexed_files.get(*file_index))
+                    .map(IndexedFile::folder_file)
+                    .collect(),
             })
             .collect()
     }
@@ -431,7 +460,7 @@ impl LocalSharesHub {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         (
             index.directories.len().try_into().unwrap_or(u32::MAX),
-            index.files.len().try_into().unwrap_or(u32::MAX),
+            index.indexed_files.len().try_into().unwrap_or(u32::MAX),
         )
     }
 
@@ -441,6 +470,7 @@ impl LocalSharesHub {
         username: &str,
         search_token: u32,
         query: &str,
+        origin: SearchResponseOrigin,
     ) -> Option<SearchResponseTicket> {
         let files = self.search(query);
         if files.is_empty() {
@@ -451,11 +481,18 @@ impl LocalSharesHub {
             username: username.to_owned(),
             search_token,
             files,
+            origin,
+            queued_at: Instant::now(),
         };
-        self.pending_searches
+        let mut pending = self
+            .pending_searches
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(connection_token, ticket.clone());
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        pending.retain(|_, queued| queued.queued_at.elapsed() <= SEARCH_RESPONSE_TTL);
+        if pending.len() >= MAX_PENDING_SEARCH_RESPONSES {
+            return None;
+        }
+        pending.insert(connection_token, ticket.clone());
         Some(ticket)
     }
 
@@ -480,6 +517,13 @@ impl LocalSharesHub {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&connection_token);
+    }
+
+    pub fn connection_lost(&self) {
+        self.pending_searches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
     }
 
     fn persist(&self) -> Result<(), LocalSharesError> {
@@ -590,6 +634,10 @@ fn scan_root(
                 return Err(LocalSharesError::IndexLimit);
             }
             let remote_filename = format!("{directory}\\{filename}");
+            let remote_key = remote_key(&remote_filename);
+            if index.files.contains_key(&remote_key) {
+                continue;
+            }
             let file = IndexedFile {
                 local_path: path,
                 remote_filename: remote_filename.clone(),
@@ -597,21 +645,21 @@ fn scan_root(
                 size_bytes: metadata.len(),
                 extension,
             };
-            if index
-                .files
-                .insert(remote_key(&remote_filename), file.clone())
-                .is_none()
-            {
-                index.directories.entry(directory).or_default().push(file);
-                index.total_size_bytes = index.total_size_bytes.saturating_add(metadata.len());
-                snapshot.file_count = snapshot.file_count.saturating_add(1);
-                snapshot.total_size_bytes =
-                    snapshot.total_size_bytes.saturating_add(metadata.len());
+            let file_index = index.indexed_files.len();
+            index.files.insert(remote_key, file_index);
+            for word in search_words(&remote_filename) {
+                index.word_index.entry(word).or_default().push(file_index);
             }
+            index.indexed_files.push(file);
+            index
+                .directories
+                .entry(directory)
+                .or_default()
+                .push(file_index);
+            index.total_size_bytes = index.total_size_bytes.saturating_add(metadata.len());
+            snapshot.file_count = snapshot.file_count.saturating_add(1);
+            snapshot.total_size_bytes = snapshot.total_size_bytes.saturating_add(metadata.len());
         }
-    }
-    for files in index.directories.values_mut() {
-        files.sort_by(|left, right| left.filename.cmp(&right.filename));
     }
     snapshot.directory_count = index
         .directories
@@ -695,6 +743,87 @@ fn normalize_remote_path(value: &str) -> String {
 
 fn remote_key(value: &str) -> String {
     normalize_remote_path(value).to_ascii_lowercase()
+}
+
+#[derive(Default)]
+struct SearchTerms {
+    included: HashSet<String>,
+    excluded: HashSet<String>,
+    partial: HashSet<String>,
+}
+
+impl SearchTerms {
+    fn parse(query: &str) -> Self {
+        let mut terms = Self::default();
+        for raw in query.split_whitespace() {
+            let (destination, value) = if let Some(value) = raw.strip_prefix('-') {
+                (&mut terms.excluded, value)
+            } else if let Some(value) = raw.strip_prefix('*') {
+                (&mut terms.partial, value)
+            } else {
+                (&mut terms.included, raw)
+            };
+            destination.extend(search_words(value));
+        }
+        terms
+    }
+}
+
+fn search_words(value: &str) -> HashSet<String> {
+    value
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(|word| word.to_lowercase())
+        .collect()
+}
+
+fn matching_file_indices(index: &ShareIndex, terms: &SearchTerms) -> Vec<usize> {
+    if terms.included.is_empty() {
+        return Vec::new();
+    }
+    let mut included_lists = Vec::with_capacity(terms.included.len());
+    for word in &terms.included {
+        let Some(matches) = index.word_index.get(word) else {
+            return Vec::new();
+        };
+        included_lists.push(matches);
+    }
+    included_lists.sort_by_key(|matches| matches.len());
+    let mut matches: HashSet<usize> = included_lists[0].iter().copied().collect();
+    for word_matches in included_lists.into_iter().skip(1) {
+        matches.retain(|file_index| word_matches.binary_search(file_index).is_ok());
+        if matches.is_empty() {
+            return Vec::new();
+        }
+    }
+
+    for partial in &terms.partial {
+        let partial_matches: HashSet<usize> = index
+            .word_index
+            .iter()
+            .filter(|(word, _)| word.ends_with(partial))
+            .flat_map(|(_, indices)| indices.iter().copied())
+            .collect();
+        matches.retain(|file_index| partial_matches.contains(file_index));
+        if matches.is_empty() {
+            return Vec::new();
+        }
+    }
+
+    for excluded in &terms.excluded {
+        if let Some(excluded_matches) = index.word_index.get(excluded) {
+            matches.retain(|file_index| excluded_matches.binary_search(file_index).is_err());
+        }
+    }
+
+    let mut matches: Vec<usize> = matches.into_iter().collect();
+    matches.sort_by(|left, right| {
+        index.indexed_files[*left]
+            .remote_filename
+            .cmp(&index.indexed_files[*right].remote_filename)
+    });
+    matches.truncate(MAX_SEARCH_RESULTS);
+    matches
 }
 
 fn is_hidden_name(name: &std::ffi::OsStr) -> bool {
@@ -818,6 +947,54 @@ mod tests {
         assert_eq!(snapshot.file_count, 1);
         assert!(index.files.contains_key("safe music\\album\\track.flac"));
         assert_eq!(index.files.len(), 1);
+        fs::remove_dir_all(root_path).unwrap();
+    }
+
+    #[test]
+    fn search_index_supports_required_excluded_and_partial_words() {
+        let root_path = std::env::temp_dir().join(format!(
+            "forever-search-test-{}-{}",
+            std::process::id(),
+            timestamp_ms()
+        ));
+        fs::create_dir_all(root_path.join("Album")).unwrap();
+        fs::write(root_path.join("Album").join("Night Geometry.flac"), [1_u8]).unwrap();
+        fs::write(
+            root_path.join("Album").join("Night Geometry Live.flac"),
+            [1_u8],
+        )
+        .unwrap();
+        fs::write(root_path.join("Album").join("Day Geometry.flac"), [1_u8]).unwrap();
+
+        let root = SharedRootConfig {
+            id: "search".to_owned(),
+            path: root_path.to_string_lossy().into_owned(),
+            alias: "Safe Music".to_owned(),
+            enabled: true,
+            added_at_ms: 0,
+        };
+        let mut snapshot = SharedRootSnapshot {
+            id: root.id.clone(),
+            path: root.path.clone(),
+            alias: root.alias.clone(),
+            enabled: true,
+            file_count: 0,
+            directory_count: 0,
+            total_size_bytes: 0,
+            error: None,
+        };
+        let mut index = ShareIndex::default();
+        scan_root(&root, &mut snapshot, &mut index).unwrap();
+
+        let matches = matching_file_indices(&index, &SearchTerms::parse("NIGHT geometry -live"));
+        assert_eq!(matches.len(), 1);
+        assert!(index.indexed_files[matches[0]]
+            .remote_filename
+            .ends_with("Night Geometry.flac"));
+
+        let partial = matching_file_indices(&index, &SearchTerms::parse("night *metry"));
+        assert_eq!(partial.len(), 2);
+        assert!(matching_file_indices(&index, &SearchTerms::parse("-live")).is_empty());
         fs::remove_dir_all(root_path).unwrap();
     }
 

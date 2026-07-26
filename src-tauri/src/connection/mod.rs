@@ -1,5 +1,6 @@
 mod credentials;
 mod diagnostics;
+mod distributed;
 mod downloads;
 mod folders;
 mod local_shares;

@@ -17,6 +17,13 @@ pub const SET_STATUS_CODE: u32 = 28;
 pub const SERVER_PING_CODE: u32 = 32;
 pub const SHARED_COUNTS_CODE: u32 = 35;
 pub const RELOGGED_CODE: u32 = 41;
+pub const HAVE_NO_PARENT_CODE: u32 = 71;
+pub const EMBEDDED_MESSAGE_CODE: u32 = 93;
+pub const ACCEPT_CHILDREN_CODE: u32 = 100;
+pub const POSSIBLE_PARENTS_CODE: u32 = 102;
+pub const BRANCH_LEVEL_CODE: u32 = 126;
+pub const BRANCH_ROOT_CODE: u32 = 127;
+pub const RESET_DISTRIBUTED_CODE: u32 = 130;
 pub const CANT_CONNECT_TO_PEER_CODE: u32 = 1001;
 pub const SHARED_FILE_LIST_REQUEST_CODE: u32 = 4;
 pub const SHARED_FILE_LIST_RESPONSE_CODE: u32 = 5;
@@ -30,11 +37,18 @@ pub const PLACE_IN_QUEUE_RESPONSE_CODE: u32 = 44;
 pub const UPLOAD_FAILED_CODE: u32 = 46;
 pub const UPLOAD_DENIED_CODE: u32 = 50;
 pub const PLACE_IN_QUEUE_REQUEST_CODE: u32 = 51;
+pub const DISTRIBUTED_SEARCH_CODE: u8 = 3;
+pub const DISTRIBUTED_BRANCH_LEVEL_CODE: u8 = 4;
+pub const DISTRIBUTED_BRANCH_ROOT_CODE: u8 = 5;
 pub const EXPERIMENTAL_MAJOR_VERSION: u32 = 177;
 pub const FOREVER_MINOR_VERSION: u32 = 3;
 const MAX_MESSAGE_LENGTH: usize = 16 * 1024 * 1024;
 const MAX_PEER_MESSAGE_LENGTH: usize = 64 * 1024 * 1024;
 const MAX_PEER_INIT_LENGTH: usize = 64 * 1024;
+const MAX_DISTRIBUTED_MESSAGE_LENGTH: usize = 16 * 1024;
+const MAX_POSSIBLE_PARENTS: usize = 10;
+const MAX_NETWORK_USERNAME_BYTES: usize = 100;
+const MAX_DISTRIBUTED_QUERY_BYTES: usize = 250;
 const MAX_DECOMPRESSED_SEARCH_LENGTH: usize = 64 * 1024 * 1024;
 const MAX_DECOMPRESSED_FOLDER_LENGTH: usize = 64 * 1024 * 1024;
 const MAX_DECOMPRESSED_SHARE_LENGTH: usize = 256 * 1024 * 1024;
@@ -78,6 +92,26 @@ pub struct PeerAddress {
     pub username: String,
     pub address: Ipv4Addr,
     pub port: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParentCandidate {
+    pub username: String,
+    pub address: Ipv4Addr,
+    pub port: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DistributedFrame {
+    pub code: u8,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DistributedSearch {
+    pub username: String,
+    pub token: u32,
+    pub query: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -176,6 +210,24 @@ pub fn login_frame(username: &str, password: &str) -> Vec<u8> {
 
 pub fn set_wait_port_frame(port: u16) -> Vec<u8> {
     encode_message(SET_WAIT_PORT_CODE, &u32::from(port).to_le_bytes())
+}
+
+pub fn have_no_parent_frame(has_no_parent: bool) -> Vec<u8> {
+    encode_message(HAVE_NO_PARENT_CODE, &[u8::from(has_no_parent)])
+}
+
+pub fn accept_children_frame(accept: bool) -> Vec<u8> {
+    encode_message(ACCEPT_CHILDREN_CODE, &[u8::from(accept)])
+}
+
+pub fn branch_level_frame(level: u32) -> Vec<u8> {
+    encode_message(BRANCH_LEVEL_CODE, &level.to_le_bytes())
+}
+
+pub fn branch_root_frame(username: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(username.len() + 4);
+    push_string(&mut payload, username);
+    encode_message(BRANCH_ROOT_CODE, &payload)
 }
 
 pub fn file_search_frame(token: u32, query: &str) -> Vec<u8> {
@@ -364,6 +416,118 @@ pub fn parse_server_search_request(frame: &Frame) -> Result<(String, u32, String
         reader.read_u32()?,
         reader.read_string_lossy()?,
     ))
+}
+
+pub fn parse_possible_parents(frame: &Frame) -> Result<Vec<ParentCandidate>, ProtocolError> {
+    if frame.code != POSSIBLE_PARENTS_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: POSSIBLE_PARENTS_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let count = reader.read_u32()? as usize;
+    if count > MAX_POSSIBLE_PARENTS {
+        return Err(ProtocolError::InvalidCount {
+            kind: "possible distributed parents",
+            count,
+        });
+    }
+
+    let mut parents = Vec::with_capacity(count);
+    for _ in 0..count {
+        let username = reader.read_string_lossy()?;
+        let address = reader.read_ipv4()?;
+        let port = reader.read_u32()?;
+        if username.is_empty()
+            || username.len() > MAX_NETWORK_USERNAME_BYTES
+            || port == 0
+            || port > u16::MAX.into()
+        {
+            continue;
+        }
+        parents.push(ParentCandidate {
+            username,
+            address,
+            port: port as u16,
+        });
+    }
+    Ok(parents)
+}
+
+pub fn parse_distributed_search(
+    frame: &DistributedFrame,
+) -> Result<DistributedSearch, ProtocolError> {
+    if frame.code != DISTRIBUTED_SEARCH_CODE {
+        return Err(ProtocolError::UnexpectedDistributedCode {
+            expected: DISTRIBUTED_SEARCH_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let identifier = reader.read_u32()?;
+    if identifier != u32::from(b'1') {
+        return Err(ProtocolError::InvalidDistributedIdentifier(identifier));
+    }
+    let username = reader.read_string_lossy()?;
+    let token = reader.read_u32()?;
+    let query = reader.read_string_lossy()?;
+    if username.is_empty()
+        || username.len() > MAX_NETWORK_USERNAME_BYTES
+        || query.is_empty()
+        || query.len() > MAX_DISTRIBUTED_QUERY_BYTES
+    {
+        return Err(ProtocolError::InvalidDistributedSearch);
+    }
+    Ok(DistributedSearch {
+        username,
+        token,
+        query,
+    })
+}
+
+pub fn parse_distributed_branch_level(frame: &DistributedFrame) -> Result<u32, ProtocolError> {
+    if frame.code != DISTRIBUTED_BRANCH_LEVEL_CODE {
+        return Err(ProtocolError::UnexpectedDistributedCode {
+            expected: DISTRIBUTED_BRANCH_LEVEL_CODE,
+            actual: frame.code,
+        });
+    }
+    let level = PayloadReader::new(&frame.payload).read_i32()?;
+    u32::try_from(level).map_err(|_| ProtocolError::InvalidDistributedBranchLevel(level))
+}
+
+pub fn parse_distributed_branch_root(frame: &DistributedFrame) -> Result<String, ProtocolError> {
+    if frame.code != DISTRIBUTED_BRANCH_ROOT_CODE {
+        return Err(ProtocolError::UnexpectedDistributedCode {
+            expected: DISTRIBUTED_BRANCH_ROOT_CODE,
+            actual: frame.code,
+        });
+    }
+    let root = PayloadReader::new(&frame.payload).read_string_lossy()?;
+    if root.is_empty() || root.len() > MAX_NETWORK_USERNAME_BYTES {
+        return Err(ProtocolError::InvalidDistributedBranchRoot);
+    }
+    Ok(root)
+}
+
+pub fn parse_embedded_distributed_search(
+    frame: &Frame,
+) -> Result<DistributedSearch, ProtocolError> {
+    if frame.code != EMBEDDED_MESSAGE_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: EMBEDDED_MESSAGE_CODE,
+            actual: frame.code,
+        });
+    }
+    let (&code, payload) = frame
+        .payload
+        .split_first()
+        .ok_or(ProtocolError::TruncatedPayload)?;
+    parse_distributed_search(&DistributedFrame {
+        code,
+        payload: payload.to_vec(),
+    })
 }
 
 pub fn parse_folder_contents_request(frame: &Frame) -> Result<(u32, String), ProtocolError> {
@@ -940,6 +1104,20 @@ where
     read_frame_with_limit(reader, MAX_PEER_MESSAGE_LENGTH).await
 }
 
+pub async fn read_distributed_frame<R>(reader: &mut R) -> Result<DistributedFrame, ProtocolError>
+where
+    R: AsyncRead + Unpin,
+{
+    let length = reader.read_u32_le().await? as usize;
+    if !(1..=MAX_DISTRIBUTED_MESSAGE_LENGTH).contains(&length) {
+        return Err(ProtocolError::InvalidLength(length));
+    }
+    let code = reader.read_u8().await?;
+    let mut payload = vec![0; length - 1];
+    reader.read_exact(&mut payload).await?;
+    Ok(DistributedFrame { code, payload })
+}
+
 async fn read_frame_with_limit<R>(reader: &mut R, maximum: usize) -> Result<Frame, ProtocolError>
 where
     R: AsyncRead + Unpin,
@@ -1113,6 +1291,13 @@ impl<'a> PayloadReader<'a> {
         ))
     }
 
+    fn read_i32(&mut self) -> Result<i32, ProtocolError> {
+        let bytes = self.read_bytes(4)?;
+        Ok(i32::from_le_bytes(
+            bytes.try_into().expect("four byte slice"),
+        ))
+    }
+
     fn read_u16(&mut self) -> Result<u16, ProtocolError> {
         let bytes = self.read_bytes(2)?;
         Ok(u16::from_le_bytes(
@@ -1165,6 +1350,16 @@ pub enum ProtocolError {
     TruncatedPayload,
     #[error("Expected Soulseek message code {expected}, received {actual}")]
     UnexpectedCode { expected: u32, actual: u32 },
+    #[error("Expected Soulseek distributed message code {expected}, received {actual}")]
+    UnexpectedDistributedCode { expected: u8, actual: u8 },
+    #[error("Soulseek distributed search identifier {0} is invalid")]
+    InvalidDistributedIdentifier(u32),
+    #[error("Soulseek distributed search fields are invalid")]
+    InvalidDistributedSearch,
+    #[error("Soulseek distributed branch level {0} is invalid")]
+    InvalidDistributedBranchLevel(i32),
+    #[error("Soulseek distributed branch root is invalid")]
+    InvalidDistributedBranchRoot,
     #[error("Unexpected Soulseek peer initialization code {0}")]
     UnexpectedPeerInitCode(u8),
     #[error("Soulseek {kind} count {count} exceeds the safety limit")]
@@ -1273,6 +1468,121 @@ mod tests {
         );
         assert_eq!(u32::from_le_bytes(search[8..12].try_into().unwrap()), 91);
         assert!(search.ends_with(b"night geometry"));
+    }
+
+    #[test]
+    fn encodes_distributed_topology_frames() {
+        let no_parent = have_no_parent_frame(true);
+        assert_eq!(
+            u32::from_le_bytes(no_parent[4..8].try_into().unwrap()),
+            HAVE_NO_PARENT_CODE
+        );
+        assert_eq!(no_parent[8], 1);
+
+        let root = branch_root_frame("forever_user");
+        assert_eq!(
+            u32::from_le_bytes(root[4..8].try_into().unwrap()),
+            BRANCH_ROOT_CODE
+        );
+        assert!(root.ends_with(b"forever_user"));
+
+        let level = branch_level_frame(7);
+        assert_eq!(
+            u32::from_le_bytes(level[4..8].try_into().unwrap()),
+            BRANCH_LEVEL_CODE
+        );
+        assert_eq!(u32::from_le_bytes(level[8..12].try_into().unwrap()), 7);
+        assert_eq!(accept_children_frame(false)[8], 0);
+    }
+
+    #[test]
+    fn parses_possible_distributed_parents_with_bounded_ports() {
+        let mut payload = 2_u32.to_le_bytes().to_vec();
+        payload.extend(encoded_string("relay-one"));
+        payload.extend([1, 0, 0, 127]);
+        payload.extend(48_123_u32.to_le_bytes());
+        payload.extend(encoded_string("invalid-relay"));
+        payload.extend([5, 4, 3, 2]);
+        payload.extend(0_u32.to_le_bytes());
+
+        assert_eq!(
+            parse_possible_parents(&Frame {
+                code: POSSIBLE_PARENTS_CODE,
+                payload,
+            })
+            .unwrap(),
+            vec![ParentCandidate {
+                username: "relay-one".to_owned(),
+                address: Ipv4Addr::new(127, 0, 0, 1),
+                port: 48_123,
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_distributed_and_embedded_search_requests() {
+        let mut payload = u32::from(b'1').to_le_bytes().to_vec();
+        payload.extend(encoded_string("listener"));
+        payload.extend(991_u32.to_le_bytes());
+        payload.extend(encoded_string("night geometry -live"));
+        let distributed = DistributedFrame {
+            code: DISTRIBUTED_SEARCH_CODE,
+            payload: payload.clone(),
+        };
+        let expected = DistributedSearch {
+            username: "listener".to_owned(),
+            token: 991,
+            query: "night geometry -live".to_owned(),
+        };
+        assert_eq!(parse_distributed_search(&distributed).unwrap(), expected);
+
+        let mut embedded = vec![DISTRIBUTED_SEARCH_CODE];
+        embedded.extend(payload);
+        assert_eq!(
+            parse_embedded_distributed_search(&Frame {
+                code: EMBEDDED_MESSAGE_CODE,
+                payload: embedded,
+            })
+            .unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_distributed_searches_and_branch_state() {
+        let invalid_search = DistributedFrame {
+            code: DISTRIBUTED_SEARCH_CODE,
+            payload: 0_u32.to_le_bytes().to_vec(),
+        };
+        assert!(matches!(
+            parse_distributed_search(&invalid_search),
+            Err(ProtocolError::InvalidDistributedIdentifier(0))
+        ));
+        assert!(matches!(
+            parse_distributed_branch_level(&DistributedFrame {
+                code: DISTRIBUTED_BRANCH_LEVEL_CODE,
+                payload: (-1_i32).to_le_bytes().to_vec(),
+            }),
+            Err(ProtocolError::InvalidDistributedBranchLevel(-1))
+        ));
+    }
+
+    #[tokio::test]
+    async fn reads_fragmented_distributed_frames() {
+        let mut payload = encoded_string("root-user");
+        let mut bytes = Vec::new();
+        push_u32(&mut bytes, u32::try_from(payload.len() + 1).unwrap());
+        bytes.push(DISTRIBUTED_BRANCH_ROOT_CODE);
+        bytes.append(&mut payload);
+        let (mut writer, mut reader) = tokio::io::duplex(16);
+        let write_task = tokio::spawn(async move {
+            for byte in bytes {
+                writer.write_all(&[byte]).await.unwrap();
+            }
+        });
+        let frame = read_distributed_frame(&mut reader).await.unwrap();
+        assert_eq!(parse_distributed_branch_root(&frame).unwrap(), "root-user");
+        write_task.await.unwrap();
     }
 
     #[test]

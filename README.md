@@ -3,9 +3,9 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.11` adds safe local music sharing and real
-> outgoing Soulseek uploads, including browse/search responses, a bounded
-> background index, configurable slots, and a live Uploads workspace.
+> **Status:** pre-alpha. Version `0.0.12` completes distributed-search
+> participation so locally shared music can appear in ordinary global searches
+> from other Soulseek clients, with indexed matching and live relay status.
 
 ![Forever Midnight Radio user shares interface](design/implementation/release-user-shares-0.0.9.png)
 
@@ -49,8 +49,15 @@ Rust, Tauri 2, React, and TypeScript.
   enable/disable, removal, rescanning, virtual aliases, and indexed totals
 - Bounded background indexing for supported audio formats, excluding hidden
   entries, symbolic links, partial/temporary files, and unsafe root overlaps
-- Live Soulseek browse, folder, and distributed-search responses for local
-  shares without exposing absolute filesystem paths
+- Live Soulseek browse and folder responses for local shares without exposing
+  absolute filesystem paths
+- Full leaf participation in Soulseek's distributed search network, including
+  parent discovery, branch-root delivery, reconnect recovery, and real search
+  responses from the local share index
+- Indexed global-search matching with required words, `-excluded` words, and
+  `*partial` terms, plus bounded deduplication and request-rate controls
+- Live global-search relay state, branch discovery, request counters, and safe
+  connection diagnostics in Settings
 - Real resumable uploads with queue positions, one to three configurable slots,
   progress, speed, ETA, cancellation, failure states, and an Uploads workspace
 - Safe `.part` files, resumable offsets, exact-size checks, sanitized local
@@ -112,11 +119,12 @@ Add music under **Settings → Your shared music**. Forever gives each selected
 root a virtual alias, indexes supported audio in the background, and announces
 the resulting public counts to Soulseek. Disable a root without forgetting it,
 rescan after changing files, and choose one to three outgoing upload slots.
-Incoming browse, folder, search, queue, and download requests are then served
-from the safe in-memory index. Follow outgoing activity under **Transfers →
-Uploads**.
+Incoming browse, folder, global-search, queue, and download requests are then
+served from the safe in-memory index. Connection settings shows whether
+Forever has joined the global-search relay and how many requests it has
+received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.11` intentionally keeps one active download at a time, even when an
+Version `0.0.12` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
 three. Library management, metadata/cover lookup, playback, rooms, and chat
 remain outside this release.
@@ -164,7 +172,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.11 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.12 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

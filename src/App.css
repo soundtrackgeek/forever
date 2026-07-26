@@ -3677,6 +3677,11 @@ button:disabled {
   border-bottom: 1px solid #252b3d;
 }
 
+.settings-status-cluster {
+  display: flex;
+  gap: 9px;
+}
+
 .connection-state-badge {
   display: grid;
   min-width: 180px;
@@ -3710,6 +3715,17 @@ button:disabled {
 
 .connection-state-badge.is-error > i {
   background: var(--danger);
+}
+
+.search-network-badge.is-connected > i,
+.search-network-badge.is-branchRoot > i {
+  background: var(--online);
+  box-shadow: 0 0 9px rgba(113, 206, 118, 0.35);
+}
+
+.search-network-badge.is-discovering > i {
+  background: var(--amber);
+  animation: status-pulse 1.2s ease-in-out infinite;
 }
 
 .connection-state-badge > span {
@@ -4021,6 +4037,14 @@ form.settings-panel {
 
   .connection-settings {
     padding-inline: 25px;
+  }
+
+  .settings-heading {
+    align-items: flex-start;
+  }
+
+  .settings-status-cluster {
+    flex-direction: column;
   }
 }
 

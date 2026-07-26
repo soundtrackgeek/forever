@@ -245,6 +245,23 @@ export type ConnectionSnapshot = {
   updatedAtMs: number;
 };
 
+export type DistributedState =
+  | "offline"
+  | "discovering"
+  | "connected"
+  | "branchRoot";
+
+export type DistributedSnapshot = {
+  state: DistributedState;
+  message: string;
+  branchLevel: number | null;
+  searchesReceived: number;
+  searchesMatched: number;
+  searchesAnswered: number;
+  searchesIgnored: number;
+  updatedAtMs: number;
+};
+
 export type DiagnosticEntry = {
   timestampMs: number;
   level: string;
@@ -257,6 +274,7 @@ export type ConnectionBootstrap = {
   suggestedProfile: ConnectionProfile;
   hasPassword: boolean;
   snapshot: ConnectionSnapshot;
+  searchNetwork: DistributedSnapshot;
   diagnosticsPath: string;
   diagnostics: DiagnosticEntry[];
 };

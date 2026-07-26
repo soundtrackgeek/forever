@@ -212,6 +212,8 @@ describe("Forever shell", () => {
       screen.getByRole("heading", { name: "Connection" }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("Network online")).not.toHaveLength(0);
+    expect(screen.getByText("Global search connected")).toBeInTheDocument();
+    expect(screen.getByText("128 received · 7 answered")).toBeInTheDocument();
     expect(screen.getByDisplayValue("SignalLevel")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Your shared music" })).toBeInTheDocument();
     expect(screen.getByText("Midnight Archive")).toBeInTheDocument();
@@ -250,15 +252,15 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.11 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.12 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Safe local music sharing with folder controls and bounded indexing.",
+        "Full participation in Soulseek’s distributed search network, including relay discovery and branch-root delivery.",
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Local filesystem paths remain private behind virtual share aliases."),
+      screen.getByText("Locally shared files can now appear in ordinary global searches from other Soulseek clients."),
     ).toBeInTheDocument();
   });
 

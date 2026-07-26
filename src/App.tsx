@@ -241,6 +241,7 @@ function App() {
             profile={connection.profile}
             hasPassword={connection.hasPassword}
             snapshot={connection.snapshot}
+            searchNetwork={connection.searchNetwork}
             diagnostics={connection.diagnostics}
             diagnosticsPath={connection.diagnosticsPath}
             error={connection.error}

@@ -6,6 +6,7 @@ import type {
   ConnectionProfile,
   ConnectionSnapshot,
   DiagnosticEntry,
+  DistributedSnapshot,
 } from "../types";
 
 const MOCK_PROFILE: ConnectionProfile = {
@@ -18,6 +19,17 @@ const MOCK_PROFILE: ConnectionProfile = {
 };
 
 const now = () => Date.now();
+
+const offlineSearchNetwork = (): DistributedSnapshot => ({
+  state: "offline",
+  message: "Connect to Soulseek to join global search.",
+  branchLevel: null,
+  searchesReceived: 0,
+  searchesMatched: 0,
+  searchesAnswered: 0,
+  searchesIgnored: 0,
+  updatedAtMs: now(),
+});
 
 function previewBootstrap(): ConnectionBootstrap {
   const showOnboarding =
@@ -52,6 +64,18 @@ function previewBootstrap(): ConnectionBootstrap {
           retryInSeconds: null,
           updatedAtMs: now(),
         },
+    searchNetwork: profile
+      ? {
+          state: "connected",
+          message: "Global search relay connected.",
+          branchLevel: 3,
+          searchesReceived: 128,
+          searchesMatched: 7,
+          searchesAnswered: 7,
+          searchesIgnored: 2,
+          updatedAtMs: now(),
+        }
+      : offlineSearchNetwork(),
     diagnosticsPath:
       "C:\\Users\\AppData\\Roaming\\com.soundtrackgeek.forever\\logs\\connection.log",
     diagnostics: [
@@ -86,6 +110,9 @@ export function useSoulseekConnection() {
   const [snapshot, setSnapshot] = useState<ConnectionSnapshot | null>(
     () => bootstrap?.snapshot ?? null,
   );
+  const [searchNetwork, setSearchNetwork] = useState<DistributedSnapshot>(
+    () => bootstrap?.searchNetwork ?? offlineSearchNetwork(),
+  );
   const bootstrapRef = useRef(bootstrap);
   const [error, setError] = useState<string | null>(null);
   const autoConnectStarted = useRef(false);
@@ -98,6 +125,7 @@ export function useSoulseekConnection() {
       bootstrapRef.current = next;
       setBootstrap(next);
       setSnapshot(next.snapshot);
+      setSearchNetwork(next.searchNetwork);
       setError(null);
       return next;
     } catch (cause) {
@@ -110,7 +138,8 @@ export function useSoulseekConnection() {
     if (!native) return;
 
     let mounted = true;
-    let unlisten: (() => void) | undefined;
+    let unlistenConnection: (() => void) | undefined;
+    let unlistenSearchNetwork: (() => void) | undefined;
 
     void listen<ConnectionSnapshot>(
       "forever://connection-status",
@@ -119,7 +148,19 @@ export function useSoulseekConnection() {
       },
     ).then((dispose) => {
       if (mounted) {
-        unlisten = dispose;
+        unlistenConnection = dispose;
+      } else {
+        dispose();
+      }
+    });
+    void listen<DistributedSnapshot>(
+      "forever://distributed-status",
+      (event) => {
+        if (mounted) setSearchNetwork(event.payload);
+      },
+    ).then((dispose) => {
+      if (mounted) {
+        unlistenSearchNetwork = dispose;
       } else {
         dispose();
       }
@@ -131,6 +172,7 @@ export function useSoulseekConnection() {
         bootstrapRef.current = next;
         setBootstrap(next);
         setSnapshot(next.snapshot);
+        setSearchNetwork(next.searchNetwork);
         setError(null);
       } catch (cause) {
         if (mounted) setError(errorMessage(cause));
@@ -139,7 +181,8 @@ export function useSoulseekConnection() {
 
     return () => {
       mounted = false;
-      unlisten?.();
+      unlistenConnection?.();
+      unlistenSearchNetwork?.();
     };
   }, [native]);
 
@@ -151,6 +194,7 @@ export function useSoulseekConnection() {
       try {
         if (!native) {
           await wait(240);
+          const nextSearchNetwork = offlineSearchNetwork();
           const next: ConnectionBootstrap = {
             ...(bootstrapRef.current ?? previewBootstrap()),
             profile,
@@ -166,10 +210,12 @@ export function useSoulseekConnection() {
               retryInSeconds: null,
               updatedAtMs: now(),
             },
+            searchNetwork: nextSearchNetwork,
           };
           bootstrapRef.current = next;
           setBootstrap(next);
           setSnapshot(next.snapshot);
+          setSearchNetwork(nextSearchNetwork);
           return next;
         }
 
@@ -185,6 +231,7 @@ export function useSoulseekConnection() {
         bootstrapRef.current = next;
         setBootstrap(next);
         setSnapshot(next.snapshot);
+        setSearchNetwork(next.searchNetwork);
         return next;
       } catch (cause) {
         const message = errorMessage(cause);
@@ -211,6 +258,11 @@ export function useSoulseekConnection() {
           connectedAtMs: null,
           retryInSeconds: null,
           updatedAtMs: now(),
+        });
+        setSearchNetwork({
+          ...offlineSearchNetwork(),
+          state: "discovering",
+          message: "Finding a global search relay…",
         });
         await wait(360);
         setSnapshot((current) =>
@@ -249,6 +301,12 @@ export function useSoulseekConnection() {
           updatedAtMs: now(),
         };
         setSnapshot(connected);
+        setSearchNetwork({
+          ...offlineSearchNetwork(),
+          state: "connected",
+          message: "Global search relay connected.",
+          branchLevel: 3,
+        });
         return connected;
       }
 
@@ -280,6 +338,7 @@ export function useSoulseekConnection() {
             }
           : previewBootstrap().snapshot;
         setSnapshot(next);
+        setSearchNetwork(offlineSearchNetwork());
         return next;
       }
 
@@ -310,9 +369,11 @@ export function useSoulseekConnection() {
           retryInSeconds: null,
           updatedAtMs: now(),
         };
+        next.searchNetwork = offlineSearchNetwork();
         bootstrapRef.current = next;
         setBootstrap(next);
         setSnapshot(next.snapshot);
+        setSearchNetwork(next.searchNetwork);
         autoConnectStarted.current = false;
         return next;
       }
@@ -321,6 +382,7 @@ export function useSoulseekConnection() {
       bootstrapRef.current = next;
       setBootstrap(next);
       setSnapshot(next.snapshot);
+      setSearchNetwork(next.searchNetwork);
       autoConnectStarted.current = false;
       return next;
     } catch (cause) {
@@ -356,6 +418,7 @@ export function useSoulseekConnection() {
       suggestedProfile: bootstrap?.suggestedProfile ?? MOCK_PROFILE,
       hasPassword: bootstrap?.hasPassword ?? false,
       snapshot: snapshot ?? previewBootstrap().snapshot,
+      searchNetwork,
       diagnosticsPath: bootstrap?.diagnosticsPath ?? "",
       diagnostics: bootstrap?.diagnostics ?? [],
       error,
@@ -375,6 +438,7 @@ export function useSoulseekConnection() {
       refresh,
       reset,
       saveProfile,
+      searchNetwork,
       snapshot,
     ],
   );

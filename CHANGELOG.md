@@ -5,6 +5,40 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.12] - 2026-07-26
+
+### Added
+
+- Full Soulseek distributed-search leaf participation with server-provided
+  parent discovery, bounded `D` peer framing, branch-level/root updates,
+  embedded branch-root searches, parent-loss recovery, and reset handling.
+- Live global-search relay state and received, matched, answered, and ignored
+  request counters, surfaced in Connection settings and safe diagnostics.
+- Protocol, topology, coordinator, TCP framing, query-matching, deduplication,
+  and request-rate regression coverage for the new search path.
+
+### Changed
+
+- Shared-file search now uses a normalized word index with required,
+  `-excluded`, and `*partial` terms instead of scanning every filename for each
+  incoming request.
+- Pending search responses, parent candidates, distributed frames, duplicate
+  tokens, and request rates are bounded to keep unsolicited network traffic
+  inexpensive.
+- Application and updater preview metadata now identify version `0.0.12`.
+
+### Fixed
+
+- Locally shared files are now discoverable through ordinary global searches
+  from other Soulseek clients, rather than only through direct user browsing
+  and targeted search delivery.
+
+### Security
+
+- Distributed-search diagnostics omit usernames, queries, IP addresses, and
+  local paths while malformed, duplicate, stale, and excessive traffic is
+  rejected before it can grow unbounded state.
+
 ## [0.0.11] - 2026-07-26
 
 ### Added

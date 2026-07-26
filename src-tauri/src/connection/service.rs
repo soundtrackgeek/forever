@@ -1,31 +1,40 @@
 use super::{
     credentials::CredentialVault,
     diagnostics::{DiagnosticEntry, Diagnostics},
+    distributed::{DistributedHub, DistributedSnapshot, RequestAdmission},
     downloads::{
         DownloadPlan, EnqueueReleaseRequest, EnqueueTransferRequest, TransferError, TransferHub,
         TransferQueueSnapshot, TransferTicket,
     },
     folders::{FolderError, FolderHub, FolderInspection, FolderTicket},
-    local_shares::{LocalSharesError, LocalSharesHub, LocalSharesSnapshot, SearchResponseTicket},
+    local_shares::{
+        LocalSharesError, LocalSharesHub, LocalSharesSnapshot, SearchResponseOrigin,
+        SearchResponseTicket,
+    },
     protocol::{
-        cant_connect_to_peer_frame, connect_to_peer_frame, file_search_frame,
-        file_search_response_frame, folder_contents_request_frame, folder_contents_response_frame,
-        get_peer_address_frame, login_frame, parse_cant_connect_token, parse_connect_to_peer,
-        parse_filename, parse_folder_contents_request, parse_folder_contents_response,
-        parse_login_response, parse_peer_address, parse_queue_position, parse_search_response,
+        accept_children_frame, branch_level_frame, branch_root_frame, cant_connect_to_peer_frame,
+        connect_to_peer_frame, file_search_frame, file_search_response_frame,
+        folder_contents_request_frame, folder_contents_response_frame, get_peer_address_frame,
+        have_no_parent_frame, login_frame, parse_cant_connect_token, parse_connect_to_peer,
+        parse_distributed_branch_level, parse_distributed_branch_root, parse_distributed_search,
+        parse_embedded_distributed_search, parse_filename, parse_folder_contents_request,
+        parse_folder_contents_response, parse_login_response, parse_peer_address,
+        parse_possible_parents, parse_queue_position, parse_search_response,
         parse_server_search_request, parse_shared_file_list_response, parse_transfer_request,
         parse_transfer_response, parse_upload_denied, peer_init_frame, pierce_firewall_frame,
         place_in_queue_request_frame, place_in_queue_response_frame, queue_upload_frame,
-        read_frame, read_peer_frame, read_peer_init, server_ping_frame, set_online_frame,
-        set_wait_port_frame, shared_counts_frame, shared_file_list_request_frame,
+        read_distributed_frame, read_frame, read_peer_frame, read_peer_init, server_ping_frame,
+        set_online_frame, set_wait_port_frame, shared_counts_frame, shared_file_list_request_frame,
         shared_file_list_response_frame, transfer_request_frame, transfer_response_frame,
-        upload_denied_frame, write_raw_frame, ConnectToPeer, Frame, LoginResponse, PeerAddress,
-        PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE, FILE_SEARCH_CODE,
-        FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE,
-        GET_PEER_ADDRESS_CODE, PLACE_IN_QUEUE_REQUEST_CODE, PLACE_IN_QUEUE_RESPONSE_CODE,
-        QUEUE_UPLOAD_CODE, RELOGGED_CODE, SHARED_FILE_LIST_REQUEST_CODE,
-        SHARED_FILE_LIST_RESPONSE_CODE, TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE,
-        UPLOAD_FAILED_CODE,
+        upload_denied_frame, write_raw_frame, ConnectToPeer, DistributedFrame, DistributedSearch,
+        Frame, LoginResponse, ParentCandidate, PeerAddress, PeerInit, ProtocolError,
+        CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE, DISTRIBUTED_BRANCH_LEVEL_CODE,
+        DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_SEARCH_CODE, EMBEDDED_MESSAGE_CODE,
+        FILE_SEARCH_CODE, FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_REQUEST_CODE,
+        FOLDER_CONTENTS_RESPONSE_CODE, GET_PEER_ADDRESS_CODE, PLACE_IN_QUEUE_REQUEST_CODE,
+        PLACE_IN_QUEUE_RESPONSE_CODE, POSSIBLE_PARENTS_CODE, QUEUE_UPLOAD_CODE, RELOGGED_CODE,
+        RESET_DISTRIBUTED_CODE, SHARED_FILE_LIST_REQUEST_CODE, SHARED_FILE_LIST_RESPONSE_CODE,
+        TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE, UPLOAD_FAILED_CODE,
     },
     search::{SearchHub, SearchSnapshot, SearchState},
     settings::{ConnectionProfile, SettingsStore},
@@ -37,6 +46,7 @@ use super::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     io::SeekFrom,
     path::{Path, PathBuf},
     sync::{
@@ -49,7 +59,7 @@ use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::{
     fs::{File, OpenOptions},
-    io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{mpsc, Semaphore},
     time::timeout,
@@ -65,11 +75,14 @@ const PEER_MESSAGE_TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_CONCURRENT_PEERS: usize = 32;
 const SERVER_FRAME_QUEUE_SIZE: usize = 64;
 const MAX_SEARCH_QUERY_BYTES: usize = 250;
+const MAX_SEARCH_USERNAME_BYTES: usize = 100;
 const TRANSFER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const FOLDER_REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
 const SHARES_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 const PEER_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const FILE_BUFFER_SIZE: usize = 128 * 1024;
+const DISTRIBUTED_EVENT_QUEUE_SIZE: usize = 256;
+const DISTRIBUTED_PARENT_IDLE_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,6 +146,7 @@ pub struct ConnectionBootstrap {
     pub snapshot: ConnectionSnapshot,
     pub diagnostics_path: String,
     pub diagnostics: Vec<DiagnosticEntry>,
+    pub search_network: DistributedSnapshot,
 }
 
 #[derive(Deserialize)]
@@ -155,6 +169,124 @@ impl Drop for AbortOnDrop {
     }
 }
 
+struct DistributedCandidateTask {
+    branch_level: Option<u32>,
+    branch_root: Option<String>,
+    _task: AbortOnDrop,
+}
+
+enum DistributedPeerEvent {
+    Frame { id: u64, frame: DistributedFrame },
+    Closed { id: u64 },
+}
+
+struct DistributedCoordinator {
+    next_id: u64,
+    candidates: HashMap<u64, DistributedCandidateTask>,
+    active_parent: Option<u64>,
+    server_is_parent: bool,
+}
+
+impl DistributedCoordinator {
+    fn new() -> Self {
+        Self {
+            next_id: 1,
+            candidates: HashMap::new(),
+            active_parent: None,
+            server_is_parent: false,
+        }
+    }
+
+    fn start_candidates(
+        &mut self,
+        parents: Vec<ParentCandidate>,
+        own_username: &str,
+        event_sender: &mpsc::Sender<DistributedPeerEvent>,
+    ) {
+        if self.active_parent.is_some() || self.server_is_parent || !self.candidates.is_empty() {
+            return;
+        }
+        self.candidates.clear();
+        let mut usernames = std::collections::HashSet::new();
+        for parent in parents {
+            if parent.username.eq_ignore_ascii_case(own_username)
+                || !usernames.insert(parent.username.to_ascii_lowercase())
+            {
+                continue;
+            }
+            let id = self.next_id;
+            self.next_id = self.next_id.wrapping_add(1).max(1);
+            let task = spawn_distributed_parent_candidate(
+                id,
+                parent.clone(),
+                own_username.to_owned(),
+                event_sender.clone(),
+            );
+            self.candidates.insert(
+                id,
+                DistributedCandidateTask {
+                    branch_level: None,
+                    branch_root: None,
+                    _task: task,
+                },
+            );
+        }
+    }
+
+    fn update_branch_level(&mut self, id: u64, level: u32) -> Option<u32> {
+        let candidate = self.candidates.get_mut(&id)?;
+        candidate.branch_level = Some(level);
+        (self.active_parent == Some(id)).then_some(level.saturating_add(1))
+    }
+
+    fn update_branch_root(&mut self, id: u64, root: String) -> Option<String> {
+        let candidate = self.candidates.get_mut(&id)?;
+        candidate.branch_root = Some(root.clone());
+        (self.active_parent == Some(id)).then_some(root)
+    }
+
+    fn adopt(&mut self, id: u64) -> Option<(u32, String)> {
+        if self.active_parent.is_some() || self.server_is_parent {
+            return None;
+        }
+        let candidate = self.candidates.get(&id)?;
+        let level = candidate.branch_level?.saturating_add(1);
+        let root = candidate.branch_root.clone()?;
+        let candidate = self.candidates.remove(&id)?;
+        self.candidates.clear();
+        self.candidates.insert(id, candidate);
+        self.active_parent = Some(id);
+        Some((level, root))
+    }
+
+    fn accepts_search_from(&self, id: u64) -> bool {
+        self.active_parent == Some(id)
+    }
+
+    fn close(&mut self, id: u64) -> bool {
+        self.candidates.remove(&id);
+        if self.active_parent == Some(id) {
+            self.active_parent = None;
+            return true;
+        }
+        false
+    }
+
+    fn become_branch_root(&mut self) -> bool {
+        let changed = !self.server_is_parent;
+        self.candidates.clear();
+        self.active_parent = None;
+        self.server_is_parent = true;
+        changed
+    }
+
+    fn reset(&mut self) {
+        self.candidates.clear();
+        self.active_parent = None;
+        self.server_is_parent = false;
+    }
+}
+
 enum ConnectionCommand {
     StartSearch { token: u32, query: String },
     InspectFolder { ticket: FolderTicket },
@@ -174,6 +306,7 @@ struct PeerServices {
     transfers: TransferHub,
     local_shares: LocalSharesHub,
     uploads: UploadHub,
+    distributed: DistributedHub,
     own_username: String,
     command_sender: mpsc::UnboundedSender<ConnectionCommand>,
 }
@@ -206,6 +339,7 @@ pub struct ConnectionManager {
     transfers: TransferHub,
     local_shares: LocalSharesHub,
     uploads: UploadHub,
+    distributed: DistributedHub,
 }
 
 impl ConnectionManager {
@@ -228,6 +362,7 @@ impl ConnectionManager {
         let transfers = TransferHub::new(app.clone(), transfers_path)?;
         let local_shares = LocalSharesHub::new(app.clone(), sharing_path)?;
         let uploads = UploadHub::new(app.clone());
+        let distributed = DistributedHub::new(app.clone());
 
         Ok(Self {
             app,
@@ -252,6 +387,7 @@ impl ConnectionManager {
             transfers,
             local_shares,
             uploads,
+            distributed,
         })
     }
 
@@ -269,6 +405,7 @@ impl ConnectionManager {
             snapshot: self.current_snapshot(),
             diagnostics_path: self.diagnostics.path().to_string_lossy().into_owned(),
             diagnostics: self.diagnostics.recent(),
+            search_network: self.distributed.snapshot(),
         })
     }
 
@@ -714,6 +851,7 @@ impl ConnectionManager {
             transfers: self.transfers.clone(),
             local_shares: self.local_shares.clone(),
             uploads: self.uploads.clone(),
+            distributed: self.distributed.clone(),
             own_username: own_username.to_owned(),
             command_sender: command_sender.clone(),
         }
@@ -788,6 +926,119 @@ impl ConnectionManager {
             .clone()
     }
 
+    async fn announce_no_distributed_parent<W>(
+        &self,
+        writer: &mut W,
+        own_username: &str,
+    ) -> Result<(), ConnectionFailure>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        for frame in [
+            have_no_parent_frame(true),
+            branch_root_frame(own_username),
+            branch_level_frame(0),
+            accept_children_frame(false),
+        ] {
+            write_raw_frame(writer, &frame).await.map_err(|error| {
+                ConnectionFailure::retryable(
+                    format!("The global-search network could not be initialized: {error}"),
+                    "distributed_setup_failed",
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    async fn announce_distributed_parent<W>(
+        &self,
+        writer: &mut W,
+        branch_root: &str,
+        branch_level: u32,
+    ) -> Result<(), ConnectionFailure>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        for frame in [
+            have_no_parent_frame(false),
+            branch_root_frame(branch_root),
+            branch_level_frame(branch_level),
+            accept_children_frame(false),
+        ] {
+            write_raw_frame(writer, &frame).await.map_err(|error| {
+                ConnectionFailure::retryable(
+                    format!("The global-search parent could not be announced: {error}"),
+                    "distributed_parent_failed",
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    async fn answer_search_request<W>(
+        &self,
+        writer: &mut W,
+        own_username: &str,
+        request: DistributedSearch,
+        origin: SearchResponseOrigin,
+    ) -> Result<(), ConnectionFailure>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        if request.username.is_empty()
+            || request.username.len() > MAX_SEARCH_USERNAME_BYTES
+            || request.query.is_empty()
+            || request.query.len() > MAX_SEARCH_QUERY_BYTES
+            || (origin == SearchResponseOrigin::Distributed
+                && request.username.eq_ignore_ascii_case(own_username))
+        {
+            return Ok(());
+        }
+        if origin == SearchResponseOrigin::Distributed
+            && self
+                .distributed
+                .admit_request(&request.username, request.token)
+                != RequestAdmission::Allowed
+        {
+            return Ok(());
+        }
+
+        let connection_token = self.take_connection_token();
+        let Some(ticket) = self.local_shares.queue_search_response(
+            connection_token,
+            &request.username,
+            request.token,
+            &request.query,
+            origin,
+        ) else {
+            return Ok(());
+        };
+        if origin == SearchResponseOrigin::Distributed {
+            self.distributed.record_match();
+        }
+
+        write_raw_frame(
+            writer,
+            &connect_to_peer_frame(connection_token, &ticket.username, "P"),
+        )
+        .await
+        .map_err(|error| {
+            ConnectionFailure::retryable(
+                format!("The search-result peer request could not be sent: {error}"),
+                "search_response_failed",
+            )
+        })?;
+        write_raw_frame(writer, &get_peer_address_frame(&ticket.username))
+            .await
+            .map_err(|error| {
+                ConnectionFailure::retryable(
+                    format!("The search-result address request could not be sent: {error}"),
+                    "search_response_failed",
+                )
+            })?;
+        Ok(())
+    }
+
     async fn run_connection_loop(
         &self,
         profile: ConnectionProfile,
@@ -838,6 +1089,8 @@ impl ConnectionManager {
             self.uploads.connection_lost();
             self.folders.connection_lost();
             self.shares.connection_lost();
+            self.local_shares.connection_lost();
+            self.distributed.offline();
             self.search
                 .fail("Search stopped because the Soulseek connection was interrupted.");
 
@@ -1006,6 +1259,18 @@ impl ConnectionManager {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(command_sender.clone());
 
+        let (distributed_event_sender, mut distributed_event_receiver) =
+            mpsc::channel(DISTRIBUTED_EVENT_QUEUE_SIZE);
+        let mut distributed_coordinator = DistributedCoordinator::new();
+        self.announce_no_distributed_parent(&mut server_writer, &profile.username)
+            .await?;
+        self.distributed.begin_discovery();
+        self.diagnostics.record(
+            "info",
+            "distributed_discovery",
+            "Looking for a global-search relay.",
+        );
+
         let connected_at_ms = timestamp_ms();
         self.diagnostics.record(
             "info",
@@ -1064,28 +1329,50 @@ impl ConnectionManager {
                     }
                     if frame.code == FILE_SEARCH_CODE {
                         if let Ok((username, search_token, query)) = parse_server_search_request(&frame) {
-                            let connection_token = self.take_connection_token();
-                            if self.local_shares.queue_search_response(
-                                connection_token,
-                                &username,
-                                search_token,
-                                &query,
-                            ).is_some() {
-                                write_raw_frame(
-                                    &mut server_writer,
-                                    &connect_to_peer_frame(connection_token, &username, "P"),
-                                ).await.map_err(|error| ConnectionFailure::retryable(
-                                    format!("The search-result peer request could not be sent: {error}"),
-                                    "search_response_failed",
-                                ))?;
-                                write_raw_frame(&mut server_writer, &get_peer_address_frame(&username))
-                                    .await
-                                    .map_err(|error| ConnectionFailure::retryable(
-                                        format!("The search-result address request could not be sent: {error}"),
-                                        "search_response_failed",
-                                    ))?;
-                            }
+                            self.answer_search_request(
+                                &mut server_writer,
+                                &profile.username,
+                                DistributedSearch { username, token: search_token, query },
+                                SearchResponseOrigin::Server,
+                            ).await?;
                         }
+                    } else if frame.code == POSSIBLE_PARENTS_CODE {
+                        if let Ok(parents) = parse_possible_parents(&frame) {
+                            distributed_coordinator.start_candidates(
+                                parents,
+                                &profile.username,
+                                &distributed_event_sender,
+                            );
+                        }
+                    } else if frame.code == EMBEDDED_MESSAGE_CODE {
+                        if let Ok(request) = parse_embedded_distributed_search(&frame) {
+                            if distributed_coordinator.become_branch_root() {
+                                self.distributed.branch_root();
+                                self.diagnostics.record(
+                                    "info",
+                                    "distributed_branch_root",
+                                    "Global search connected in branch-root mode.",
+                                );
+                            }
+                            self.answer_search_request(
+                                &mut server_writer,
+                                &profile.username,
+                                request,
+                                SearchResponseOrigin::Distributed,
+                            ).await?;
+                        }
+                    } else if frame.code == RESET_DISTRIBUTED_CODE {
+                        distributed_coordinator.reset();
+                        self.announce_no_distributed_parent(
+                            &mut server_writer,
+                            &profile.username,
+                        ).await?;
+                        self.distributed.rediscovering();
+                        self.diagnostics.record(
+                            "warn",
+                            "distributed_reset",
+                            "The server reset global search; finding a new relay.",
+                        );
                     } else if frame.code == CONNECT_TO_PEER_CODE {
                         if let Ok(request) = parse_connect_to_peer(&frame) {
                             spawn_indirect_peer(
@@ -1171,6 +1458,87 @@ impl ConnectionManager {
                                 "The downloader could not establish a peer connection.".to_owned(),
                             ) {
                                 let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
+                            }
+                        }
+                    }
+                }
+                Some(event) = distributed_event_receiver.recv() => {
+                    match event {
+                        DistributedPeerEvent::Frame { id, frame } => match frame.code {
+                            DISTRIBUTED_BRANCH_LEVEL_CODE => {
+                                if let Ok(level) = parse_distributed_branch_level(&frame) {
+                                    if let Some(own_level) =
+                                        distributed_coordinator.update_branch_level(id, level)
+                                    {
+                                        write_raw_frame(
+                                            &mut server_writer,
+                                            &branch_level_frame(own_level),
+                                        ).await.map_err(|error| ConnectionFailure::retryable(
+                                            format!("The global-search branch update failed: {error}"),
+                                            "distributed_parent_failed",
+                                        ))?;
+                                        self.distributed.connected(own_level);
+                                    }
+                                }
+                            }
+                            DISTRIBUTED_BRANCH_ROOT_CODE => {
+                                if let Ok(root) = parse_distributed_branch_root(&frame) {
+                                    if let Some(own_root) =
+                                        distributed_coordinator.update_branch_root(id, root)
+                                    {
+                                        write_raw_frame(
+                                            &mut server_writer,
+                                            &branch_root_frame(&own_root),
+                                        ).await.map_err(|error| ConnectionFailure::retryable(
+                                            format!("The global-search branch update failed: {error}"),
+                                            "distributed_parent_failed",
+                                        ))?;
+                                    }
+                                }
+                            }
+                            DISTRIBUTED_SEARCH_CODE => {
+                                if let Ok(request) = parse_distributed_search(&frame) {
+                                    if !distributed_coordinator.accepts_search_from(id) {
+                                        if let Some((branch_level, branch_root)) =
+                                            distributed_coordinator.adopt(id)
+                                        {
+                                            self.announce_distributed_parent(
+                                                &mut server_writer,
+                                                &branch_root,
+                                                branch_level,
+                                            ).await?;
+                                            self.distributed.connected(branch_level);
+                                            self.diagnostics.record(
+                                                "info",
+                                                "distributed_connected",
+                                                "Connected to the global-search network.",
+                                            );
+                                        }
+                                    }
+                                    if distributed_coordinator.accepts_search_from(id) {
+                                        self.answer_search_request(
+                                            &mut server_writer,
+                                            &profile.username,
+                                            request,
+                                            SearchResponseOrigin::Distributed,
+                                        ).await?;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        },
+                        DistributedPeerEvent::Closed { id } => {
+                            if distributed_coordinator.close(id) {
+                                self.announce_no_distributed_parent(
+                                    &mut server_writer,
+                                    &profile.username,
+                                ).await?;
+                                self.distributed.rediscovering();
+                                self.diagnostics.record(
+                                    "warn",
+                                    "distributed_parent_lost",
+                                    "The global-search relay disconnected; finding another.",
+                                );
                             }
                         }
                     }
@@ -1428,6 +1796,8 @@ impl ConnectionManager {
         self.transfers.connection_lost();
         self.folders.connection_lost();
         self.shares.connection_lost();
+        self.local_shares.connection_lost();
+        self.distributed.offline();
         if let Some(active) = self
             .task
             .lock()
@@ -1468,6 +1838,51 @@ where
         let terminal = frame.is_err();
         if sender.send(frame).await.is_err() || terminal {
             return;
+        }
+    }
+}
+
+fn spawn_distributed_parent_candidate(
+    id: u64,
+    parent: ParentCandidate,
+    own_username: String,
+    event_sender: mpsc::Sender<DistributedPeerEvent>,
+) -> AbortOnDrop {
+    AbortOnDrop(tauri::async_runtime::spawn(async move {
+        let _ = run_distributed_parent_candidate(id, &parent, &own_username, event_sender.clone())
+            .await;
+        let _ = event_sender.send(DistributedPeerEvent::Closed { id }).await;
+    }))
+}
+
+async fn run_distributed_parent_candidate(
+    id: u64,
+    parent: &ParentCandidate,
+    own_username: &str,
+    event_sender: mpsc::Sender<DistributedPeerEvent>,
+) -> Result<(), ProtocolError> {
+    let mut stream = timeout(
+        PEER_CONNECT_TIMEOUT,
+        TcpStream::connect((parent.address, parent.port)),
+    )
+    .await
+    .map_err(|_| peer_timeout_error())??;
+    let _ = stream.set_nodelay(true);
+    write_raw_frame(&mut stream, &peer_init_frame(own_username, "D")).await?;
+
+    loop {
+        let frame = timeout(
+            DISTRIBUTED_PARENT_IDLE_TIMEOUT,
+            read_distributed_frame(&mut stream),
+        )
+        .await
+        .map_err(|_| peer_timeout_error())??;
+        if event_sender
+            .send(DistributedPeerEvent::Frame { id, frame })
+            .await
+            .is_err()
+        {
+            return Ok(());
         }
     }
 }
@@ -1676,12 +2091,14 @@ fn spawn_outbound_search_response_peer(
     };
     tauri::async_runtime::spawn(async move {
         let _permit = permit;
+        let connection_token = ticket.connection_token;
         let Ok(Ok(mut stream)) = timeout(
             PEER_CONNECT_TIMEOUT,
             TcpStream::connect((address.address, address.port as u16)),
         )
         .await
         else {
+            services.local_shares.fail_search(connection_token);
             return;
         };
         let _ = stream.set_nodelay(true);
@@ -1689,6 +2106,7 @@ fn spawn_outbound_search_response_peer(
             .await
             .is_err()
         {
+            services.local_shares.fail_search(connection_token);
             return;
         }
         let Some(claimed) = services.local_shares.claim_search(ticket.connection_token) else {
@@ -1806,7 +2224,11 @@ async fn send_search_response_on_peer(
         0,
         services.uploads.queued_count(),
     )?;
-    write_raw_frame(stream, &frame).await
+    write_raw_frame(stream, &frame).await?;
+    if ticket.origin == SearchResponseOrigin::Distributed {
+        services.distributed.record_answered();
+    }
+    Ok(())
 }
 
 async fn negotiate_upload_on_peer(
@@ -1864,6 +2286,7 @@ fn spawn_outbound_download_peer(
             transfers,
             local_shares,
             uploads,
+            distributed,
             own_username: service_username,
             command_sender,
         } = services;
@@ -1896,6 +2319,7 @@ fn spawn_outbound_download_peer(
                 transfers: transfers.clone(),
                 local_shares,
                 uploads,
+                distributed,
                 own_username: service_username,
                 command_sender: command_sender.clone(),
             },
@@ -1933,6 +2357,7 @@ fn spawn_outbound_folder_peer(
             transfers,
             local_shares,
             uploads,
+            distributed,
             own_username: service_username,
             command_sender,
         } = services;
@@ -1965,6 +2390,7 @@ fn spawn_outbound_folder_peer(
                 transfers,
                 local_shares,
                 uploads,
+                distributed,
                 own_username: service_username,
                 command_sender,
             },
@@ -2665,5 +3091,81 @@ mod tests {
         assert_eq!(received[1].code, super::super::protocol::SET_STATUS_CODE);
         fragmented_writer.await.unwrap();
         pump.abort();
+    }
+
+    #[tokio::test]
+    async fn distributed_coordinator_adopts_only_a_candidate_with_branch_state() {
+        let mut coordinator = DistributedCoordinator::new();
+        coordinator.candidates.insert(
+            7,
+            DistributedCandidateTask {
+                branch_level: None,
+                branch_root: None,
+                _task: AbortOnDrop(tauri::async_runtime::spawn(std::future::pending())),
+            },
+        );
+        coordinator.candidates.insert(
+            8,
+            DistributedCandidateTask {
+                branch_level: Some(3),
+                branch_root: Some("branch-root".to_owned()),
+                _task: AbortOnDrop(tauri::async_runtime::spawn(std::future::pending())),
+            },
+        );
+
+        assert_eq!(coordinator.adopt(7), None);
+        assert_eq!(coordinator.adopt(8), Some((4, "branch-root".to_owned())));
+        assert!(coordinator.accepts_search_from(8));
+        assert_eq!(coordinator.candidates.len(), 1);
+        assert!(coordinator.close(8));
+    }
+
+    #[tokio::test]
+    async fn distributed_parent_connection_sends_d_init_and_streams_frames() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (event_sender, mut event_receiver) = mpsc::channel(4);
+        let parent = ParentCandidate {
+            username: "relay-user".to_owned(),
+            address: "127.0.0.1".parse().unwrap(),
+            port: address.port(),
+        };
+        let candidate_task =
+            spawn_distributed_parent_candidate(17, parent, "forever-user".to_owned(), event_sender);
+
+        let peer = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            assert_eq!(
+                read_peer_init(&mut stream).await.unwrap(),
+                PeerInit::Peer {
+                    username: "forever-user".to_owned(),
+                    connection_type: "D".to_owned(),
+                    token: 0,
+                }
+            );
+            let mut payload = Vec::new();
+            payload.extend(11_u32.to_le_bytes());
+            payload.extend(b"branch-root");
+            let mut frame = Vec::new();
+            frame.extend(u32::try_from(payload.len() + 1).unwrap().to_le_bytes());
+            frame.push(DISTRIBUTED_BRANCH_ROOT_CODE);
+            frame.extend(payload);
+            stream.write_all(&frame).await.unwrap();
+        });
+
+        let event = timeout(Duration::from_secs(2), event_receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let DistributedPeerEvent::Frame { id, frame } = event else {
+            panic!("expected a distributed frame");
+        };
+        assert_eq!(id, 17);
+        assert_eq!(
+            parse_distributed_branch_root(&frame).unwrap(),
+            "branch-root"
+        );
+        peer.await.unwrap();
+        drop(candidate_task);
     }
 }
