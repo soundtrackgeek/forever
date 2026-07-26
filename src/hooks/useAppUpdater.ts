@@ -30,21 +30,21 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.9",
-  version: "0.0.10",
-  body: `## What’s new in Forever 0.0.10
+  currentVersion: "0.0.10",
+  version: "0.0.11",
+  body: `## What’s new in Forever 0.0.11
 
 ### Added
 
-- Folder-name results in user share searches,
-  with matching folders that open directly.
-- Expandable and collapsible shared-folder trees.
+- Safe local music sharing with folder controls and bounded indexing.
+- Real Soulseek browse, search, queue, and resumable upload responses.
+- A live Uploads view with progress, speed, queue state, and cancellation.
 
-### Fixed
+### Changed
 
-- Search-result actions keep their intended circular shape.
-- Update prompts show the release’s real changelog highlights.`,
-  date: "2026-07-25",
+- Upload slots are configurable from one to three, with one as the safe default.
+- Local filesystem paths remain private behind virtual share aliases.`,
+  date: "2026-07-26",
 };
 
 const wait = (duration: number) =>

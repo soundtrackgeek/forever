@@ -1,5 +1,9 @@
-use flate2::read::ZlibDecoder;
-use std::{io::Read, net::Ipv4Addr, string::FromUtf8Error};
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use std::{
+    io::{Read, Write},
+    net::Ipv4Addr,
+    string::FromUtf8Error,
+};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use zeroize::Zeroizing;
@@ -243,6 +247,84 @@ pub fn transfer_response_frame(token: u32, allowed: bool, reason: Option<&str>) 
     encode_message(TRANSFER_RESPONSE_CODE, &payload)
 }
 
+pub fn transfer_request_frame(token: u32, filename: &str, size_bytes: u64) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(filename.len() + 20);
+    push_u32(&mut payload, 1);
+    push_u32(&mut payload, token);
+    push_string(&mut payload, filename);
+    push_u64(&mut payload, size_bytes);
+    encode_message(TRANSFER_REQUEST_CODE, &payload)
+}
+
+pub fn place_in_queue_response_frame(filename: &str, position: u32) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(filename.len() + 8);
+    push_string(&mut payload, filename);
+    push_u32(&mut payload, position);
+    encode_message(PLACE_IN_QUEUE_RESPONSE_CODE, &payload)
+}
+
+pub fn upload_denied_frame(filename: &str, reason: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(filename.len() + reason.len() + 8);
+    push_string(&mut payload, filename);
+    push_string(&mut payload, reason);
+    encode_message(UPLOAD_DENIED_CODE, &payload)
+}
+
+pub fn file_search_response_frame(
+    username: &str,
+    token: u32,
+    files: &[SearchFile],
+    slot_free: bool,
+    average_speed: u32,
+    queue_length: u32,
+) -> Result<Vec<u8>, ProtocolError> {
+    let mut payload = Vec::new();
+    push_string(&mut payload, username);
+    push_u32(&mut payload, token);
+    push_search_files(&mut payload, files.iter().filter(|file| !file.is_private))?;
+    payload.push(u8::from(slot_free));
+    push_u32(&mut payload, average_speed);
+    push_u32(&mut payload, queue_length);
+    push_u32(&mut payload, 0);
+    push_search_files(&mut payload, files.iter().filter(|file| file.is_private))?;
+    encode_compressed_message(FILE_SEARCH_RESPONSE_CODE, &payload)
+}
+
+pub fn folder_contents_response_frame(
+    token: u32,
+    requested_folder: &str,
+    folders: &[FolderListing],
+) -> Result<Vec<u8>, ProtocolError> {
+    let mut payload = Vec::new();
+    push_u32(&mut payload, token);
+    push_string(&mut payload, requested_folder);
+    push_u32(&mut payload, checked_count(folders.len())?);
+    for folder in folders {
+        push_string(&mut payload, &folder.directory);
+        push_u32(&mut payload, checked_count(folder.files.len())?);
+        for file in &folder.files {
+            push_folder_file(&mut payload, file)?;
+        }
+    }
+    encode_compressed_message(FOLDER_CONTENTS_RESPONSE_CODE, &payload)
+}
+
+pub fn shared_file_list_response_frame(
+    directories: &[ShareListing],
+) -> Result<Vec<u8>, ProtocolError> {
+    let mut payload = Vec::new();
+    push_share_directories(
+        &mut payload,
+        directories.iter().filter(|directory| !directory.is_private),
+    )?;
+    push_u32(&mut payload, 0);
+    push_share_directories(
+        &mut payload,
+        directories.iter().filter(|directory| directory.is_private),
+    )?;
+    encode_compressed_message(SHARED_FILE_LIST_RESPONSE_CODE, &payload)
+}
+
 pub fn cant_connect_to_peer_frame(token: u32, username: &str) -> Vec<u8> {
     let mut payload = Vec::with_capacity(username.len() + 8);
     push_u32(&mut payload, token);
@@ -262,11 +344,60 @@ pub fn set_online_frame() -> Vec<u8> {
     encode_message(SET_STATUS_CODE, &2_i32.to_le_bytes())
 }
 
-pub fn shared_counts_frame() -> Vec<u8> {
+pub fn shared_counts_frame(directories: u32, files: u32) -> Vec<u8> {
     let mut payload = Vec::with_capacity(8);
-    push_u32(&mut payload, 0);
-    push_u32(&mut payload, 0);
+    push_u32(&mut payload, directories);
+    push_u32(&mut payload, files);
     encode_message(SHARED_COUNTS_CODE, &payload)
+}
+
+pub fn parse_server_search_request(frame: &Frame) -> Result<(String, u32, String), ProtocolError> {
+    if frame.code != FILE_SEARCH_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: FILE_SEARCH_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    Ok((
+        reader.read_string_lossy()?,
+        reader.read_u32()?,
+        reader.read_string_lossy()?,
+    ))
+}
+
+pub fn parse_folder_contents_request(frame: &Frame) -> Result<(u32, String), ProtocolError> {
+    if frame.code != FOLDER_CONTENTS_REQUEST_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: FOLDER_CONTENTS_REQUEST_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    Ok((
+        reader.read_u32()?,
+        reader.read_string_lossy()?.replace('/', "\\"),
+    ))
+}
+
+pub fn parse_transfer_response(
+    frame: &Frame,
+) -> Result<(u32, bool, Option<String>), ProtocolError> {
+    if frame.code != TRANSFER_RESPONSE_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: TRANSFER_RESPONSE_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let token = reader.read_u32()?;
+    let allowed = reader.read_bool()?;
+    let reason = if allowed {
+        None
+    } else {
+        Some(reader.read_string_lossy()?)
+    };
+    Ok((token, allowed, reason))
 }
 
 pub fn server_ping_frame() -> Vec<u8> {
@@ -850,7 +981,87 @@ fn encode_message(code: u32, payload: &[u8]) -> Vec<u8> {
     frame
 }
 
+fn encode_compressed_message(code: u32, payload: &[u8]) -> Result<Vec<u8>, ProtocolError> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(payload)?;
+    Ok(encode_message(code, &encoder.finish()?))
+}
+
+fn checked_count(count: usize) -> Result<u32, ProtocolError> {
+    u32::try_from(count).map_err(|_| ProtocolError::InvalidCount {
+        kind: "encoded values",
+        count,
+    })
+}
+
+fn push_search_files<'a>(
+    payload: &mut Vec<u8>,
+    files: impl Iterator<Item = &'a SearchFile>,
+) -> Result<(), ProtocolError> {
+    let files: Vec<_> = files.collect();
+    push_u32(payload, checked_count(files.len())?);
+    for file in files {
+        push_folder_file(
+            payload,
+            &FolderFile {
+                filename: file.filename.clone(),
+                size_bytes: file.size_bytes,
+                extension: file.extension.clone(),
+                bitrate: file.bitrate,
+                duration_seconds: file.duration_seconds,
+                vbr: file.vbr,
+                sample_rate: file.sample_rate,
+                bit_depth: file.bit_depth,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn push_share_directories<'a>(
+    payload: &mut Vec<u8>,
+    directories: impl Iterator<Item = &'a ShareListing>,
+) -> Result<(), ProtocolError> {
+    let directories: Vec<_> = directories.collect();
+    push_u32(payload, checked_count(directories.len())?);
+    for directory in directories {
+        push_string(payload, &directory.directory);
+        push_u32(payload, checked_count(directory.files.len())?);
+        for file in &directory.files {
+            push_folder_file(payload, file)?;
+        }
+    }
+    Ok(())
+}
+
+fn push_folder_file(payload: &mut Vec<u8>, file: &FolderFile) -> Result<(), ProtocolError> {
+    payload.push(1);
+    push_string(payload, &file.filename);
+    push_u64(payload, file.size_bytes);
+    push_string(payload, &file.extension);
+    let attributes = [
+        file.bitrate.map(|value| (0, value)),
+        file.duration_seconds.map(|value| (1, value)),
+        file.vbr.map(|value| (2, u32::from(value))),
+        file.sample_rate.map(|value| (4, value)),
+        file.bit_depth.map(|value| (5, value)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    push_u32(payload, checked_count(attributes.len())?);
+    for (code, value) in attributes {
+        push_u32(payload, code);
+        push_u32(payload, value);
+    }
+    Ok(())
+}
+
 fn push_u32(buffer: &mut Vec<u8>, value: u32) {
+    buffer.extend_from_slice(&value.to_le_bytes());
+}
+
+fn push_u64(buffer: &mut Vec<u8>, value: u64) {
     buffer.extend_from_slice(&value.to_le_bytes());
 }
 
@@ -976,6 +1187,13 @@ mod tests {
         let mut result = Vec::new();
         push_string(&mut result, value);
         result
+    }
+
+    fn decoded_frame(bytes: &[u8]) -> Frame {
+        Frame {
+            code: u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+            payload: bytes[8..].to_vec(),
+        }
     }
 
     #[test]
@@ -1203,6 +1421,56 @@ mod tests {
         assert_eq!(response.files[0].bitrate, Some(2_304));
         assert_eq!(response.files[0].duration_seconds, Some(321));
         assert_eq!(response.files[0].sample_rate, Some(96_000));
+    }
+
+    #[test]
+    fn outgoing_search_and_share_responses_round_trip() {
+        let search_file = SearchFile {
+            filename: "Midnight Archive\\Burial\\04 Endorphin.flac".to_owned(),
+            size_bytes: 31_800_000,
+            extension: "flac".to_owned(),
+            bitrate: Some(1_020),
+            duration_seconds: Some(179),
+            vbr: Some(false),
+            sample_rate: Some(44_100),
+            bit_depth: Some(16),
+            is_private: false,
+        };
+        let response = file_search_response_frame(
+            "forever_user",
+            91,
+            std::slice::from_ref(&search_file),
+            true,
+            2_800_000,
+            2,
+        )
+        .unwrap();
+        let decoded = parse_search_response(&decoded_frame(&response)).unwrap();
+        assert_eq!(decoded.username, "forever_user");
+        assert_eq!(decoded.token, 91);
+        assert_eq!(decoded.files, vec![search_file]);
+
+        let listing = ShareListing {
+            directory: "Midnight Archive\\Burial".to_owned(),
+            files: vec![FolderFile {
+                filename: "04 Endorphin.flac".to_owned(),
+                size_bytes: 31_800_000,
+                extension: "flac".to_owned(),
+                bitrate: None,
+                duration_seconds: None,
+                vbr: None,
+                sample_rate: None,
+                bit_depth: None,
+            }],
+            is_private: false,
+        };
+        let response = shared_file_list_response_frame(std::slice::from_ref(&listing)).unwrap();
+        assert_eq!(
+            parse_shared_file_list_response(&decoded_frame(&response))
+                .unwrap()
+                .directories,
+            vec![listing]
+        );
     }
 
     #[test]

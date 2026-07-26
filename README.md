@@ -3,9 +3,9 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.10` makes the User Shares Explorer easier
-> to navigate with folder-name search and expandable folder branches, while
-> in-app update prompts now show each release's actual changelog highlights.
+> **Status:** pre-alpha. Version `0.0.11` adds safe local music sharing and real
+> outgoing Soulseek uploads, including browse/search responses, a bounded
+> background index, configurable slots, and a live Uploads workspace.
 
 ![Forever Midnight Radio user shares interface](design/implementation/release-user-shares-0.0.9.png)
 
@@ -45,6 +45,14 @@ Rust, Tauri 2, React, and TypeScript.
   Completed, and Failed filters, transfer search, aggregate and per-file
   progress, release-level controls, Clear completed, and native completion
   notifications
+- Persistent local shared-folder configuration with native selection,
+  enable/disable, removal, rescanning, virtual aliases, and indexed totals
+- Bounded background indexing for supported audio formats, excluding hidden
+  entries, symbolic links, partial/temporary files, and unsafe root overlaps
+- Live Soulseek browse, folder, and distributed-search responses for local
+  shares without exposing absolute filesystem paths
+- Real resumable uploads with queue positions, one to three configurable slots,
+  progress, speed, ETA, cancellation, failure states, and an Uploads workspace
 - Safe `.part` files, resumable offsets, exact-size checks, sanitized local
   names, collision-free destinations, and no overwrite of existing files
 - Passwords stored in Windows Credential Manager, or held only in memory when
@@ -86,7 +94,7 @@ preview the update toast and modal without publishing a release.
 Use `http://localhost:1420/?onboarding=1` to preview the fresh-install
 connection flow. The browser preview simulates connection state; run
 `npm run tauri dev` to exercise the native credential vault and live Soulseek
-login, network search, folder browsing, and downloads. Search for an artist,
+login, network search, folder browsing, downloads, and uploads. Search for an artist,
 album, track, or filename while connected; results stream into the table as
 peers respond. Each search listens for responses for 15 seconds and can be
 stopped early. Select a live file and choose **Browse folder** to request its
@@ -100,9 +108,18 @@ folder rail. Share-list search returns matching folders and files locally after
 the list is received; choose a folder result to open it directly. **Refresh**
 explicitly asks the peer again.
 
-Version `0.0.10` intentionally keeps one active file at a time, even when an
-entire release is queued. Multiple simultaneous downloads, uploads, library
-management, metadata/cover lookup, and playback remain outside this release.
+Add music under **Settings → Your shared music**. Forever gives each selected
+root a virtual alias, indexes supported audio in the background, and announces
+the resulting public counts to Soulseek. Disable a root without forgetting it,
+rescan after changing files, and choose one to three outgoing upload slots.
+Incoming browse, folder, search, queue, and download requests are then served
+from the safe in-memory index. Follow outgoing activity under **Transfers →
+Uploads**.
+
+Version `0.0.11` intentionally keeps one active download at a time, even when an
+entire release is queued. Uploads default to one slot and can be raised to
+three. Library management, metadata/cover lookup, playback, rooms, and chat
+remain outside this release.
 
 Soulseek does not have a separate sign-up step. Connecting with a valid unused
 username creates that account using the password you enter; only an existing
@@ -119,7 +136,10 @@ Automatic update checks**.
 Forever writes non-secret account preferences to the Tauri application
 configuration directory and connection events to
 `logs/connection.log`. Release grouping, file order, and transfer metadata are
-stored in `transfers.json` in the same configuration directory; peer IP
+stored in `transfers.json` in the same configuration directory. Shared-root
+configuration and upload-slot count are stored separately in `sharing.json`;
+the file contains local folder paths because Forever must reopen those roots,
+but it never leaves the device. Peer IP
 addresses, temporary folder listings, cached user share lists, and credentials
 are excluded. Share lists stay in memory only for the current app session.
 Passwords are excluded from both. With “Remember
@@ -144,7 +164,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.10 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.11 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

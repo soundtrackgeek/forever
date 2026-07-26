@@ -8,17 +8,20 @@ import {
   Pause,
   Play,
   SlidersHorizontal,
+  UploadSimple,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
-import type { Transfer } from "../types";
+import type { Transfer, Upload } from "../types";
 import { groupTransfers, type TransferGroup } from "../utils/transfers";
 
 type Filter = "all" | "active" | "queued" | "completed" | "failed";
 
 type TransfersWorkspaceProps = {
   transfers: Transfer[];
+  uploads: Upload[];
+  uploadError: string | null;
   error: string | null;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
@@ -31,6 +34,9 @@ type TransfersWorkspaceProps = {
   onClearCompleted: () => void;
   onDismissError: () => void;
   onBrowseUser: (username: string) => void;
+  onCancelUpload: (id: string) => void;
+  onClearFinishedUploads: () => void;
+  onDismissUploadError: () => void;
 };
 
 const formatBytes = (bytes: number) => {
@@ -73,6 +79,8 @@ const isVisibleInFilter = (group: TransferGroup, filter: Filter) => {
 
 export function TransfersWorkspace({
   transfers,
+  uploads,
+  uploadError,
   error,
   onPause,
   onResume,
@@ -85,7 +93,11 @@ export function TransfersWorkspace({
   onClearCompleted,
   onDismissError,
   onBrowseUser,
+  onCancelUpload,
+  onClearFinishedUploads,
+  onDismissUploadError,
 }: TransfersWorkspaceProps) {
+  const [direction, setDirection] = useState<"downloads" | "uploads">("downloads");
   const groups = useMemo(() => groupTransfers(transfers), [transfers]);
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -129,7 +141,7 @@ export function TransfersWorkspace({
       <header className="transfers-heading">
         <div>
           <h1>Transfers</h1>
-          <p>Complete releases, one carefully resumed file at a time.</p>
+          <p>{direction === "downloads" ? "Complete releases, one carefully resumed file at a time." : "Every outgoing file, clearly queued and in sight."}</p>
         </div>
         <label className="transfer-search">
           <MagnifyingGlass size={16} weight="light" />
@@ -142,7 +154,16 @@ export function TransfersWorkspace({
         </label>
       </header>
 
-      <div className="transfer-filters">
+      <div className="transfer-direction-tabs" role="tablist" aria-label="Transfer direction">
+        <button type="button" role="tab" aria-selected={direction === "downloads"} className={direction === "downloads" ? "is-active" : ""} onClick={() => setDirection("downloads")}>
+          <DownloadSimple size={15} /> Downloads <span>{transfers.length}</span>
+        </button>
+        <button type="button" role="tab" aria-selected={direction === "uploads"} className={direction === "uploads" ? "is-active" : ""} onClick={() => setDirection("uploads")}>
+          <UploadSimple size={15} /> Uploads <span>{uploads.length}</span>
+        </button>
+      </div>
+
+      {direction === "downloads" ? <div className="transfer-filters">
         <div role="tablist" aria-label="Transfer filters">
           {(["all", "active", "queued", "completed", "failed"] as const).map((value) => (
             <button
@@ -168,9 +189,12 @@ export function TransfersWorkspace({
         <button type="button" className="transfer-view-options" aria-label="Transfer view options">
           <SlidersHorizontal size={16} />
         </button>
-      </div>
+      </div> : <div className="transfer-filters upload-toolbar">
+        <p>{uploads.filter((upload) => upload.status === "uploading").length} active · {uploads.filter((upload) => upload.status === "queued").length} queued</p>
+        <button type="button" className="clear-completed-button" disabled={!uploads.some((upload) => ["completed", "failed", "cancelled"].includes(upload.status))} onClick={onClearFinishedUploads}>Clear finished</button>
+      </div>}
 
-      {error && (
+      {error && direction === "downloads" && (
         <div className="workspace-transfer-error" role="alert">
           <WarningCircle size={15} weight="fill" />
           <span>{error}</span>
@@ -178,8 +202,46 @@ export function TransfersWorkspace({
         </div>
       )}
 
+      {uploadError && direction === "uploads" ? (
+        <div className="workspace-transfer-error" role="alert">
+          <WarningCircle size={15} weight="fill" />
+          <span>{uploadError}</span>
+          <button type="button" aria-label="Dismiss upload error" onClick={onDismissUploadError}><X size={13} /></button>
+        </div>
+      ) : null}
+
       <div className="release-transfer-list" aria-live="polite">
-        {visibleGroups.length === 0 ? (
+        {direction === "uploads" ? (
+          uploads.length === 0 ? (
+            <div className="transfers-empty-state">
+              <UploadSimple size={30} weight="thin" />
+              <h2>No outgoing signals yet</h2>
+              <p>Uploads appear here when another Soulseek user requests a shared file.</p>
+            </div>
+          ) : uploads.map((upload) => {
+            const progress = upload.sizeBytes ? Math.min(100, upload.transferredBytes / upload.sizeBytes * 100) : 0;
+            const finished = ["completed", "failed", "cancelled"].includes(upload.status);
+            return (
+              <article className={`upload-transfer-card is-${upload.status}`} key={upload.id}>
+                <span className="upload-signal-icon"><UploadSimple size={19} weight="light" /></span>
+                <span className="upload-transfer-name">
+                  <strong>{upload.filename}</strong>
+                  <small>to {upload.username} · {formatBytes(upload.sizeBytes)}</small>
+                  <em title={upload.remoteFilename}>{upload.remoteFilename}</em>
+                </span>
+                <span className="upload-transfer-progress">
+                  <span><strong>{upload.status === "uploading" ? "Uploading" : upload.status[0].toUpperCase() + upload.status.slice(1)}</strong><small>{Math.round(progress)}%</small></span>
+                  <i><b style={{ width: `${progress}%` }} /></i>
+                  <small>{formatBytes(upload.transferredBytes)} / {formatBytes(upload.sizeBytes)}{upload.speedBytesPerSecond ? ` · ${formatBytes(upload.speedBytesPerSecond)}/s` : ""}{upload.etaSeconds !== null && upload.status === "uploading" ? ` · ${formatEta(upload.etaSeconds)}` : ""}</small>
+                </span>
+                <button type="button" onClick={() => onCancelUpload(upload.id)} aria-label={`${finished ? "Remove" : "Cancel"} upload ${upload.filename}`}>
+                  <X size={15} /> <small>{finished ? "Remove" : "Cancel"}</small>
+                </button>
+                {upload.error ? <p>{upload.error}</p> : null}
+              </article>
+            );
+          })
+        ) : visibleGroups.length === 0 ? (
           <div className="transfers-empty-state">
             <DownloadSimple size={30} weight="thin" />
             <h2>{groups.length ? "Nothing in this signal" : "Your queue is quiet"}</h2>

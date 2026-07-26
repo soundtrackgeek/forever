@@ -6,20 +6,25 @@ use super::{
         TransferQueueSnapshot, TransferTicket,
     },
     folders::{FolderError, FolderHub, FolderInspection, FolderTicket},
+    local_shares::{LocalSharesError, LocalSharesHub, LocalSharesSnapshot, SearchResponseTicket},
     protocol::{
         cant_connect_to_peer_frame, connect_to_peer_frame, file_search_frame,
-        folder_contents_request_frame, get_peer_address_frame, login_frame,
-        parse_cant_connect_token, parse_connect_to_peer, parse_filename,
-        parse_folder_contents_response, parse_login_response, parse_peer_address,
-        parse_queue_position, parse_search_response, parse_shared_file_list_response,
-        parse_transfer_request, parse_upload_denied, peer_init_frame, pierce_firewall_frame,
-        place_in_queue_request_frame, queue_upload_frame, read_frame, read_peer_frame,
-        read_peer_init, server_ping_frame, set_online_frame, set_wait_port_frame,
-        shared_counts_frame, shared_file_list_request_frame, transfer_response_frame,
-        write_raw_frame, ConnectToPeer, Frame, LoginResponse, PeerAddress, PeerInit, ProtocolError,
-        CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE, FILE_SEARCH_RESPONSE_CODE,
-        FOLDER_CONTENTS_RESPONSE_CODE, GET_PEER_ADDRESS_CODE, PLACE_IN_QUEUE_RESPONSE_CODE,
-        RELOGGED_CODE, SHARED_FILE_LIST_RESPONSE_CODE, TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE,
+        file_search_response_frame, folder_contents_request_frame, folder_contents_response_frame,
+        get_peer_address_frame, login_frame, parse_cant_connect_token, parse_connect_to_peer,
+        parse_filename, parse_folder_contents_request, parse_folder_contents_response,
+        parse_login_response, parse_peer_address, parse_queue_position, parse_search_response,
+        parse_server_search_request, parse_shared_file_list_response, parse_transfer_request,
+        parse_transfer_response, parse_upload_denied, peer_init_frame, pierce_firewall_frame,
+        place_in_queue_request_frame, place_in_queue_response_frame, queue_upload_frame,
+        read_frame, read_peer_frame, read_peer_init, server_ping_frame, set_online_frame,
+        set_wait_port_frame, shared_counts_frame, shared_file_list_request_frame,
+        shared_file_list_response_frame, transfer_request_frame, transfer_response_frame,
+        upload_denied_frame, write_raw_frame, ConnectToPeer, Frame, LoginResponse, PeerAddress,
+        PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE, FILE_SEARCH_CODE,
+        FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE,
+        GET_PEER_ADDRESS_CODE, PLACE_IN_QUEUE_REQUEST_CODE, PLACE_IN_QUEUE_RESPONSE_CODE,
+        QUEUE_UPLOAD_CODE, RELOGGED_CODE, SHARED_FILE_LIST_REQUEST_CODE,
+        SHARED_FILE_LIST_RESPONSE_CODE, TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE,
         UPLOAD_FAILED_CODE,
     },
     search::{SearchHub, SearchSnapshot, SearchState},
@@ -28,9 +33,11 @@ use super::{
         ShareFolderSnapshot, ShareSearchSnapshot, SharesError, SharesHub, SharesTicket,
         UserSharesOverview,
     },
+    uploads::{UploadError, UploadHub, UploadQueueSnapshot, UploadTicket},
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    io::SeekFrom,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
@@ -41,8 +48,8 @@ use std::{
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::{
-    fs::OpenOptions,
-    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
+    fs::{File, OpenOptions},
+    io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{mpsc, Semaphore},
     time::timeout,
@@ -154,6 +161,9 @@ enum ConnectionCommand {
     BrowseShares { ticket: SharesTicket },
     PeerConnectionFailed { token: u32, username: String },
     ScheduleDownloads,
+    ScheduleUploads,
+    OpenUploadFile { id: String },
+    RefreshSharedCounts,
 }
 
 #[derive(Clone)]
@@ -162,6 +172,9 @@ struct PeerServices {
     folders: FolderHub,
     shares: SharesHub,
     transfers: TransferHub,
+    local_shares: LocalSharesHub,
+    uploads: UploadHub,
+    own_username: String,
     command_sender: mpsc::UnboundedSender<ConnectionCommand>,
 }
 
@@ -191,6 +204,8 @@ pub struct ConnectionManager {
     folders: FolderHub,
     shares: SharesHub,
     transfers: TransferHub,
+    local_shares: LocalSharesHub,
+    uploads: UploadHub,
 }
 
 impl ConnectionManager {
@@ -198,6 +213,7 @@ impl ConnectionManager {
         app: AppHandle,
         settings_path: PathBuf,
         transfers_path: PathBuf,
+        sharing_path: PathBuf,
         diagnostics_path: PathBuf,
         download_directory: PathBuf,
     ) -> Result<Self, ConnectionServiceError> {
@@ -210,6 +226,8 @@ impl ConnectionManager {
             .unwrap_or_else(ConnectionSnapshot::unconfigured);
         let search = SearchHub::new(app.clone());
         let transfers = TransferHub::new(app.clone(), transfers_path)?;
+        let local_shares = LocalSharesHub::new(app.clone(), sharing_path)?;
+        let uploads = UploadHub::new(app.clone());
 
         Ok(Self {
             app,
@@ -232,6 +250,8 @@ impl ConnectionManager {
             folders: FolderHub::default(),
             shares: SharesHub::default(),
             transfers,
+            local_shares,
+            uploads,
         })
     }
 
@@ -357,6 +377,67 @@ impl ConnectionManager {
 
     pub fn current_transfers(&self) -> TransferQueueSnapshot {
         self.transfers.snapshot()
+    }
+
+    pub fn current_local_shares(&self) -> LocalSharesSnapshot {
+        self.local_shares.snapshot()
+    }
+
+    pub fn add_local_share(
+        &self,
+        path: &str,
+    ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
+        let snapshot = self.local_shares.add_root(path)?;
+        self.refresh_shared_counts();
+        Ok(snapshot)
+    }
+
+    pub fn remove_local_share(
+        &self,
+        id: &str,
+    ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
+        let snapshot = self.local_shares.remove_root(id)?;
+        self.refresh_shared_counts();
+        Ok(snapshot)
+    }
+
+    pub fn set_local_share_enabled(
+        &self,
+        id: &str,
+        enabled: bool,
+    ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
+        let snapshot = self.local_shares.set_enabled(id, enabled)?;
+        self.refresh_shared_counts();
+        Ok(snapshot)
+    }
+
+    pub fn rescan_local_shares(&self) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
+        let snapshot = self.local_shares.scan()?;
+        self.refresh_shared_counts();
+        Ok(snapshot)
+    }
+
+    pub fn set_upload_slots(
+        &self,
+        upload_slots: u8,
+    ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
+        let snapshot = self.local_shares.set_upload_slots(upload_slots)?;
+        self.schedule_uploads();
+        Ok(snapshot)
+    }
+
+    pub fn current_uploads(&self) -> UploadQueueSnapshot {
+        self.uploads.snapshot()
+    }
+
+    pub fn cancel_upload(&self, id: &str) -> Result<UploadQueueSnapshot, ConnectionServiceError> {
+        let snapshot = self.uploads.cancel(id)?;
+        self.schedule_uploads();
+        Ok(snapshot)
+    }
+
+    pub fn clear_finished_uploads(&self) -> UploadQueueSnapshot {
+        self.uploads.clear_finished()
     }
 
     pub fn enqueue_transfer(
@@ -596,6 +677,48 @@ impl ConnectionManager {
         }
     }
 
+    fn schedule_uploads(&self) {
+        if self.current_snapshot().state != ConnectionState::Online {
+            return;
+        }
+        if let Some(sender) = self
+            .command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+        {
+            let _ = sender.send(ConnectionCommand::ScheduleUploads);
+        }
+    }
+
+    fn refresh_shared_counts(&self) {
+        if let Some(sender) = self
+            .command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+        {
+            let _ = sender.send(ConnectionCommand::RefreshSharedCounts);
+        }
+    }
+
+    fn peer_services(
+        &self,
+        own_username: &str,
+        command_sender: &mpsc::UnboundedSender<ConnectionCommand>,
+    ) -> PeerServices {
+        PeerServices {
+            search: self.search.clone(),
+            folders: self.folders.clone(),
+            shares: self.shares.clone(),
+            transfers: self.transfers.clone(),
+            local_shares: self.local_shares.clone(),
+            uploads: self.uploads.clone(),
+            own_username: own_username.to_owned(),
+            command_sender: command_sender.clone(),
+        }
+    }
+
     fn take_connection_token(&self) -> u32 {
         loop {
             let token = self.next_connection_token.fetch_add(1, Ordering::SeqCst);
@@ -712,6 +835,7 @@ impl ConnectionManager {
                 .await;
             self.clear_command_sender();
             self.transfers.connection_lost();
+            self.uploads.connection_lost();
             self.folders.connection_lost();
             self.shares.connection_lost();
             self.search
@@ -852,14 +976,18 @@ impl ConnectionManager {
                     "session_setup_failed",
                 )
             })?;
-        write_raw_frame(&mut stream, &shared_counts_frame())
-            .await
-            .map_err(|error| {
-                ConnectionFailure::retryable(
-                    format!("The Soulseek session could not be initialized: {error}"),
-                    "session_setup_failed",
-                )
-            })?;
+        let (shared_directories, shared_files) = self.local_shares.counts();
+        write_raw_frame(
+            &mut stream,
+            &shared_counts_frame(shared_directories, shared_files),
+        )
+        .await
+        .map_err(|error| {
+            ConnectionFailure::retryable(
+                format!("The Soulseek session could not be initialized: {error}"),
+                "session_setup_failed",
+            )
+        })?;
 
         // `read_frame` uses `read_exact`, which is not cancellation-safe. Keep it
         // out of the busy select loop so timer/listener/command branches cannot
@@ -895,6 +1023,7 @@ impl ConnectionManager {
             updated_at_ms: connected_at_ms,
         });
         let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
+        let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
 
         let mut keepalive = tokio::time::interval(KEEPALIVE_INTERVAL);
         let mut search_tick = tokio::time::interval(Duration::from_millis(250));
@@ -933,34 +1062,70 @@ impl ConnectionManager {
                             "relogged",
                         ));
                     }
-                    if frame.code == CONNECT_TO_PEER_CODE {
+                    if frame.code == FILE_SEARCH_CODE {
+                        if let Ok((username, search_token, query)) = parse_server_search_request(&frame) {
+                            let connection_token = self.take_connection_token();
+                            if self.local_shares.queue_search_response(
+                                connection_token,
+                                &username,
+                                search_token,
+                                &query,
+                            ).is_some() {
+                                write_raw_frame(
+                                    &mut server_writer,
+                                    &connect_to_peer_frame(connection_token, &username, "P"),
+                                ).await.map_err(|error| ConnectionFailure::retryable(
+                                    format!("The search-result peer request could not be sent: {error}"),
+                                    "search_response_failed",
+                                ))?;
+                                write_raw_frame(&mut server_writer, &get_peer_address_frame(&username))
+                                    .await
+                                    .map_err(|error| ConnectionFailure::retryable(
+                                        format!("The search-result address request could not be sent: {error}"),
+                                        "search_response_failed",
+                                    ))?;
+                            }
+                        }
+                    } else if frame.code == CONNECT_TO_PEER_CODE {
                         if let Ok(request) = parse_connect_to_peer(&frame) {
                             spawn_indirect_peer(
                                 request,
-                                PeerServices {
-                                    search: self.search.clone(),
-                                    folders: self.folders.clone(),
-                                    shares: self.shares.clone(),
-                                    transfers: self.transfers.clone(),
-                                    command_sender: command_sender.clone(),
-                                },
+                                self.peer_services(&profile.username, &command_sender),
                                 peer_limit.clone(),
                             );
                         }
                     } else if frame.code == GET_PEER_ADDRESS_CODE {
                         if let Ok(address) = parse_peer_address(&frame) {
-                            if let Some(ticket) = self.folders.requesting_for_username(&address.username) {
+                            if let Some(ticket) = self.uploads.requesting_file_for_username(&address.username) {
+                                spawn_outbound_upload_file_peer(
+                                    address,
+                                    ticket,
+                                    profile.username.clone(),
+                                    self.peer_services(&profile.username, &command_sender),
+                                    peer_limit.clone(),
+                                );
+                            } else if let Some(ticket) = self.uploads.requesting_control_for_username(&address.username) {
+                                spawn_outbound_upload_control_peer(
+                                    address,
+                                    ticket,
+                                    profile.username.clone(),
+                                    self.peer_services(&profile.username, &command_sender),
+                                    peer_limit.clone(),
+                                );
+                            } else if let Some(ticket) = self.local_shares.requesting_search_for_username(&address.username) {
+                                spawn_outbound_search_response_peer(
+                                    address,
+                                    ticket,
+                                    profile.username.clone(),
+                                    self.peer_services(&profile.username, &command_sender),
+                                    peer_limit.clone(),
+                                );
+                            } else if let Some(ticket) = self.folders.requesting_for_username(&address.username) {
                                 spawn_outbound_folder_peer(
                                     address,
                                     ticket,
                                     profile.username.clone(),
-                                    PeerServices {
-                                        search: self.search.clone(),
-                                        folders: self.folders.clone(),
-                                        shares: self.shares.clone(),
-                                        transfers: self.transfers.clone(),
-                                        command_sender: command_sender.clone(),
-                                    },
+                                    self.peer_services(&profile.username, &command_sender),
                                     peer_limit.clone(),
                                 );
                             } else if let Some(ticket) = self.shares.requesting_for_username(&address.username) {
@@ -968,13 +1133,7 @@ impl ConnectionManager {
                                     address,
                                     ticket,
                                     profile.username.clone(),
-                                    PeerServices {
-                                        search: self.search.clone(),
-                                        folders: self.folders.clone(),
-                                        shares: self.shares.clone(),
-                                        transfers: self.transfers.clone(),
-                                        command_sender: command_sender.clone(),
-                                    },
+                                    self.peer_services(&profile.username, &command_sender),
                                     peer_limit.clone(),
                                 );
                             } else if let Some(ticket) = self
@@ -985,13 +1144,7 @@ impl ConnectionManager {
                                     address,
                                     ticket,
                                     profile.username.clone(),
-                                    PeerServices {
-                                        search: self.search.clone(),
-                                        folders: self.folders.clone(),
-                                        shares: self.shares.clone(),
-                                        transfers: self.transfers.clone(),
-                                        command_sender: command_sender.clone(),
-                                    },
+                                    self.peer_services(&profile.username, &command_sender),
                                     peer_limit.clone(),
                                 );
                             }
@@ -1012,6 +1165,13 @@ impl ConnectionManager {
                                 token,
                                 "The source could not establish a peer connection.".to_owned(),
                             );
+                            self.local_shares.fail_search(token);
+                            if self.uploads.fail_connection(
+                                token,
+                                "The downloader could not establish a peer connection.".to_owned(),
+                            ) {
+                                let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
+                            }
                         }
                     }
                 }
@@ -1024,13 +1184,7 @@ impl ConnectionManager {
                     })?;
                     spawn_direct_peer(
                         peer_stream,
-                        PeerServices {
-                            search: self.search.clone(),
-                            folders: self.folders.clone(),
-                            shares: self.shares.clone(),
-                            transfers: self.transfers.clone(),
-                            command_sender: command_sender.clone(),
-                        },
+                        self.peer_services(&profile.username, &command_sender),
                         peer_limit.clone(),
                     );
                 }
@@ -1150,6 +1304,76 @@ impl ConnectionManager {
                                     command_sender.clone(),
                                 );
                             }
+                        }
+                        Some(ConnectionCommand::ScheduleUploads) => {
+                            loop {
+                                let token = self.take_connection_token();
+                                let Some(ticket) = self.uploads.activate_next(
+                                    token,
+                                    self.local_shares.upload_slots(),
+                                ) else {
+                                    break;
+                                };
+                                write_raw_frame(
+                                    &mut server_writer,
+                                    &connect_to_peer_frame(
+                                        ticket.connection_token,
+                                        &ticket.username,
+                                        "P",
+                                    ),
+                                ).await.map_err(|error| ConnectionFailure::retryable(
+                                    format!("The upload peer request could not be sent: {error}"),
+                                    "upload_request_failed",
+                                ))?;
+                                write_raw_frame(
+                                    &mut server_writer,
+                                    &get_peer_address_frame(&ticket.username),
+                                ).await.map_err(|error| ConnectionFailure::retryable(
+                                    format!("The downloader address request could not be sent: {error}"),
+                                    "upload_address_failed",
+                                ))?;
+                                spawn_upload_request_timeout(
+                                    ticket,
+                                    self.uploads.clone(),
+                                    command_sender.clone(),
+                                );
+                            }
+                        }
+                        Some(ConnectionCommand::OpenUploadFile { id }) => {
+                            let connection_token = self.take_connection_token();
+                            if let Some(ticket) = self.uploads.prepare_file_connection(
+                                &id,
+                                connection_token,
+                            ) {
+                                write_raw_frame(
+                                    &mut server_writer,
+                                    &connect_to_peer_frame(
+                                        ticket.connection_token,
+                                        &ticket.username,
+                                        "F",
+                                    ),
+                                ).await.map_err(|error| ConnectionFailure::retryable(
+                                    format!("The upload file connection could not be sent: {error}"),
+                                    "upload_file_request_failed",
+                                ))?;
+                                write_raw_frame(
+                                    &mut server_writer,
+                                    &get_peer_address_frame(&ticket.username),
+                                ).await.map_err(|error| ConnectionFailure::retryable(
+                                    format!("The downloader file address request could not be sent: {error}"),
+                                    "upload_file_address_failed",
+                                ))?;
+                            }
+                        }
+                        Some(ConnectionCommand::RefreshSharedCounts) => {
+                            let (directories, files) = self.local_shares.counts();
+                            write_raw_frame(
+                                &mut server_writer,
+                                &shared_counts_frame(directories, files),
+                            ).await.map_err(|error| ConnectionFailure::retryable(
+                                format!("Updated shared counts could not be sent: {error}"),
+                                "shared_counts_failed",
+                            ))?;
                         }
                         None => {
                             return Err(ConnectionFailure::retryable(
@@ -1274,6 +1498,15 @@ fn spawn_indirect_peer(request: ConnectToPeer, services: PeerServices, limit: Ar
             .await
             .is_err()
         {
+            services.local_shares.fail_search(request.token);
+            if services.uploads.fail_connection(
+                request.token,
+                "The downloader peer connection failed.".to_owned(),
+            ) {
+                let _ = services
+                    .command_sender
+                    .send(ConnectionCommand::ScheduleUploads);
+            }
             services.folders.fail_connection(
                 request.token,
                 "The source peer connection failed before the folder could be read.".to_owned(),
@@ -1302,7 +1535,15 @@ async fn handle_direct_peer(
         .map_err(|_| peer_timeout_error())??;
     match init {
         PeerInit::PierceFirewall { token } => {
-            if let Some(ticket) = services.transfers.claim_peer(token) {
+            if let Some(ticket) = services.uploads.claim_file(token) {
+                stream.write_u32_le(ticket.transfer_token).await?;
+                stream.flush().await?;
+                spawn_file_upload(stream, ticket, services.uploads, services.command_sender);
+            } else if let Some(ticket) = services.uploads.claim_control(token) {
+                negotiate_upload_on_peer(&mut stream, ticket, services).await?;
+            } else if let Some(ticket) = services.local_shares.claim_search(token) {
+                send_search_response_on_peer(&mut stream, ticket, &services).await?;
+            } else if let Some(ticket) = services.transfers.claim_peer(token) {
                 if let Err(error) =
                     queue_download_on_peer(&mut stream, ticket.clone(), services.clone()).await
                 {
@@ -1382,6 +1623,12 @@ async fn handle_indirect_peer(
     let _ = stream.set_nodelay(true);
     write_raw_frame(&mut stream, &pierce_firewall_frame(request.token)).await?;
     if request.connection_type == "F" {
+        if let Some(ticket) = services.uploads.claim_file(request.token) {
+            stream.write_u32_le(ticket.transfer_token).await?;
+            stream.flush().await?;
+            spawn_file_upload(stream, ticket, services.uploads, services.command_sender);
+            return Ok(());
+        }
         let transfer_token = timeout(PEER_MESSAGE_TIMEOUT, stream.read_u32_le())
             .await
             .map_err(|_| peer_timeout_error())??;
@@ -1392,6 +1639,12 @@ async fn handle_indirect_peer(
             services.command_sender,
         );
         return Ok(());
+    }
+    if let Some(ticket) = services.uploads.claim_control(request.token) {
+        return negotiate_upload_on_peer(&mut stream, ticket, services).await;
+    }
+    if let Some(ticket) = services.local_shares.claim_search(request.token) {
+        return send_search_response_on_peer(&mut stream, ticket, &services).await;
     }
     if let Some(ticket) = services.folders.claim_peer(request.token) {
         return browse_folder_on_peer(&mut stream, ticket, services).await;
@@ -1406,6 +1659,188 @@ async fn handle_indirect_peer(
         PeerMessagePurpose::General,
     )
     .await
+}
+
+fn spawn_outbound_search_response_peer(
+    address: PeerAddress,
+    ticket: SearchResponseTicket,
+    own_username: String,
+    services: PeerServices,
+    limit: Arc<Semaphore>,
+) {
+    if address.port == 0 || address.port > u16::MAX.into() {
+        return;
+    }
+    let Ok(permit) = limit.try_acquire_owned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let _permit = permit;
+        let Ok(Ok(mut stream)) = timeout(
+            PEER_CONNECT_TIMEOUT,
+            TcpStream::connect((address.address, address.port as u16)),
+        )
+        .await
+        else {
+            return;
+        };
+        let _ = stream.set_nodelay(true);
+        if write_raw_frame(&mut stream, &peer_init_frame(&own_username, "P"))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let Some(claimed) = services.local_shares.claim_search(ticket.connection_token) else {
+            return;
+        };
+        let _ = send_search_response_on_peer(&mut stream, claimed, &services).await;
+    });
+}
+
+fn spawn_outbound_upload_control_peer(
+    address: PeerAddress,
+    ticket: UploadTicket,
+    own_username: String,
+    services: PeerServices,
+    limit: Arc<Semaphore>,
+) {
+    if address.port == 0 || address.port > u16::MAX.into() {
+        return;
+    }
+    let Ok(permit) = limit.try_acquire_owned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let _permit = permit;
+        let result = async {
+            let mut stream = timeout(
+                PEER_CONNECT_TIMEOUT,
+                TcpStream::connect((address.address, address.port as u16)),
+            )
+            .await
+            .map_err(|_| peer_timeout_error())??;
+            let _ = stream.set_nodelay(true);
+            write_raw_frame(&mut stream, &peer_init_frame(&own_username, "P")).await?;
+            let claimed = services
+                .uploads
+                .claim_control(ticket.connection_token)
+                .ok_or_else(peer_timeout_error)?;
+            negotiate_upload_on_peer(&mut stream, claimed, services.clone()).await
+        }
+        .await;
+        if let Err(error) = result {
+            if services.uploads.fail_connection(
+                ticket.connection_token,
+                format!("The downloader did not accept the upload: {error}"),
+            ) {
+                let _ = services
+                    .command_sender
+                    .send(ConnectionCommand::ScheduleUploads);
+            }
+        }
+    });
+}
+
+fn spawn_outbound_upload_file_peer(
+    address: PeerAddress,
+    ticket: UploadTicket,
+    own_username: String,
+    services: PeerServices,
+    limit: Arc<Semaphore>,
+) {
+    if address.port == 0 || address.port > u16::MAX.into() {
+        return;
+    }
+    let Ok(permit) = limit.try_acquire_owned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let _permit = permit;
+        let Ok(Ok(mut stream)) = timeout(
+            PEER_CONNECT_TIMEOUT,
+            TcpStream::connect((address.address, address.port as u16)),
+        )
+        .await
+        else {
+            return;
+        };
+        let _ = stream.set_nodelay(true);
+        if write_raw_frame(&mut stream, &peer_init_frame(&own_username, "F"))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let Some(claimed) = services.uploads.claim_file(ticket.connection_token) else {
+            return;
+        };
+        if stream.write_u32_le(claimed.transfer_token).await.is_err()
+            || stream.flush().await.is_err()
+        {
+            services.uploads.fail_id(
+                &claimed.id,
+                "The upload file connection could not be started.".to_owned(),
+            );
+            let _ = services
+                .command_sender
+                .send(ConnectionCommand::ScheduleUploads);
+            return;
+        }
+        spawn_file_upload(stream, claimed, services.uploads, services.command_sender);
+    });
+}
+
+async fn send_search_response_on_peer(
+    stream: &mut TcpStream,
+    ticket: SearchResponseTicket,
+    services: &PeerServices,
+) -> Result<(), ProtocolError> {
+    let frame = file_search_response_frame(
+        &services.own_username,
+        ticket.search_token,
+        &ticket.files,
+        services
+            .uploads
+            .has_free_slot(services.local_shares.upload_slots()),
+        0,
+        services.uploads.queued_count(),
+    )?;
+    write_raw_frame(stream, &frame).await
+}
+
+async fn negotiate_upload_on_peer(
+    stream: &mut TcpStream,
+    ticket: UploadTicket,
+    services: PeerServices,
+) -> Result<(), ProtocolError> {
+    write_raw_frame(
+        stream,
+        &transfer_request_frame(
+            ticket.transfer_token,
+            &ticket.remote_filename,
+            ticket.size_bytes,
+        ),
+    )
+    .await?;
+    let frame = timeout(PEER_MESSAGE_TIMEOUT, read_peer_frame(stream))
+        .await
+        .map_err(|_| peer_timeout_error())??;
+    let (token, allowed, reason) = parse_transfer_response(&frame)?;
+    if token != ticket.transfer_token || !allowed {
+        services.uploads.fail_id(
+            &ticket.id,
+            reason.unwrap_or_else(|| "The downloader declined the upload.".to_owned()),
+        );
+        let _ = services
+            .command_sender
+            .send(ConnectionCommand::ScheduleUploads);
+        return Ok(());
+    }
+    let _ = services
+        .command_sender
+        .send(ConnectionCommand::OpenUploadFile { id: ticket.id });
+    Ok(())
 }
 
 fn spawn_outbound_download_peer(
@@ -1427,6 +1862,9 @@ fn spawn_outbound_download_peer(
             folders,
             shares,
             transfers,
+            local_shares,
+            uploads,
+            own_username: service_username,
             command_sender,
         } = services;
         let _permit = permit;
@@ -1456,6 +1894,9 @@ fn spawn_outbound_download_peer(
                 folders,
                 shares,
                 transfers: transfers.clone(),
+                local_shares,
+                uploads,
+                own_username: service_username,
                 command_sender: command_sender.clone(),
             },
         )
@@ -1490,6 +1931,9 @@ fn spawn_outbound_folder_peer(
             folders,
             shares,
             transfers,
+            local_shares,
+            uploads,
+            own_username: service_username,
             command_sender,
         } = services;
         let _permit = permit;
@@ -1519,6 +1963,9 @@ fn spawn_outbound_folder_peer(
                 folders: folders.clone(),
                 shares,
                 transfers,
+                local_shares,
+                uploads,
+                own_username: service_username,
                 command_sender,
             },
         )
@@ -1668,6 +2115,58 @@ async fn handle_peer_messages(
             Err(_) => return Ok(()),
         };
         match frame.code {
+            SHARED_FILE_LIST_REQUEST_CODE => {
+                let response =
+                    shared_file_list_response_frame(&services.local_shares.share_list())?;
+                write_raw_frame(stream, &response).await?;
+            }
+            FOLDER_CONTENTS_REQUEST_CODE => {
+                let (token, folder) = parse_folder_contents_request(&frame)?;
+                let response = folder_contents_response_frame(
+                    token,
+                    &folder,
+                    &services.local_shares.folder_list(&folder),
+                )?;
+                write_raw_frame(stream, &response).await?;
+            }
+            QUEUE_UPLOAD_CODE => {
+                let filename = parse_filename(&frame, QUEUE_UPLOAD_CODE)?;
+                if let Some(file) = services.local_shares.resolve_file(&filename) {
+                    match services.uploads.enqueue(username, file) {
+                        Ok(_) => {
+                            let _ = services
+                                .command_sender
+                                .send(ConnectionCommand::ScheduleUploads);
+                        }
+                        Err(error) => {
+                            write_raw_frame(
+                                stream,
+                                &upload_denied_frame(&filename, &error.to_string()),
+                            )
+                            .await?;
+                        }
+                    }
+                } else {
+                    write_raw_frame(
+                        stream,
+                        &upload_denied_frame(&filename, "File is not shared."),
+                    )
+                    .await?;
+                }
+            }
+            PLACE_IN_QUEUE_REQUEST_CODE => {
+                let filename = parse_filename(&frame, PLACE_IN_QUEUE_REQUEST_CODE)?;
+                if let Some(position) = services.uploads.queue_position(username, &filename) {
+                    write_raw_frame(stream, &place_in_queue_response_frame(&filename, position))
+                        .await?;
+                } else {
+                    write_raw_frame(
+                        stream,
+                        &upload_denied_frame(&filename, "File is not queued."),
+                    )
+                    .await?;
+                }
+            }
             FILE_SEARCH_RESPONSE_CODE => {
                 services.search.record(parse_search_response(&frame)?);
                 if purpose == PeerMessagePurpose::General {
@@ -1774,6 +2273,22 @@ fn spawn_transfer_request_timeout(
     });
 }
 
+fn spawn_upload_request_timeout(
+    ticket: UploadTicket,
+    uploads: UploadHub,
+    command_sender: mpsc::UnboundedSender<ConnectionCommand>,
+) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(TRANSFER_REQUEST_TIMEOUT).await;
+        if uploads.fail_connection(
+            ticket.connection_token,
+            "The downloader did not answer the upload connection request.".to_owned(),
+        ) {
+            let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
+        }
+    });
+}
+
 fn spawn_file_download(
     stream: TcpStream,
     transfer_token: u32,
@@ -1802,6 +2317,95 @@ fn spawn_file_download(
         task_transfers.unregister_task(&task_id);
         let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
     });
+}
+
+fn spawn_file_upload(
+    stream: TcpStream,
+    ticket: UploadTicket,
+    uploads: UploadHub,
+    command_sender: mpsc::UnboundedSender<ConnectionCommand>,
+) {
+    let plan = match uploads.begin_file(&ticket.id) {
+        Ok(plan) => plan,
+        Err(error) => {
+            uploads.fail_id(&ticket.id, error.to_string());
+            let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
+            return;
+        }
+    };
+    let cancellation = Arc::new(AtomicBool::new(false));
+    uploads.register_task(plan.id.clone(), cancellation.clone());
+    let task_uploads = uploads.clone();
+    tauri::async_runtime::spawn(async move {
+        let result = send_file(stream, &plan, task_uploads.clone(), cancellation).await;
+        if let Err(message) = result {
+            task_uploads.fail_id(&plan.id, message);
+        }
+        task_uploads.unregister_task(&plan.id);
+        let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
+    });
+}
+
+async fn send_file(
+    mut stream: TcpStream,
+    plan: &UploadTicket,
+    uploads: UploadHub,
+    cancellation: Arc<AtomicBool>,
+) -> Result<(), String> {
+    let offset = timeout(PEER_MESSAGE_TIMEOUT, stream.read_u64_le())
+        .await
+        .map_err(|_| "The downloader did not send a resume offset in time.".to_owned())?
+        .map_err(|error| format!("The upload resume offset could not be read: {error}"))?;
+    if offset > plan.size_bytes {
+        return Err("The downloader requested an invalid resume offset.".to_owned());
+    }
+    let mut file = File::open(&plan.local_path)
+        .await
+        .map_err(|error| format!("Forever could not open the shared file: {error}"))?;
+    file.seek(SeekFrom::Start(offset))
+        .await
+        .map_err(|error| format!("Forever could not seek the shared file: {error}"))?;
+
+    let mut transferred = offset;
+    let mut last_bytes = transferred;
+    let mut last_update = Instant::now();
+    let mut buffer = vec![0_u8; FILE_BUFFER_SIZE];
+    while transferred < plan.size_bytes {
+        if cancellation.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let remaining = plan.size_bytes - transferred;
+        let capacity = usize::try_from(remaining.min(FILE_BUFFER_SIZE as u64))
+            .expect("bounded file read size fits usize");
+        let count = file
+            .read(&mut buffer[..capacity])
+            .await
+            .map_err(|error| format!("Forever could not read the shared file: {error}"))?;
+        if count == 0 {
+            return Err("The shared file ended before its indexed size.".to_owned());
+        }
+        stream
+            .write_all(&buffer[..count])
+            .await
+            .map_err(|error| format!("The downloader connection was interrupted: {error}"))?;
+        transferred += count as u64;
+        let elapsed = last_update.elapsed();
+        if elapsed >= Duration::from_millis(250) || transferred == plan.size_bytes {
+            let millis = elapsed.as_millis().max(1) as u64;
+            let speed = transferred.saturating_sub(last_bytes).saturating_mul(1_000) / millis;
+            uploads.update_progress(&plan.id, transferred, speed);
+            last_bytes = transferred;
+            last_update = Instant::now();
+        }
+    }
+    stream
+        .flush()
+        .await
+        .map_err(|error| format!("The upload could not be finished: {error}"))?;
+    if !cancellation.load(Ordering::SeqCst) {
+        uploads.complete(&plan.id);
+    }
+    Ok(())
 }
 
 async fn receive_file(
@@ -1980,6 +2584,10 @@ pub enum ConnectionServiceError {
     Folder(#[from] FolderError),
     #[error("{0}")]
     Shares(#[from] SharesError),
+    #[error("{0}")]
+    LocalShares(#[from] LocalSharesError),
+    #[error("{0}")]
+    Upload(#[from] UploadError),
     #[error("Add your Soulseek account before connecting.")]
     NotConfigured,
     #[error("Enter your Soulseek password.")]

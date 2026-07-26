@@ -2,11 +2,13 @@ mod credentials;
 mod diagnostics;
 mod downloads;
 mod folders;
+mod local_shares;
 mod protocol;
 mod search;
 mod service;
 mod settings;
 mod shares;
+mod uploads;
 
 use search::SearchSnapshot;
 use service::{ConnectionBootstrap, ConnectionManager, ConnectionSnapshot, SaveConnectionRequest};
@@ -27,10 +29,100 @@ pub fn initialize(app: &AppHandle) -> Result<ConnectionManager, String> {
         app.clone(),
         config_directory.join("connection.json"),
         config_directory.join("transfers.json"),
+        config_directory.join("sharing.json"),
         config_directory.join("logs").join("connection.log"),
         download_directory,
     )
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn local_shares_snapshot(
+    manager: State<'_, ConnectionManager>,
+) -> Result<local_shares::LocalSharesSnapshot, String> {
+    Ok(manager.current_local_shares())
+}
+
+#[tauri::command]
+pub async fn local_shares_add(
+    manager: State<'_, ConnectionManager>,
+    path: String,
+) -> Result<local_shares::LocalSharesSnapshot, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.add_local_share(&path))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn local_shares_remove(
+    manager: State<'_, ConnectionManager>,
+    id: String,
+) -> Result<local_shares::LocalSharesSnapshot, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.remove_local_share(&id))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn local_shares_set_enabled(
+    manager: State<'_, ConnectionManager>,
+    id: String,
+    enabled: bool,
+) -> Result<local_shares::LocalSharesSnapshot, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.set_local_share_enabled(&id, enabled))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn local_shares_rescan(
+    manager: State<'_, ConnectionManager>,
+) -> Result<local_shares::LocalSharesSnapshot, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.rescan_local_shares())
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn local_shares_set_upload_slots(
+    manager: State<'_, ConnectionManager>,
+    upload_slots: u8,
+) -> Result<local_shares::LocalSharesSnapshot, String> {
+    manager
+        .set_upload_slots(upload_slots)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn uploads_snapshot(
+    manager: State<'_, ConnectionManager>,
+) -> Result<uploads::UploadQueueSnapshot, String> {
+    Ok(manager.current_uploads())
+}
+
+#[tauri::command]
+pub async fn upload_cancel(
+    manager: State<'_, ConnectionManager>,
+    id: String,
+) -> Result<uploads::UploadQueueSnapshot, String> {
+    manager
+        .cancel_upload(&id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn upload_clear_finished(
+    manager: State<'_, ConnectionManager>,
+) -> Result<uploads::UploadQueueSnapshot, String> {
+    Ok(manager.clear_finished_uploads())
 }
 
 #[tauri::command]

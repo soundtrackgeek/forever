@@ -40,6 +40,15 @@ pub fn run() {
             connection::shares_browse,
             connection::shares_folder,
             connection::shares_search,
+            connection::local_shares_snapshot,
+            connection::local_shares_add,
+            connection::local_shares_remove,
+            connection::local_shares_set_enabled,
+            connection::local_shares_rescan,
+            connection::local_shares_set_upload_slots,
+            connection::uploads_snapshot,
+            connection::upload_cancel,
+            connection::upload_clear_finished,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -179,6 +179,17 @@ describe("Forever shell", () => {
     expect(within(workspace).queryByText("Spheric Dusk")).not.toBeInTheDocument();
   });
 
+  it("shows outgoing uploads with live progress in Transfers", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Uploads 1" }));
+
+    expect(screen.getByText("04 Endorphin.flac")).toBeInTheDocument();
+    expect(screen.getByText(/to lowlight.fm/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel upload 04 Endorphin.flac" })).toBeInTheDocument();
+  });
+
   it("opens a source's shares from transfer history", async () => {
     render(<App />);
 
@@ -202,6 +213,9 @@ describe("Forever shell", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("Network online")).not.toHaveLength(0);
     expect(screen.getByDisplayValue("SignalLevel")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your shared music" })).toBeInTheDocument();
+    expect(screen.getByText("Midnight Archive")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Upload slots" })).toHaveValue("1");
   });
 
   it("checks for updates every five minutes by default and saves a new cadence", () => {
@@ -236,15 +250,15 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.10 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.11 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Folder-name results in user share searches, with matching folders that open directly.",
+        "Safe local music sharing with folder controls and bounded indexing.",
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Search-result actions keep their intended circular shape."),
+      screen.getByText("Local filesystem paths remain private behind virtual share aliases."),
     ).toBeInTheDocument();
   });
 

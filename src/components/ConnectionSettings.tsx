@@ -3,6 +3,8 @@ import {
   ArrowsClockwise,
   Check,
   FolderOpen,
+  FolderPlus,
+  HardDrives,
   LockKey,
   Plug,
   Plugs,
@@ -16,6 +18,7 @@ import type {
   ConnectionProfile,
   ConnectionSnapshot,
   DiagnosticEntry,
+  LocalSharesSnapshot,
 } from "../types";
 
 type ConnectionSettingsProps = {
@@ -35,6 +38,18 @@ type ConnectionSettingsProps = {
   onUpdateCheckIntervalChange: (
     interval: UpdateCheckIntervalMinutes,
   ) => void;
+  localShares: LocalSharesSnapshot;
+  sharingError: string | null;
+  onAddShare: (path: string) => Promise<unknown>;
+  onRemoveShare: (id: string) => Promise<unknown>;
+  onSetShareEnabled: (id: string, enabled: boolean) => Promise<unknown>;
+  onRescanShares: () => Promise<unknown>;
+  onSetUploadSlots: (slots: number) => Promise<unknown>;
+};
+
+const formatBytes = (bytes: number) => {
+  if (bytes < 1_000_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
 };
 
 const statusLabels: Record<ConnectionSnapshot["state"], string> = {
@@ -70,6 +85,13 @@ export function ConnectionSettings({
   onCheckForUpdates,
   updateCheckIntervalMinutes,
   onUpdateCheckIntervalChange,
+  localShares,
+  sharingError,
+  onAddShare,
+  onRemoveShare,
+  onSetShareEnabled,
+  onRescanShares,
+  onSetUploadSlots,
 }: ConnectionSettingsProps) {
   const [draft, setDraft] = useState(profile);
   const [password, setPassword] = useState("");
@@ -97,6 +119,15 @@ export function ConnectionSettings({
     if (typeof selected === "string") {
       setDraft((current) => ({ ...current, downloadDirectory: selected }));
     }
+  };
+
+  const addSharedFolder = async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Choose a music folder to share",
+    });
+    if (typeof selected === "string") await onAddShare(selected);
   };
 
   const save = async (event: FormEvent) => {
@@ -307,6 +338,78 @@ export function ConnectionSettings({
           </div>
         </form>
 
+        <section className="settings-panel sharing-panel">
+          <div className="settings-panel-heading sharing-panel-heading">
+            <div className="settings-icon">
+              <HardDrives size={19} weight="light" />
+            </div>
+            <div>
+              <h2>Your shared music</h2>
+              <p>Only supported audio files are indexed. Local paths never leave Forever.</p>
+            </div>
+            <span className="sharing-total">
+              <strong>{localShares.totalFileCount.toLocaleString()}</strong>
+              <small>files · {formatBytes(localShares.totalSizeBytes)}</small>
+            </span>
+          </div>
+
+          <div className="share-root-list">
+            {localShares.roots.length === 0 ? (
+              <div className="share-empty">
+                <HardDrives size={22} weight="thin" />
+                <span><strong>No music shared yet</strong><small>Add a folder to let other Soulseek users browse and download from you.</small></span>
+              </div>
+            ) : localShares.roots.map((root) => (
+              <div className={`share-root-row ${root.enabled ? "" : "is-disabled"}`} key={root.id}>
+                <label className="share-root-toggle">
+                  <input
+                    type="checkbox"
+                    checked={root.enabled}
+                    onChange={(event) => void onSetShareEnabled(root.id, event.target.checked)}
+                    aria-label={`Share ${root.alias}`}
+                  />
+                  <span className="toggle-visual" aria-hidden="true"><i /></span>
+                </label>
+                <span className="share-root-name">
+                  <strong>{root.alias}</strong>
+                  <small title={root.path}>{root.path}</small>
+                  {root.error ? <em>{root.error}</em> : null}
+                </span>
+                <span className="share-root-counts">
+                  <strong>{root.fileCount.toLocaleString()} files</strong>
+                  <small>{root.directoryCount.toLocaleString()} folders · {formatBytes(root.totalSizeBytes)}</small>
+                </span>
+                <button type="button" onClick={() => void onRemoveShare(root.id)} aria-label={`Remove ${root.alias}`}>
+                  <Trash size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {sharingError ? <p className="connection-error" role="alert">{sharingError}</p> : null}
+
+          <div className="sharing-actions">
+            <button type="button" className="primary-action" onClick={() => void addSharedFolder()}>
+              <FolderPlus size={16} /> Add folder
+            </button>
+            <button type="button" className="secondary-text-button" disabled={localShares.scanning} onClick={() => void onRescanShares()}>
+              <ArrowsClockwise size={15} className={localShares.scanning ? "is-spinning" : ""} />
+              {localShares.scanning ? "Scanning…" : "Rescan"}
+            </button>
+            <label className="upload-slots-field">
+              <span>Upload slots</span>
+              <select value={localShares.uploadSlots} onChange={(event) => void onSetUploadSlots(Number(event.target.value))}>
+                <option value={1}>1 slot</option>
+                <option value={2}>2 slots</option>
+                <option value={3}>3 slots</option>
+              </select>
+            </label>
+            <small className="sharing-scan-time">
+              {localShares.lastScanAtMs ? `Last indexed ${formatTime(localShares.lastScanAtMs)}` : "Not indexed yet"}
+            </small>
+          </div>
+        </section>
+
         <div className="settings-lower-grid">
           <section className="settings-panel diagnostics-panel">
             <div className="settings-panel-heading">
@@ -341,7 +444,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.10</h2>
+              <h2>Forever 0.0.11</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="update-interval-field">
                 <span>Automatic update checks</span>

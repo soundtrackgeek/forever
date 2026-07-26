@@ -172,6 +172,50 @@ export type TransferQueueSnapshot = {
   activeCount: number;
 };
 
+export type SharedRoot = {
+  id: string;
+  path: string;
+  alias: string;
+  enabled: boolean;
+  fileCount: number;
+  directoryCount: number;
+  totalSizeBytes: number;
+  error: string | null;
+};
+
+export type LocalSharesSnapshot = {
+  roots: SharedRoot[];
+  uploadSlots: number;
+  scanning: boolean;
+  totalFileCount: number;
+  totalDirectoryCount: number;
+  totalSizeBytes: number;
+  lastScanAtMs: number | null;
+};
+
+export type Upload = {
+  id: string;
+  username: string;
+  remoteFilename: string;
+  filename: string;
+  sizeBytes: number;
+  transferredBytes: number;
+  speedBytesPerSecond: number;
+  etaSeconds: number | null;
+  status: "queued" | "connecting" | "uploading" | "completed" | "failed" | "cancelled";
+  queuePosition: number | null;
+  error: string | null;
+  createdAtMs: number;
+  updatedAtMs: number;
+};
+
+export type UploadQueueSnapshot = {
+  uploads: Upload[];
+  activeCount: number;
+  queuedCount: number;
+  sessionUploadedBytes: number;
+};
+
 export type ConnectionState =
   | "unconfigured"
   | "offline"

@@ -5,6 +5,41 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.11] - 2026-07-26
+
+### Added
+
+- Persistent local share configuration with native folder selection, enable/
+  disable and removal controls, manual rescanning, virtual share aliases, and
+  live file, folder, and byte totals.
+- A bounded Rust music index that rejects overlapping roots and excludes
+  hidden entries, symbolic links, temporary/partial files, zero-byte files,
+  unsupported formats, excessive depth, and oversized indexes.
+- Real Soulseek Shared File List, Folder Contents, and distributed search
+  responses for locally shared music over direct and indirect peer links.
+- A conservative outgoing upload queue with one configurable active slot by
+  default (up to three), queue positions, transfer negotiation, resumable byte
+  offsets, speed, ETA, progress, cancellation, failure handling, and automatic
+  scheduling of the next file.
+- A Midnight Radio sharing panel in Settings and a dedicated Uploads section
+  in Transfers with live outgoing activity and finished-history cleanup.
+- Protocol round-trip, index safety, queue-position, and frontend regression
+  coverage for local sharing and uploads.
+
+### Changed
+
+- Forever now announces its real public share counts when connecting and after
+  a share configuration or rescan change.
+- Share indexing starts off the UI thread so a large music collection does not
+  delay application startup.
+- Application and updater preview metadata now identify version `0.0.11`.
+
+### Security
+
+- Absolute local paths are kept inside the Rust index and are never serialized
+  to peers or the upload interface; Soulseek users only receive virtual aliases
+  and relative remote filenames.
+
 ## [0.0.10] - 2026-07-25
 
 ### Added

@@ -17,6 +17,7 @@ import { useSoulseekFolders } from "./hooks/useSoulseekFolders";
 import { useSoulseekSearch } from "./hooks/useSoulseekSearch";
 import { useSoulseekShares } from "./hooks/useSoulseekShares";
 import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
+import { useLocalSharing } from "./hooks/useLocalSharing";
 import type { SearchResult } from "./types";
 
 const viewDetails = {
@@ -90,6 +91,7 @@ function App() {
   const connection = useSoulseekConnection();
   const search = useSoulseekSearch();
   const transfers = useSoulseekTransfers();
+  const sharing = useLocalSharing();
   const folders = useSoulseekFolders();
   const shares = useSoulseekShares();
   const [sharesUsername, setSharesUsername] = useState("audiophile92");
@@ -216,6 +218,8 @@ function App() {
         ) : activeView === "transfers" ? (
           <TransfersWorkspace
             transfers={transfers.snapshot.transfers}
+            uploads={sharing.uploads.uploads}
+            uploadError={sharing.error}
             error={transfers.error}
             onPause={(id) => void transfers.pause(id).catch(() => undefined)}
             onResume={(id) => void transfers.resume(id).catch(() => undefined)}
@@ -228,6 +232,9 @@ function App() {
             onClearCompleted={() => void transfers.clearCompleted().catch(() => undefined)}
             onDismissError={transfers.clearError}
             onBrowseUser={browseUser}
+            onCancelUpload={(id) => void sharing.cancelUpload(id).catch(() => undefined)}
+            onClearFinishedUploads={() => void sharing.clearFinishedUploads().catch(() => undefined)}
+            onDismissUploadError={sharing.clearError}
           />
         ) : activeView === "settings" && connection.profile ? (
           <ConnectionSettings
@@ -250,6 +257,13 @@ function App() {
             onUpdateCheckIntervalChange={
               updater.setUpdateCheckIntervalMinutes
             }
+            localShares={sharing.shares}
+            sharingError={sharing.error}
+            onAddShare={sharing.addRoot}
+            onRemoveShare={sharing.removeRoot}
+            onSetShareEnabled={sharing.setRootEnabled}
+            onRescanShares={sharing.rescan}
+            onSetUploadSlots={sharing.setUploadSlots}
           />
         ) : (
           <PlaceholderView
