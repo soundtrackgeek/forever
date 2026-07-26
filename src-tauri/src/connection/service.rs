@@ -297,17 +297,39 @@ impl DistributedCoordinator {
 }
 
 enum ConnectionCommand {
-    StartSearch { token: u32, query: String },
-    SendPrivateMessage { username: String, message: String },
-    InspectFolder { ticket: FolderTicket },
-    BrowseShares { ticket: SharesTicket },
-    RequestProfile { ticket: ProfileTicket },
-    WatchPerson { username: String },
-    UnwatchPerson { username: String },
-    PeerConnectionFailed { token: u32, username: String },
+    StartSearch {
+        token: u32,
+        query: String,
+    },
+    SendPrivateMessage {
+        id: String,
+        username: String,
+        message: String,
+    },
+    InspectFolder {
+        ticket: FolderTicket,
+    },
+    BrowseShares {
+        ticket: SharesTicket,
+    },
+    RequestProfile {
+        ticket: ProfileTicket,
+    },
+    WatchPerson {
+        username: String,
+    },
+    UnwatchPerson {
+        username: String,
+    },
+    PeerConnectionFailed {
+        token: u32,
+        username: String,
+    },
     ScheduleDownloads,
     ScheduleUploads,
-    OpenUploadFile { id: String },
+    OpenUploadFile {
+        id: String,
+    },
     RefreshSharedCounts,
 }
 
@@ -559,7 +581,7 @@ impl ConnectionManager {
         &self,
         username: String,
         message: String,
-    ) -> Result<(), ConnectionServiceError> {
+    ) -> Result<MessagesSnapshot, ConnectionServiceError> {
         let username = username.trim().to_owned();
         let message = super::messages::valid_message(&message)?;
         if username.is_empty() || username.len() > MAX_SEARCH_USERNAME_BYTES {
@@ -575,9 +597,61 @@ impl ConnectionManager {
             .clone()
             .ok_or(ConnectionServiceError::MessagesUnavailable)?;
         self.people.remember(&username)?;
-        sender
-            .send(ConnectionCommand::SendPrivateMessage { username, message })
-            .map_err(|_| ConnectionServiceError::MessagesUnavailable)
+        let (id, snapshot) = self.messages.queue_outgoing(&username, &message)?;
+        if sender
+            .send(ConnectionCommand::SendPrivateMessage {
+                id: id.clone(),
+                username,
+                message,
+            })
+            .is_err()
+        {
+            let _ = self.messages.mark_failed(
+                &id,
+                "The Soulseek connection closed before this message was sent.",
+            );
+            return Err(ConnectionServiceError::MessagesUnavailable);
+        }
+        Ok(snapshot)
+    }
+
+    pub fn retry_private_message(
+        &self,
+        id: &str,
+    ) -> Result<MessagesSnapshot, ConnectionServiceError> {
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::MessagesUnavailable);
+        }
+        let sender = self
+            .command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .ok_or(ConnectionServiceError::MessagesUnavailable)?;
+        let (username, message, snapshot) = self.messages.retry(id)?;
+        if sender
+            .send(ConnectionCommand::SendPrivateMessage {
+                id: id.to_owned(),
+                username,
+                message,
+            })
+            .is_err()
+        {
+            let _ = self.messages.mark_failed(
+                id,
+                "The Soulseek connection closed before this message was sent.",
+            );
+            return Err(ConnectionServiceError::MessagesUnavailable);
+        }
+        Ok(snapshot)
+    }
+
+    pub fn open_conversation(
+        &self,
+        username: &str,
+    ) -> Result<MessagesSnapshot, ConnectionServiceError> {
+        self.people.remember(username)?;
+        Ok(self.messages.open_conversation(username)?)
     }
 
     pub fn mark_conversation_read(
@@ -585,6 +659,27 @@ impl ConnectionManager {
         username: &str,
     ) -> Result<MessagesSnapshot, ConnectionServiceError> {
         Ok(self.messages.mark_read(username)?)
+    }
+
+    pub fn mark_conversation_unread(
+        &self,
+        username: &str,
+    ) -> Result<MessagesSnapshot, ConnectionServiceError> {
+        Ok(self.messages.mark_unread(username)?)
+    }
+
+    pub fn clear_conversation(
+        &self,
+        username: &str,
+    ) -> Result<MessagesSnapshot, ConnectionServiceError> {
+        Ok(self.messages.clear_conversation(username)?)
+    }
+
+    pub fn remove_conversation(
+        &self,
+        username: &str,
+    ) -> Result<MessagesSnapshot, ConnectionServiceError> {
+        Ok(self.messages.remove_conversation(username)?)
     }
 
     pub async fn open_person_profile(
@@ -1259,6 +1354,9 @@ impl ConnectionManager {
                 .connect_once(&profile, password.as_str(), attempt)
                 .await;
             self.clear_command_sender();
+            let _ = self.messages.fail_queued(
+                "The Soulseek connection was interrupted before this message was sent.",
+            );
             self.transfers.connection_lost();
             self.uploads.connection_lost();
             self.folders.connection_lost();
@@ -1800,20 +1898,24 @@ impl ConnectionManager {
                                     )
                                 })?;
                         }
-                        Some(ConnectionCommand::SendPrivateMessage { username, message }) => {
-                            let frame = message_user_frame(&username, &message).map_err(|error| {
-                                ConnectionFailure::fatal(
-                                    format!("The private message is invalid: {error}"),
-                                    "message_invalid",
-                                )
-                            })?;
-                            write_raw_frame(&mut server_writer, &frame)
-                                .await
-                                .map_err(|error| ConnectionFailure::retryable(
-                                    format!("The private message could not be sent: {error}"),
+                        Some(ConnectionCommand::SendPrivateMessage { id, username, message }) => {
+                            let frame = match message_user_frame(&username, &message) {
+                                Ok(frame) => frame,
+                                Err(error) => {
+                                    let detail = format!("The private message is invalid: {error}");
+                                    let _ = self.messages.mark_failed(&id, &detail);
+                                    return Err(ConnectionFailure::fatal(detail, "message_invalid"));
+                                }
+                            };
+                            if let Err(error) = write_raw_frame(&mut server_writer, &frame).await {
+                                let detail = format!("The private message could not be sent: {error}");
+                                let _ = self.messages.mark_failed(&id, &detail);
+                                return Err(ConnectionFailure::retryable(
+                                    detail,
                                     "message_send_failed",
-                                ))?;
-                            self.messages.record_outgoing(&username, &message).map_err(|error| {
+                                ));
+                            }
+                            self.messages.mark_sent(&id).map_err(|error| {
                                 ConnectionFailure::retryable(
                                     format!("The sent private message could not be saved: {error}"),
                                     "message_store_failed",

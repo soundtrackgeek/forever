@@ -56,7 +56,12 @@ pub fn run() {
             connection::people_set_ignored,
             connection::messages_snapshot,
             connection::messages_send,
+            connection::messages_retry,
+            connection::messages_open,
             connection::messages_mark_read,
+            connection::messages_mark_unread,
+            connection::messages_clear,
+            connection::messages_remove,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

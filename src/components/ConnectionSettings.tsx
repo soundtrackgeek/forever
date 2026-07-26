@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   ArrowsClockwise,
+  BellRinging,
   Check,
   FolderOpen,
   FolderPlus,
@@ -47,6 +48,8 @@ type ConnectionSettingsProps = {
   onSetShareEnabled: (id: string, enabled: boolean) => Promise<unknown>;
   onRescanShares: () => Promise<unknown>;
   onSetUploadSlots: (slots: number) => Promise<unknown>;
+  messageNotificationsEnabled: boolean;
+  onMessageNotificationsChange: (enabled: boolean) => void;
 };
 
 const formatBytes = (bytes: number) => {
@@ -109,6 +112,8 @@ export function ConnectionSettings({
   onSetShareEnabled,
   onRescanShares,
   onSetUploadSlots,
+  messageNotificationsEnabled,
+  onMessageNotificationsChange,
 }: ConnectionSettingsProps) {
   const [draft, setDraft] = useState(profile);
   const [password, setPassword] = useState("");
@@ -472,7 +477,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.14</h2>
+              <h2>Forever 0.0.15</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="update-interval-field">
                 <span>Automatic update checks</span>
@@ -494,6 +499,22 @@ export function ConnectionSettings({
                 <small>
                   Default: every 5 minutes while Forever is running.
                 </small>
+              </label>
+              <label className="toggle-row message-notification-preference">
+                <input
+                  type="checkbox"
+                  checked={messageNotificationsEnabled}
+                  onChange={(event) =>
+                    onMessageNotificationsChange(event.target.checked)
+                  }
+                />
+                <span className="toggle-visual" aria-hidden="true">
+                  <i />
+                </span>
+                <span>
+                  <strong><BellRinging size={13} /> Private-message alerts</strong>
+                  <small>Show a Windows notification when a new message arrives.</small>
+                </span>
               </label>
               <button
                 type="button"

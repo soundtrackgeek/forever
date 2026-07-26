@@ -110,9 +110,29 @@ pub async fn messages_send(
     manager: State<'_, ConnectionManager>,
     username: String,
     message: String,
-) -> Result<(), String> {
+) -> Result<messages::MessagesSnapshot, String> {
     manager
         .send_private_message(username, message)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn messages_retry(
+    manager: State<'_, ConnectionManager>,
+    id: String,
+) -> Result<messages::MessagesSnapshot, String> {
+    manager
+        .retry_private_message(&id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn messages_open(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+) -> Result<messages::MessagesSnapshot, String> {
+    manager
+        .open_conversation(&username)
         .map_err(|error| error.to_string())
 }
 
@@ -123,6 +143,36 @@ pub async fn messages_mark_read(
 ) -> Result<messages::MessagesSnapshot, String> {
     manager
         .mark_conversation_read(&username)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn messages_mark_unread(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+) -> Result<messages::MessagesSnapshot, String> {
+    manager
+        .mark_conversation_unread(&username)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn messages_clear(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+) -> Result<messages::MessagesSnapshot, String> {
+    manager
+        .clear_conversation(&username)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn messages_remove(
+    manager: State<'_, ConnectionManager>,
+    username: String,
+) -> Result<messages::MessagesSnapshot, String> {
+    manager
+        .remove_conversation(&username)
         .map_err(|error| error.to_string())
 }
 

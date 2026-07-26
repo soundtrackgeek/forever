@@ -21,6 +21,16 @@ pub enum MessageDirection {
     Outgoing,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageDelivery {
+    Received,
+    Queued,
+    #[default]
+    Sent,
+    Failed,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrivateMessage {
@@ -31,6 +41,10 @@ pub struct PrivateMessage {
     pub direction: MessageDirection,
     pub sent_at_ms: u64,
     pub unread: bool,
+    #[serde(default)]
+    pub delivery: MessageDelivery,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -121,6 +135,8 @@ impl MessagesHub {
             direction: MessageDirection::Incoming,
             sent_at_ms,
             unread: true,
+            delivery: MessageDelivery::Received,
+            error: None,
         });
         conversation.unread_count = conversation.unread_count.saturating_add(1);
         conversation.updated_at_ms = sent_at_ms.max(timestamp_ms());
@@ -133,11 +149,11 @@ impl MessagesHub {
         Ok(snapshot)
     }
 
-    pub fn record_outgoing(
+    pub fn queue_outgoing(
         &self,
         username: &str,
         body: &str,
-    ) -> Result<MessagesSnapshot, MessagesError> {
+    ) -> Result<(String, MessagesSnapshot), MessagesError> {
         let username = valid_username(username).ok_or(MessagesError::InvalidUsername)?;
         let body = valid_message(body)?;
         let sent_at_ms = timestamp_ms();
@@ -151,14 +167,17 @@ impl MessagesHub {
             .map(|conversation| conversation.messages.len())
             .sum::<usize>();
         let conversation = conversation_mut(&mut store, &username);
+        let id = format!("local-{sent_at_ms}-{sequence}");
         conversation.messages.push(PrivateMessage {
-            id: format!("local-{sent_at_ms}-{sequence}"),
+            id: id.clone(),
             server_id: None,
             username,
             body,
             direction: MessageDirection::Outgoing,
             sent_at_ms,
             unread: false,
+            delivery: MessageDelivery::Queued,
+            error: None,
         });
         conversation.updated_at_ms = sent_at_ms;
         trim_conversation(conversation);
@@ -167,6 +186,94 @@ impl MessagesHub {
         let snapshot = snapshot_from(&store);
         drop(store);
         self.publish(&snapshot);
+        Ok((id, snapshot))
+    }
+
+    pub fn mark_sent(&self, id: &str) -> Result<MessagesSnapshot, MessagesError> {
+        self.set_delivery(id, MessageDelivery::Sent, None)
+    }
+
+    pub fn mark_failed(&self, id: &str, error: &str) -> Result<MessagesSnapshot, MessagesError> {
+        self.set_delivery(id, MessageDelivery::Failed, Some(clean_error(error)))
+    }
+
+    pub fn retry(&self, id: &str) -> Result<(String, String, MessagesSnapshot), MessagesError> {
+        let mut store = self
+            .store
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (username, body) = {
+            let message = store
+                .conversations
+                .iter_mut()
+                .flat_map(|conversation| conversation.messages.iter_mut())
+                .find(|message| {
+                    message.id == id
+                        && message.direction == MessageDirection::Outgoing
+                        && message.delivery == MessageDelivery::Failed
+                })
+                .ok_or(MessagesError::MessageNotFound)?;
+            message.delivery = MessageDelivery::Queued;
+            message.error = None;
+            (message.username.clone(), message.body.clone())
+        };
+        touch_conversation(&mut store, &username);
+        persist(&self.path, &store)?;
+        let snapshot = snapshot_from(&store);
+        drop(store);
+        self.publish(&snapshot);
+        Ok((username, body, snapshot))
+    }
+
+    pub fn fail_queued(&self, error: &str) -> Result<MessagesSnapshot, MessagesError> {
+        let mut store = self
+            .store
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let error = clean_error(error);
+        let mut changed = false;
+        for conversation in &mut store.conversations {
+            for message in &mut conversation.messages {
+                if message.direction == MessageDirection::Outgoing
+                    && message.delivery == MessageDelivery::Queued
+                {
+                    message.delivery = MessageDelivery::Failed;
+                    message.error = Some(error.clone());
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            persist(&self.path, &store)?;
+        }
+        let snapshot = snapshot_from(&store);
+        drop(store);
+        if changed {
+            self.publish(&snapshot);
+        }
+        Ok(snapshot)
+    }
+
+    pub fn open_conversation(&self, username: &str) -> Result<MessagesSnapshot, MessagesError> {
+        let username = valid_username(username).ok_or(MessagesError::InvalidUsername)?;
+        let mut store = self
+            .store
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let exists = store
+            .conversations
+            .iter()
+            .any(|conversation| conversation.username.eq_ignore_ascii_case(&username));
+        if !exists {
+            conversation_mut(&mut store, &username);
+            sort_and_trim(&mut store);
+            persist(&self.path, &store)?;
+        }
+        let snapshot = snapshot_from(&store);
+        drop(store);
+        if !exists {
+            self.publish(&snapshot);
+        }
         Ok(snapshot)
     }
 
@@ -187,6 +294,106 @@ impl MessagesHub {
             }
             persist(&self.path, &store)?;
         }
+        let snapshot = snapshot_from(&store);
+        drop(store);
+        self.publish(&snapshot);
+        Ok(snapshot)
+    }
+
+    pub fn mark_unread(&self, username: &str) -> Result<MessagesSnapshot, MessagesError> {
+        let username = valid_username(username).ok_or(MessagesError::InvalidUsername)?;
+        let mut store = self
+            .store
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conversation = store
+            .conversations
+            .iter_mut()
+            .find(|conversation| conversation.username.eq_ignore_ascii_case(&username))
+            .ok_or(MessagesError::ConversationNotFound)?;
+        let message = conversation
+            .messages
+            .last_mut()
+            .ok_or(MessagesError::ConversationNotFound)?;
+        message.unread = true;
+        conversation.unread_count = conversation
+            .messages
+            .iter()
+            .filter(|message| message.unread)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        persist(&self.path, &store)?;
+        let snapshot = snapshot_from(&store);
+        drop(store);
+        self.publish(&snapshot);
+        Ok(snapshot)
+    }
+
+    pub fn clear_conversation(&self, username: &str) -> Result<MessagesSnapshot, MessagesError> {
+        let username = valid_username(username).ok_or(MessagesError::InvalidUsername)?;
+        let mut store = self
+            .store
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conversation = store
+            .conversations
+            .iter_mut()
+            .find(|conversation| conversation.username.eq_ignore_ascii_case(&username))
+            .ok_or(MessagesError::ConversationNotFound)?;
+        conversation.messages.clear();
+        conversation.unread_count = 0;
+        conversation.updated_at_ms = timestamp_ms();
+        persist(&self.path, &store)?;
+        let snapshot = snapshot_from(&store);
+        drop(store);
+        self.publish(&snapshot);
+        Ok(snapshot)
+    }
+
+    pub fn remove_conversation(&self, username: &str) -> Result<MessagesSnapshot, MessagesError> {
+        let username = valid_username(username).ok_or(MessagesError::InvalidUsername)?;
+        let mut store = self
+            .store
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous_len = store.conversations.len();
+        store
+            .conversations
+            .retain(|conversation| !conversation.username.eq_ignore_ascii_case(&username));
+        if store.conversations.len() == previous_len {
+            return Err(MessagesError::ConversationNotFound);
+        }
+        persist(&self.path, &store)?;
+        let snapshot = snapshot_from(&store);
+        drop(store);
+        self.publish(&snapshot);
+        Ok(snapshot)
+    }
+
+    fn set_delivery(
+        &self,
+        id: &str,
+        delivery: MessageDelivery,
+        error: Option<String>,
+    ) -> Result<MessagesSnapshot, MessagesError> {
+        let mut store = self
+            .store
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let username = {
+            let message = store
+                .conversations
+                .iter_mut()
+                .flat_map(|conversation| conversation.messages.iter_mut())
+                .find(|message| message.id == id && message.direction == MessageDirection::Outgoing)
+                .ok_or(MessagesError::MessageNotFound)?;
+            message.delivery = delivery;
+            message.error = error;
+            message.username.clone()
+        };
+        touch_conversation(&mut store, &username);
+        persist(&self.path, &store)?;
         let snapshot = snapshot_from(&store);
         drop(store);
         self.publish(&snapshot);
@@ -239,6 +446,17 @@ fn sort_and_trim(store: &mut MessagesStore) {
     store.conversations.truncate(MAX_CONVERSATIONS);
 }
 
+fn touch_conversation(store: &mut MessagesStore, username: &str) {
+    if let Some(conversation) = store
+        .conversations
+        .iter_mut()
+        .find(|conversation| conversation.username.eq_ignore_ascii_case(username))
+    {
+        conversation.updated_at_ms = timestamp_ms();
+    }
+    sort_and_trim(store);
+}
+
 fn snapshot_from(store: &MessagesStore) -> MessagesSnapshot {
     MessagesSnapshot {
         conversations: store.conversations.clone(),
@@ -267,6 +485,16 @@ pub fn valid_message(value: &str) -> Result<String, MessagesError> {
         return Err(MessagesError::InvalidMessage);
     }
     Ok(value)
+}
+
+fn clean_error(value: &str) -> String {
+    value
+        .replace(['\r', '\n', '\0'], " ")
+        .chars()
+        .take(500)
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 fn load_store(path: &Path) -> Result<MessagesStore, MessagesError> {
@@ -303,6 +531,10 @@ pub enum MessagesError {
     InvalidUsername,
     #[error("Enter a private message between 1 and {MAX_PRIVATE_MESSAGE_BYTES} bytes.")]
     InvalidMessage,
+    #[error("That private message is no longer available to retry.")]
+    MessageNotFound,
+    #[error("That private conversation is no longer available.")]
+    ConversationNotFound,
     #[error("The private-message history was created by an unsupported Forever version.")]
     UnsupportedStore,
     #[error("Could not read or save private messages: {0}")]
@@ -320,5 +552,17 @@ mod tests {
         assert_eq!(valid_message("  hello  ").unwrap(), "hello");
         assert!(valid_message("  ").is_err());
         assert!(valid_message(&"x".repeat(MAX_PRIVATE_MESSAGE_BYTES + 1)).is_err());
+        assert_eq!(clean_error("  first\r\nsecond\0  "), "first  second");
+    }
+
+    #[test]
+    fn older_messages_default_to_sent_delivery() {
+        let message: PrivateMessage = serde_json::from_str(
+            r#"{"id":"local-1","serverId":null,"username":"listener","body":"hello","direction":"outgoing","sentAtMs":1,"unread":false}"#,
+        )
+        .unwrap();
+
+        assert_eq!(message.delivery, MessageDelivery::Sent);
+        assert!(message.error.is_none());
     }
 }

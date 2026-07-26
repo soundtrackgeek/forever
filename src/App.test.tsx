@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { UPDATE_CHECK_INTERVAL_STORAGE_KEY } from "./hooks/useAppUpdater";
+import { MESSAGE_NOTIFICATION_STORAGE_KEY } from "./hooks/usePrivateMessages";
+import { MESSAGE_DRAFTS_STORAGE_KEY } from "./components/MessagesWorkspace";
 
 describe("Forever shell", () => {
   it("renders the Midnight Radio search workspace", () => {
@@ -222,18 +224,60 @@ describe("Forever shell", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 
-  it("opens the private conversation shell from a person profile", async () => {
+  it("opens the Midnight Inbox from a person profile and sends a message", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "People" }));
     fireEvent.click(screen.getByRole("button", { name: "Message" }));
 
-    const conversation = screen.getByRole("dialog", { name: "audiophile92" });
-    expect(within(conversation).getByText(/late-night radio session/)).toBeInTheDocument();
-    const composer = within(conversation).getByRole("textbox", { name: "Message audiophile92" });
+    const inbox = screen.getByRole("region", { name: "Midnight Inbox" });
+    expect(within(inbox).getByRole("heading", { name: "Midnight Inbox" })).toBeInTheDocument();
+    expect(within(inbox).getByText(/late-night radio session/)).toBeInTheDocument();
+    const composer = within(inbox).getByRole("textbox", { name: "Message audiophile92" });
     expect(composer).toBeEnabled();
     fireEvent.change(composer, { target: { value: "That would be wonderful." } });
-    fireEvent.click(within(conversation).getByRole("button", { name: "Send" }));
-    expect(await within(conversation).findByText("That would be wonderful.")).toBeInTheDocument();
+    fireEvent.click(within(inbox).getByRole("button", { name: "Send" }));
+    expect(await within(inbox).findByText("That would be wonderful.")).toBeInTheDocument();
+  });
+
+  it("searches message history and retries a failed transmission", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+
+    const inbox = screen.getByRole("region", { name: "Midnight Inbox" });
+    fireEvent.change(
+      within(inbox).getByRole("textbox", { name: "Search conversations and messages" }),
+      { target: { value: "cue-sheet" } },
+    );
+    const vinylConversation = await within(inbox).findByRole("button", {
+      name: /vinyljunkie/,
+    });
+    fireEvent.click(vinylConversation);
+    expect(within(inbox).getByText("Failed")).toBeInTheDocument();
+    fireEvent.click(within(inbox).getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(within(inbox).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("starts a new exact-username conversation and preserves its draft", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+    fireEvent.click(screen.getByRole("button", { name: "New message" }));
+    fireEvent.change(screen.getByLabelText("Exact Soulseek username"), {
+      target: { value: "fieldrecorder" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open new conversation" }));
+
+    const composer = await screen.findByRole("textbox", { name: "Message fieldrecorder" });
+    fireEvent.change(composer, { target: { value: "Holding this thought for later." } });
+    expect(window.localStorage.getItem(MESSAGE_DRAFTS_STORAGE_KEY)).toContain(
+      "Holding this thought for later.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+    expect(screen.getByRole("textbox", { name: "Message fieldrecorder" })).toHaveValue(
+      "Holding this thought for later.",
+    );
   });
 
   it("opens a user profile directly from a search result", () => {
@@ -264,6 +308,12 @@ describe("Forever shell", () => {
     expect(screen.getByRole("heading", { name: "Your shared music" })).toBeInTheDocument();
     expect(screen.getByText("Midnight Archive")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Upload slots" })).toHaveValue("1");
+    const notifications = screen.getByRole("checkbox", {
+      name: /Private-message alerts/,
+    });
+    expect(notifications).toBeChecked();
+    fireEvent.click(notifications);
+    expect(window.localStorage.getItem(MESSAGE_NOTIFICATION_STORAGE_KEY)).toBe("false");
   });
 
   it("checks for updates every five minutes by default and saves a new cadence", () => {
@@ -298,16 +348,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.14 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.15 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Real Soulseek private messaging with persistent conversation history and unread indicators.",
+        "A dedicated Midnight Inbox with conversation search, exact-username starts, unread controls, and presence details.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Bundled country flags and validated profile pictures now render in packaged builds.",
+        "Interrupted outgoing messages become failed and retryable instead of remaining stuck or disappearing.",
       ),
     ).toBeInTheDocument();
   });

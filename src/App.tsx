@@ -4,6 +4,7 @@ import "./App.css";
 import { AppSidebar } from "./components/AppSidebar";
 import { ConnectionOnboarding } from "./components/ConnectionOnboarding";
 import { ConnectionSettings } from "./components/ConnectionSettings";
+import { MessagesWorkspace } from "./components/MessagesWorkspace";
 import { ReleaseInspector } from "./components/ReleaseInspector";
 import { PeopleWorkspace } from "./components/PeopleWorkspace";
 import { SearchWorkspace } from "./components/SearchWorkspace";
@@ -101,6 +102,9 @@ function App() {
   const messages = usePrivateMessages();
   const [sharesUsername, setSharesUsername] = useState("audiophile92");
   const [selectedUsername, setSelectedUsername] = useState<string | null>("audiophile92");
+  const [selectedMessageUsername, setSelectedMessageUsername] = useState<string | null>(
+    "audiophile92",
+  );
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [onboardingInProgress, setOnboardingInProgress] = useState(false);
   const needsOnboarding = !connection.profile || !connection.hasPassword;
@@ -119,11 +123,19 @@ function App() {
   };
 
   const navigate = (view: string) => {
-    if (view === "people" && messages.snapshot.unreadCount > 0) {
+    if (view === "messages") {
       const unread = messages.snapshot.conversations.find(
         (conversation) => conversation.unreadCount > 0,
       );
-      if (unread) setSelectedUsername(unread.username);
+      const next =
+        messages.snapshot.conversations.find(
+          (conversation) =>
+            conversation.username.toLocaleLowerCase() ===
+            selectedMessageUsername?.toLocaleLowerCase(),
+        ) ??
+        unread ??
+        messages.snapshot.conversations[0];
+      if (next) setSelectedMessageUsername(next.username);
     }
     setActiveView(view);
   };
@@ -138,6 +150,12 @@ function App() {
     setSelectedUsername(username);
     setActiveView("people");
     void people.openProfile(username, refresh).catch(() => undefined);
+  };
+
+  const openMessages = (username: string) => {
+    setSelectedMessageUsername(username);
+    setActiveView("messages");
+    void messages.openConversation(username).catch(() => undefined);
   };
 
   const isSearchView = activeView === "search";
@@ -212,6 +230,39 @@ function App() {
               }}
             />
           </>
+        ) : activeView === "messages" ? (
+          <MessagesWorkspace
+            snapshot={messages.snapshot}
+            ready={messages.ready}
+            error={messages.error ?? people.error}
+            connectionOnline={connection.snapshot.state === "online"}
+            selectedUsername={selectedMessageUsername}
+            personByUsername={people.personByUsername}
+            onSelectUsername={setSelectedMessageUsername}
+            onOpenConversation={async (username) => {
+              await messages.openConversation(username);
+              if (connection.snapshot.state === "online") {
+                void people.openProfile(username).catch(() => undefined);
+              }
+            }}
+            onSendMessage={messages.send}
+            onRetryMessage={messages.retry}
+            onMarkRead={messages.markRead}
+            onMarkUnread={messages.markUnread}
+            onClearConversation={messages.clearConversation}
+            onRemoveConversation={messages.removeConversation}
+            onSetIgnored={(username, ignored) =>
+              void people.setIgnored(username, ignored).catch(() => undefined)
+            }
+            onSetBlocked={(username, blocked) =>
+              void people.setBlocked(username, blocked).catch(() => undefined)
+            }
+            onOpenPerson={openPerson}
+            onDismissError={() => {
+              messages.clearError();
+              people.clearError();
+            }}
+          />
         ) : activeView === "people" ? (
           <PeopleWorkspace
             snapshot={people.snapshot}
@@ -229,12 +280,12 @@ function App() {
             onSetIgnored={(username, ignored) =>
               void people.setIgnored(username, ignored).catch(() => undefined)
             }
-            conversation={selectedUsername ? messages.conversationByUsername(selectedUsername) : null}
-            connectionOnline={connection.snapshot.state === "online"}
-            onSendMessage={messages.send}
-            onMarkConversationRead={(username) =>
-              void messages.markRead(username).catch(() => undefined)
+            conversationUnreadCount={
+              selectedUsername
+                ? messages.conversationByUsername(selectedUsername)?.unreadCount ?? 0
+                : 0
             }
+            onMessageUser={openMessages}
             onDismissError={() => {
               people.clearError();
               messages.clearError();
@@ -321,6 +372,8 @@ function App() {
             onSetShareEnabled={sharing.setRootEnabled}
             onRescanShares={sharing.rescan}
             onSetUploadSlots={sharing.setUploadSlots}
+            messageNotificationsEnabled={messages.notificationsEnabled}
+            onMessageNotificationsChange={messages.setNotificationsEnabled}
           />
         ) : (
           <PlaceholderView

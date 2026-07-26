@@ -1,6 +1,7 @@
 import {
   ArrowsClockwise,
   AddressBook,
+  ChatCircleDots,
   CaretDown,
   DownloadSimple,
   GearSix,
@@ -25,6 +26,7 @@ type AppSidebarProps = {
 const navItems = [
   { id: "home", label: "Home", icon: House },
   { id: "search", label: "Search", icon: MagnifyingGlass },
+  { id: "messages", label: "Messages", icon: ChatCircleDots },
   { id: "people", label: "People", icon: AddressBook },
   { id: "rooms", label: "Rooms", icon: UsersThree },
   { id: "transfers", label: "Transfers", icon: DownloadSimple },
@@ -79,7 +81,7 @@ export function AppSidebar({
             >
               <Icon size={21} weight={isActive ? "regular" : "light"} />
               <span>{item.label}</span>
-              {item.id === "people" && unreadMessages > 0 ? (
+              {item.id === "messages" && unreadMessages > 0 ? (
                 <b className="nav-unread" aria-label={`${unreadMessages} unread messages`}>
                   {unreadMessages > 99 ? "99+" : unreadMessages}
                 </b>

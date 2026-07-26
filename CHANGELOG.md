@@ -5,6 +5,42 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.15] - 2026-07-26
+
+### Added
+
+- A dedicated two-pane Midnight Inbox with recent conversations, unread and
+  presence indicators, conversation and message-history search, and exact-
+  username conversation starts.
+- Persistent per-conversation drafts and configurable native Windows
+  notifications for incoming private messages.
+- Queued, sent, and failed outgoing-message states with one-click retry, plus
+  mark read/unread, clear-history, and remove-conversation actions.
+- Responsive empty, loading, error, and jump-to-latest states with thread-tail
+  following that does not interrupt someone reading older messages.
+
+### Changed
+
+- Message actions in People now route to the full Messages workspace, where
+  ignore and ban controls remain available beside the active conversation.
+- Outgoing messages are persisted before network transmission and updated as
+  delivery succeeds or fails, including during connection interruption.
+- Application and updater preview metadata now identify version `0.0.15`.
+
+### Fixed
+
+- Interrupted outgoing messages no longer remain permanently queued or vanish;
+  they become failed messages that can be retried.
+- Incoming message events, send acknowledgements, and command responses no
+  longer race and replace newer thread state with an older queued snapshot.
+
+### Security
+
+- Drafts, notification previews, delivery errors, message bodies, usernames,
+  conversations, and stored history are bounded before display or persistence.
+- Destructive clear-history and remove-conversation actions require explicit
+  confirmation and affect only the selected conversation.
+
 ## [0.0.14] - 2026-07-26
 
 ### Added

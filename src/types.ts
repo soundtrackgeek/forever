@@ -71,6 +71,7 @@ export type PeopleSnapshot = {
 };
 
 export type MessageDirection = "incoming" | "outgoing";
+export type MessageDelivery = "received" | "queued" | "sent" | "failed";
 
 export type PrivateMessage = {
   id: string;
@@ -80,6 +81,8 @@ export type PrivateMessage = {
   direction: MessageDirection;
   sentAtMs: number;
   unread: boolean;
+  delivery: MessageDelivery;
+  error: string | null;
 };
 
 export type PrivateConversation = {

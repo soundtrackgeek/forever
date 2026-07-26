@@ -30,25 +30,25 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.13",
-  version: "0.0.14",
-  body: `## What’s new in Forever 0.0.14
+  currentVersion: "0.0.14",
+  version: "0.0.15",
+  body: `## What’s new in Forever 0.0.15
 
 ### Added
 
-- Real Soulseek private messaging with persistent conversation history and unread indicators.
-- Separate Ignore User and Ban User controls with clear local-message and sharing behavior.
-- Upload slot totals, current availability, and queued-upload counts on listener profiles.
+- A dedicated Midnight Inbox with conversation search, exact-username starts, unread controls, and presence details.
+- Persistent message drafts and configurable Windows notifications for incoming private messages.
+- Queued, sent, and failed delivery states with one-click retry for interrupted transmissions.
 
 ### Changed
 
-- Incoming messages open from the People workspace and remain available after restarting Forever.
-- Banned users can no longer browse or download your shares; ignored users are filtered from messages and search activity.
+- The People workspace now opens private conversations in the full Messages workspace.
+- Ignore, ban, clear-history, and remove-conversation controls are available beside each thread.
 
 ### Fixed
 
-- Bundled country flags and validated profile pictures now render in packaged builds.
-- Failed profile pictures fall back to initials without exposing duplicate image text.`,
+- Interrupted outgoing messages become failed and retryable instead of remaining stuck or disappearing.
+- New messages follow the bottom of the thread without pulling you away while reading older history.`,
   date: "2026-07-26",
 };
 

@@ -15,14 +15,8 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useMemo, useState, type FormEvent } from "react";
-import type {
-  PeopleSnapshot,
-  PersonProfile,
-  PersonStatus,
-  PrivateConversation,
-} from "../types";
+import type { PeopleSnapshot, PersonProfile, PersonStatus } from "../types";
 import { CountryFlag } from "./CountryFlag";
-import { countryName } from "../utils/people";
 
 type PeopleWorkspaceProps = {
   snapshot: PeopleSnapshot;
@@ -34,10 +28,8 @@ type PeopleWorkspaceProps = {
   onSetFavorite: (username: string, favorite: boolean) => void;
   onSetBlocked: (username: string, blocked: boolean) => void;
   onSetIgnored: (username: string, ignored: boolean) => void;
-  conversation: PrivateConversation | null;
-  connectionOnline: boolean;
-  onSendMessage: (username: string, message: string) => Promise<void>;
-  onMarkConversationRead: (username: string) => void;
+  conversationUnreadCount: number;
+  onMessageUser: (username: string) => void;
   onDismissError: () => void;
 };
 
@@ -93,9 +85,6 @@ function PersonAvatar({ person, large = false }: { person: PersonProfile; large?
   );
 }
 
-const formatMessageTime = (value: number) =>
-  new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(value);
-
 export function PeopleWorkspace({
   snapshot,
   ready,
@@ -106,17 +95,12 @@ export function PeopleWorkspace({
   onSetFavorite,
   onSetBlocked,
   onSetIgnored,
-  conversation,
-  connectionOnline,
-  onSendMessage,
-  onMarkConversationRead,
+  conversationUnreadCount,
+  onMessageUser,
   onDismissError,
 }: PeopleWorkspaceProps) {
   const [query, setQuery] = useState("");
   const [listMode, setListMode] = useState<"all" | "favorites">("all");
-  const [messageOpen, setMessageOpen] = useState(false);
-  const [messageDraft, setMessageDraft] = useState("");
-  const [messageSending, setMessageSending] = useState(false);
   const selected = snapshot.users.find(
     (person) =>
       person.username.toLocaleLowerCase() === selectedUsername?.toLocaleLowerCase(),
@@ -135,26 +119,6 @@ export function PeopleWorkspace({
     event.preventDefault();
     const username = query.trim();
     if (username) onSelect(username, true);
-  };
-
-  const openMessages = () => {
-    if (!selected) return;
-    setMessageOpen(true);
-    onMarkConversationRead(selected.username);
-  };
-
-  const sendMessage = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!selected || !messageDraft.trim() || messageSending || !connectionOnline) return;
-    setMessageSending(true);
-    try {
-      await onSendMessage(selected.username, messageDraft);
-      setMessageDraft("");
-    } catch {
-      // The shared people error banner presents the command failure.
-    } finally {
-      setMessageSending(false);
-    }
   };
 
   return (
@@ -273,10 +237,10 @@ export function PeopleWorkspace({
                     <Heart size={17} weight={selected.favorite ? "fill" : "regular"} />
                     {selected.favorite ? "Saved" : "Save"}
                   </button>
-                  <button type="button" onClick={openMessages}>
+                  <button type="button" onClick={() => onMessageUser(selected.username)}>
                     <ChatCircleDots size={17} /> Message
-                    {conversation && conversation.unreadCount > 0 ? (
-                      <span className="message-unread-count" aria-hidden="true">{conversation.unreadCount}</span>
+                    {conversationUnreadCount > 0 ? (
+                      <span className="message-unread-count" aria-hidden="true">{conversationUnreadCount}</span>
                     ) : null}
                   </button>
                   <button type="button" className="profile-browse-action" onClick={() => onBrowseUser(selected.username)}>
@@ -359,49 +323,6 @@ export function PeopleWorkspace({
         </main>
       </div>
 
-      {messageOpen && selected && (
-        <div className="message-shell-backdrop" role="presentation" onMouseDown={() => setMessageOpen(false)}>
-          <section className="message-shell" role="dialog" aria-modal="true" aria-labelledby="message-shell-title" onMouseDown={(event) => event.stopPropagation()}>
-            <header>
-              <PersonAvatar person={selected} />
-              <span><strong id="message-shell-title">{selected.username}</strong><small>{statusCopy[selected.status]} · {countryName(selected.countryCode)}</small></span>
-              <button type="button" aria-label="Close conversation" onClick={() => setMessageOpen(false)}><X size={16} /></button>
-            </header>
-            <div className={`message-shell-body ${conversation?.messages.length ? "has-messages" : ""}`} aria-live="polite">
-              {conversation?.messages.length ? (
-                <ol className="message-thread">
-                  {conversation.messages.map((message) => (
-                    <li className={`is-${message.direction}`} key={message.id}>
-                      <span>{message.body}</span>
-                      <time dateTime={new Date(message.sentAtMs).toISOString()}>{formatMessageTime(message.sentAtMs)}</time>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <div className="message-empty-state">
-                  <ChatCircleDots size={32} weight="thin" />
-                  <h3>A quiet line is ready</h3>
-                  <p>Messages stay private, persist on this device, and can be delivered when the listener returns.</p>
-                </div>
-              )}
-            </div>
-            <form className="message-composer" onSubmit={sendMessage}>
-              <input
-                value={messageDraft}
-                onChange={(event) => setMessageDraft(event.target.value)}
-                disabled={!connectionOnline || messageSending}
-                placeholder={connectionOnline ? `Message ${selected.username}` : "Connect to send a message"}
-                aria-label={`Message ${selected.username}`}
-                maxLength={8192}
-                autoFocus
-              />
-              <button type="submit" disabled={!connectionOnline || !messageDraft.trim() || messageSending}>
-                {messageSending ? "Sending…" : "Send"}
-              </button>
-            </form>
-          </section>
-        </div>
-      )}
     </section>
   );
 }
