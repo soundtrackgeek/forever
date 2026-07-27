@@ -32,10 +32,54 @@ const releaseTransfer = (
 });
 
 describe("TransfersWorkspace signal order", () => {
+  it("shows when Safe Passage has stopped the local queue for an update", () => {
+    render(
+      <TransfersWorkspace
+        safetyState="draining"
+        maxConcurrentDownloads={3}
+        relaySuggestionMinutes={10}
+        relayRecords={{}}
+        online
+        archiveOwnedReleaseIds={new Set()}
+        transfers={[releaseTransfer("release-a", "Release A", "downloading")]}
+        uploads={[]}
+        uploadError={null}
+        error={null}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onCancel={vi.fn()}
+        onReveal={vi.fn()}
+        onPauseRelease={vi.fn()}
+        onResumeRelease={vi.fn()}
+        onCancelRelease={vi.fn()}
+        onRevealRelease={vi.fn()}
+        onReorderRelease={vi.fn()}
+        onClearCompleted={vi.fn()}
+        onVerifyRelease={vi.fn()}
+        onRetryReleaseIssues={vi.fn()}
+        onSwitchReleaseSource={vi.fn()}
+        onFindAlternatives={vi.fn()}
+        onRelayReleaseSource={vi.fn().mockResolvedValue(undefined)}
+        onDismissError={vi.fn()}
+        personByUsername={() => null}
+        onOpenPerson={vi.fn()}
+        onCancelUpload={vi.fn()}
+        onClearFinishedUploads={vi.fn()}
+        onDismissUploadError={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Safe Passage · Update scheduled")).toBeInTheDocument();
+    expect(
+      screen.getByText("Current files may finish; the queue will not advance."),
+    ).toBeInTheDocument();
+  });
+
   it("shows a queue-wide summary and provides accessible release ordering controls", () => {
     const onReorderRelease = vi.fn();
     render(
       <TransfersWorkspace
+        safetyState="running"
         maxConcurrentDownloads={3}
         relaySuggestionMinutes={10}
         relayRecords={{}}
@@ -150,6 +194,7 @@ describe("TransfersWorkspace signal order", () => {
     });
     render(
       <TransfersWorkspace
+        safetyState="running"
         maxConcurrentDownloads={3}
         relaySuggestionMinutes={10}
         relayRecords={{
@@ -267,6 +312,7 @@ describe("TransfersWorkspace signal order", () => {
 
     render(
       <TransfersWorkspace
+        safetyState="running"
         maxConcurrentDownloads={3}
         relaySuggestionMinutes={10}
         relayRecords={{}}

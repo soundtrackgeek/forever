@@ -1,5 +1,6 @@
 import { CheckCircle, DownloadSimple, MagnifyingGlass, Radio, Sliders, WarningCircle, X } from "@phosphor-icons/react";
 import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { AppSidebar } from "./components/AppSidebar";
@@ -14,6 +15,7 @@ import { MissingShelfWorkspace } from "./components/MissingShelfWorkspace";
 import { ReleaseInspector } from "./components/ReleaseInspector";
 import { PeopleWorkspace } from "./components/PeopleWorkspace";
 import { RoomsWorkspace } from "./components/RoomsWorkspace";
+import { SafeExitDialog } from "./components/SafeExitDialog";
 import { SearchPresetRail } from "./components/SearchPresetRail";
 import { SearchWorkspace, type AlbumResultView } from "./components/SearchWorkspace";
 import { SmartMatchPreferencesDialog } from "./components/SmartMatchPreferencesDialog";
@@ -120,6 +122,8 @@ function PlaceholderView({
 
 function App() {
   const native = isTauri();
+  const safeExitPreview = import.meta.env.DEV
+    && new URLSearchParams(window.location.search).get("safe-exit") === "1";
   const [activeView, setActiveView] = useState("home");
   const [transferShelfExpanded, setTransferShelfExpanded] = useState(false);
   const [transferFocus, setTransferFocus] = useState<{ groupId: string; requestId: number } | null>(null);
@@ -195,6 +199,10 @@ function App() {
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [relayClock, setRelayClock] = useState(appStartedAtMs);
   const [relayNotice, setRelayNotice] = useState<{ groupId: string; title: string; count: number } | null>(null);
+  const [safeExitOpen, setSafeExitOpen] = useState(false);
+  const [safeExitPreparing, setSafeExitPreparing] = useState(false);
+  const allowNextClose = useRef(false);
+  const activeTransferCount = useRef(0);
   const relaysStarted = useRef(new Set<string>());
   const relaysNotified = useRef(new Set<string>());
   const transferVerificationActive = useRef(false);
@@ -204,6 +212,44 @@ function App() {
     connection.ready &&
     (needsOnboarding || onboardingInProgress) &&
     !onboardingDismissed;
+
+  useEffect(() => {
+    activeTransferCount.current = safeExitPreview
+      ? Math.max(1, transfers.snapshot.activeCount)
+      : transfers.snapshot.activeCount;
+  }, [safeExitPreview, transfers.snapshot.activeCount]);
+
+  useEffect(() => {
+    if (!native) return;
+    let dispose: (() => void) | undefined;
+    let mounted = true;
+    void getCurrentWindow().onCloseRequested((event) => {
+      if (allowNextClose.current || activeTransferCount.current === 0) return;
+      event.preventDefault();
+      setSafeExitOpen(true);
+    }).then((unlisten) => {
+      if (mounted) dispose = unlisten;
+      else unlisten();
+    });
+    return () => {
+      mounted = false;
+      dispose?.();
+    };
+  }, [native]);
+
+  const pauseSafelyAndExit = async () => {
+    if (safeExitPreparing) return;
+    setSafeExitPreparing(true);
+    try {
+      await transfers.prepareForRestart("pauseNow");
+      allowNextClose.current = true;
+      await getCurrentWindow().close();
+    } catch {
+      allowNextClose.current = false;
+      await transfers.cancelRestartPreparation().catch(() => undefined);
+      setSafeExitPreparing(false);
+    }
+  };
 
   const selectedResult =
     search.results.find((result) => result.id === selectedResultId) ??
@@ -956,6 +1002,7 @@ function App() {
           <TransfersWorkspace
             key={transferFocus?.requestId ?? "transfers"}
             transfers={transfers.snapshot.transfers}
+            safetyState={transfers.snapshot.safetyState}
             maxConcurrentDownloads={transfers.snapshot.maxConcurrentDownloads}
             relaySuggestionMinutes={transfers.snapshot.relaySuggestionMinutes}
             relayRecords={search.records}
@@ -1086,7 +1133,20 @@ function App() {
         </aside>
       ) : null}
 
-      <UpdateExperience {...updater} />
+      <UpdateExperience
+        {...updater}
+        transfers={transfers.snapshot}
+        onPrepareTransfers={transfers.prepareForRestart}
+        onCancelPreparation={transfers.cancelRestartPreparation}
+      />
+
+      <SafeExitDialog
+        open={safeExitOpen}
+        activeCount={safeExitPreview ? Math.max(1, transfers.snapshot.activeCount) : transfers.snapshot.activeCount}
+        preparing={safeExitPreparing}
+        onKeepRunning={() => setSafeExitOpen(false)}
+        onPauseAndExit={() => void pauseSafelyAndExit()}
+      />
 
       {preferencesAlbum ? (
         <SmartMatchPreferencesDialog

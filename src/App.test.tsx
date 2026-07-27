@@ -831,18 +831,29 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.41 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.42 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Windows now places a small gold update badge over Forever’s taskbar icon as soon as a new release is found.",
+        "Safe Passage coordinates active downloads with app updates and Windows exit requests.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "The taskbar badge remains visible when the update toast is dismissed, then clears when downloading begins or Forever is current.",
+        "Partial files are flushed to disk before Forever restarts, then resume automatically after launch.",
       ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Safe Passage update choices" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Finish active files first/ }),
+    );
+    expect(await screen.findByText("Update scheduled")).toBeInTheDocument();
+    expect(screen.getByText("Finishing active files…")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Securing downloads for update" }),
     ).toBeInTheDocument();
   });
 

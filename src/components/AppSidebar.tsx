@@ -55,6 +55,8 @@ export function AppSidebar({
           ? "Update available"
           : updateStatus === "downloading"
             ? "Downloading update"
+            : updateStatus === "preparing"
+              ? "Securing downloads for update"
             : updateStatus === "ready"
               ? "Update ready"
               : updateStatus === "error"

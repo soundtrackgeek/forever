@@ -2,13 +2,23 @@ import {
   ArrowClockwise,
   CheckCircle,
   DownloadSimple,
+  HourglassMedium,
+  Pause,
+  ShieldCheck,
   Sparkle,
   X,
 } from "@phosphor-icons/react";
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { useAppUpdater } from "../hooks/useAppUpdater";
+import type { TransferQueueSnapshot } from "../types";
 
-type UpdateExperienceProps = ReturnType<typeof useAppUpdater>;
+type TransferPreparationMode = "pauseNow" | "finishCurrentFiles";
+
+type UpdateExperienceProps = ReturnType<typeof useAppUpdater> & {
+  transfers: TransferQueueSnapshot;
+  onPrepareTransfers: (mode: TransferPreparationMode) => Promise<unknown>;
+  onCancelPreparation: () => Promise<unknown>;
+};
 
 const plainMarkdown = (value: string) =>
   value
@@ -70,7 +80,27 @@ export function UpdateExperience({
   openModal,
   closeModal,
   remindLater,
+  transfers,
+  onPrepareTransfers,
+  onCancelPreparation,
 }: UpdateExperienceProps) {
+  const [preparationMode, setPreparationMode] =
+    useState<TransferPreparationMode | null>(null);
+  const pendingTransferCount = useMemo(
+    () => transfers.transfers.filter(
+      (transfer) => transfer.status !== "completed",
+    ).length,
+    [transfers.transfers],
+  );
+  const preparing = status === "preparing";
+  const startSafeUpdate = (mode: TransferPreparationMode) => {
+    setPreparationMode(mode);
+    void installUpdate(
+      () => onPrepareTransfers(mode),
+      onCancelPreparation,
+    );
+  };
+
   if (!details && status !== "error") return null;
 
   return (
@@ -101,7 +131,7 @@ export function UpdateExperience({
       {isModalOpen && (
         <div className="modal-backdrop" role="presentation">
           <section
-            className="update-modal"
+            className={`update-modal ${pendingTransferCount > 0 ? "is-safe-passage" : ""}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="update-title"
@@ -110,7 +140,12 @@ export function UpdateExperience({
               <span className="update-modal-mark">
                 <Sparkle size={22} weight="fill" />
               </span>
-              <button type="button" aria-label="Close update" onClick={closeModal}>
+              <button
+                type="button"
+                aria-label="Close update"
+                onClick={closeModal}
+                disabled={preparing || status === "downloading"}
+              >
                 <X size={17} />
               </button>
             </header>
@@ -119,7 +154,11 @@ export function UpdateExperience({
               <>
                 <div className="update-heading">
                   <span>Update interrupted</span>
-                  <h2 id="update-title">We couldn’t check for updates.</h2>
+                  <h2 id="update-title">
+                    {details
+                      ? "We couldn’t complete the update."
+                      : "We couldn’t check for updates."}
+                  </h2>
                   <p>{error || "Check your connection and try again."}</p>
                 </div>
                 <div className="update-modal-actions">
@@ -152,6 +191,69 @@ export function UpdateExperience({
                     <ReleaseNotes body={details.body} />
                   </div>
 
+                  {status === "available" && pendingTransferCount > 0 ? (
+                    <section
+                      className="safe-passage-options"
+                      aria-label="Safe Passage update choices"
+                    >
+                      <header>
+                        <ShieldCheck size={18} weight="fill" />
+                        <span>
+                          <small>Safe Passage</small>
+                          <strong>
+                            {pendingTransferCount} unfinished {pendingTransferCount === 1 ? "file is" : "files are"} protected.
+                          </strong>
+                        </span>
+                      </header>
+                      <button
+                        type="button"
+                        onClick={() => startSafeUpdate("pauseNow")}
+                      >
+                        <Pause size={17} weight="fill" />
+                        <span>
+                          <strong>Pause safely &amp; update</strong>
+                          <small>Flush partial files, install now, and resume after restart.</small>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => startSafeUpdate("finishCurrentFiles")}
+                        disabled={transfers.activeCount === 0}
+                      >
+                        <HourglassMedium size={18} />
+                        <span>
+                          <strong>Finish active files first</strong>
+                          <small>
+                            Start nothing new, then update when {transfers.activeCount} active {transfers.activeCount === 1 ? "file is" : "files are"} complete.
+                          </small>
+                        </span>
+                      </button>
+                    </section>
+                  ) : null}
+
+                  {preparing ? (
+                    <div className="safe-passage-preparing" role="status">
+                      <span className="search-spinner"><HourglassMedium size={18} /></span>
+                      <span>
+                        <small>Update scheduled</small>
+                        <strong>
+                          {preparationMode === "finishCurrentFiles"
+                            ? "Finishing active files…"
+                            : "Securing partial downloads…"}
+                        </strong>
+                        <p>No new download will start. Forever installs when every file handle is safely closed.</p>
+                      </span>
+                      {preparationMode === "finishCurrentFiles" ? (
+                        <button
+                          type="button"
+                          onClick={() => void onPrepareTransfers("pauseNow")}
+                        >
+                          Pause now instead
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   {(status === "downloading" || status === "ready") && (
                     <div className="update-progress">
                       <span>
@@ -169,9 +271,11 @@ export function UpdateExperience({
                       type="button"
                       className="modal-secondary"
                       onClick={remindLater}
-                      disabled={status === "downloading"}
+                      disabled={preparing || status === "downloading"}
                     >
-                      Later
+                      {pendingTransferCount > 0 && status === "available"
+                        ? "Keep downloading"
+                        : "Later"}
                     </button>
                     {status === "ready" ? (
                       <button
@@ -181,15 +285,17 @@ export function UpdateExperience({
                       >
                         <CheckCircle size={18} weight="fill" /> Restart Forever
                       </button>
-                    ) : (
+                    ) : status === "available" && pendingTransferCount > 0 ? null : (
                       <button
                         type="button"
                         className="modal-primary"
-                        disabled={status === "downloading"}
+                        disabled={preparing || status === "downloading"}
                         onClick={() => void installUpdate()}
                       >
                         <DownloadSimple size={18} weight="bold" />
-                        {status === "downloading"
+                        {preparing
+                          ? "Securing downloads"
+                          : status === "downloading"
                           ? `Downloading ${progress}%`
                           : "Update Forever"}
                       </button>

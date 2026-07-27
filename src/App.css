@@ -5477,8 +5477,10 @@ button:disabled {
 }
 
 .update-modal {
-  width: min(468px, calc(100vw - 48px));
-  overflow: hidden;
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow-x: hidden;
+  overflow-y: auto;
   background:
     radial-gradient(circle at 15% 0%, rgba(87, 57, 117, 0.22), transparent 38%),
     #101421;
@@ -5561,6 +5563,261 @@ button:disabled {
   background: rgba(18, 22, 37, 0.76);
   border: 1px solid #2c3247;
   border-radius: 7px;
+}
+
+.update-modal.is-safe-passage .update-heading {
+  padding-bottom: 14px;
+}
+
+.update-modal.is-safe-passage .release-notes {
+  max-height: min(150px, 21vh);
+}
+
+.update-modal.is-safe-passage .update-modal-actions {
+  margin-top: 14px;
+}
+
+.safe-passage-options {
+  display: grid;
+  gap: 8px;
+  margin: 14px 22px 0;
+  padding: 12px;
+  background: linear-gradient(135deg, rgba(81, 57, 112, 0.17), rgba(15, 20, 34, 0.78));
+  border: 1px solid #403958;
+  border-radius: 8px;
+}
+
+.safe-passage-options > header,
+.safe-passage-options > button {
+  display: grid;
+  grid-template-columns: 29px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.safe-passage-options > header {
+  padding: 0 4px 4px;
+  color: #70d98c;
+}
+
+.safe-passage-options > header span,
+.safe-passage-options > button span,
+.safe-passage-preparing > span:nth-child(2) {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+}
+
+.safe-passage-options small,
+.safe-passage-preparing small {
+  color: #928ba4;
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.safe-passage-options strong,
+.safe-passage-preparing strong {
+  color: #e9e5ee;
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.safe-passage-options > button {
+  min-height: 50px;
+  padding: 8px 10px;
+  color: #bdafd2;
+  background: rgba(16, 20, 34, 0.88);
+  border: 1px solid #353148;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.safe-passage-options > button:hover:not(:disabled) {
+  color: var(--amber);
+  background: rgba(42, 33, 56, 0.9);
+  border-color: #66527e;
+}
+
+.safe-passage-options > button small {
+  color: #898c9e;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
+}
+
+.safe-passage-options > button:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.safe-passage-preparing {
+  display: grid;
+  grid-template-columns: 31px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 16px 22px 0;
+  padding: 12px 14px;
+  background: rgba(36, 29, 50, 0.72);
+  border: 1px solid #514266;
+  border-radius: 7px;
+}
+
+.safe-passage-preparing > span:first-child {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  color: var(--amber);
+  place-items: center;
+}
+
+.safe-passage-preparing p {
+  margin: 0;
+  color: #8f92a2;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.safe-passage-preparing > button {
+  grid-column: 2;
+  justify-self: start;
+  padding: 0;
+  color: var(--amber);
+  font: inherit;
+  font-size: 9px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.safe-passage-preparing > button:hover {
+  color: #ffd58b;
+}
+
+.safe-exit-modal {
+  width: min(440px, calc(100vw - 48px));
+  overflow: hidden;
+  background: radial-gradient(circle at 12% 0%, rgba(72, 110, 90, 0.16), transparent 40%), #101421;
+  border: 1px solid #3d4f4d;
+  border-radius: 12px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.58);
+  animation: modal-in 220ms ease-out;
+}
+
+.safe-exit-modal > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 19px 22px 0;
+}
+
+.safe-exit-modal > header > span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  color: #70d98c;
+  background: rgba(71, 157, 101, 0.12);
+  border: 1px solid rgba(93, 184, 122, 0.3);
+  border-radius: 9px;
+  place-items: center;
+}
+
+.safe-exit-modal > header > button {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  padding: 0;
+  color: #858998;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  place-items: center;
+}
+
+.safe-exit-modal > div {
+  padding: 17px 22px 20px;
+}
+
+.safe-exit-modal > div > small {
+  color: #70d98c;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+}
+
+.safe-exit-modal h2 {
+  margin: 7px 0 8px;
+  color: #f2f2f5;
+  font-size: 23px;
+  font-weight: 480;
+  letter-spacing: -0.035em;
+}
+
+.safe-exit-modal p,
+.safe-exit-modal li {
+  color: #9a9dac;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.safe-exit-modal p {
+  margin: 0;
+}
+
+.safe-exit-modal ul {
+  display: grid;
+  gap: 5px;
+  margin: 15px 0 0;
+  padding-left: 17px;
+}
+
+.safe-exit-modal li::marker {
+  color: #70d98c;
+}
+
+.safe-exit-modal > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  padding: 16px 22px;
+  background: rgba(6, 9, 17, 0.46);
+  border-top: 1px solid #273238;
+}
+
+.safe-passage-transfer-banner {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 0 25px 12px;
+  padding: 10px 13px;
+  color: #70d98c;
+  background: linear-gradient(90deg, rgba(42, 77, 59, 0.2), rgba(25, 22, 38, 0.5));
+  border: 1px solid rgba(91, 157, 112, 0.3);
+  border-radius: 7px;
+}
+
+.safe-passage-transfer-banner span {
+  display: grid;
+  gap: 3px;
+}
+
+.safe-passage-transfer-banner small {
+  color: #70d98c;
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.safe-passage-transfer-banner strong {
+  color: #c4c8ce;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .release-notes-content {

@@ -147,13 +147,15 @@ const emptySnapshot: TransferQueueSnapshot = {
   activeCount: 0,
   maxConcurrentDownloads: 3,
   relaySuggestionMinutes: 10,
+  safetyState: "running",
 };
 
 const withCount = (
   transfers: Transfer[],
-  settings: Pick<TransferQueueSnapshot, "maxConcurrentDownloads" | "relaySuggestionMinutes"> = {
+  settings: Pick<TransferQueueSnapshot, "maxConcurrentDownloads" | "relaySuggestionMinutes" | "safetyState"> = {
     maxConcurrentDownloads: 3,
     relaySuggestionMinutes: 10,
+    safetyState: "running",
   },
 ): TransferQueueSnapshot => ({
   transfers,
@@ -164,6 +166,7 @@ const withCount = (
   ).length,
   maxConcurrentDownloads: settings.maxConcurrentDownloads,
   relaySuggestionMinutes: settings.relaySuggestionMinutes,
+  safetyState: settings.safetyState,
 });
 
 const errorMessage = (cause: unknown) =>
@@ -386,6 +389,7 @@ export function useSoulseekTransfers() {
             };
           }
           if (
+            current.safetyState === "running" &&
             !hasActive &&
             (transfer.status === "queued" ||
               (transfer.status === "retrying" &&
@@ -1008,6 +1012,70 @@ export function useSoulseekTransfers() {
     }
   }, [native, snapshot]);
 
+  const prepareForRestart = useCallback(async (
+    mode: "pauseNow" | "finishCurrentFiles",
+  ) => {
+    setError(null);
+    try {
+      if (native) {
+        const next = await invoke<TransferQueueSnapshot>(
+          "transfers_prepare_for_restart",
+          { mode },
+        );
+        setSnapshot(next);
+        return next;
+      }
+
+      setSnapshot((current) => ({
+        ...current,
+        safetyState: mode === "pauseNow" ? "pausedForRestart" : "draining",
+      }));
+      await new Promise((resolve) => window.setTimeout(resolve, mode === "pauseNow" ? 180 : 900));
+      let nextSnapshot = emptySnapshot;
+      setSnapshot((current) => {
+        const transfers = current.transfers.map((transfer) =>
+          !["requesting", "remotelyQueued", "connecting", "downloading"].includes(
+            transfer.status,
+          )
+            ? transfer
+            : {
+                ...transfer,
+                status: "queued" as const,
+                speedBytesPerSecond: 0,
+                etaSeconds: null,
+                queuePosition: null,
+                error: null,
+              },
+        );
+        nextSnapshot = withCount(transfers, {
+          ...current,
+          safetyState: "pausedForRestart",
+        });
+        return nextSnapshot;
+      });
+      return nextSnapshot;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native]);
+
+  const cancelRestartPreparation = useCallback(async () => {
+    setError(null);
+    try {
+      const next = native
+        ? await invoke<TransferQueueSnapshot>(
+            "transfers_cancel_restart_preparation",
+          )
+        : { ...snapshot, safetyState: "running" as const };
+      setSnapshot(next);
+      return next;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native, snapshot]);
+
   return useMemo(
     () => ({
       ready,
@@ -1032,6 +1100,8 @@ export function useSoulseekTransfers() {
       relayReleaseSource,
       setMaxConcurrentDownloads,
       setRelaySuggestionMinutes,
+      prepareForRestart,
+      cancelRestartPreparation,
       completionNotice,
       clearCompletionNotice,
       activityNotice,
@@ -1063,6 +1133,8 @@ export function useSoulseekTransfers() {
       relayReleaseSource,
       setMaxConcurrentDownloads,
       setRelaySuggestionMinutes,
+      prepareForRestart,
+      cancelRestartPreparation,
       completionNotice,
       activityNotice,
       snapshot,

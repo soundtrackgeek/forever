@@ -20,6 +20,40 @@ const MAX_CONCURRENT_DOWNLOADS: u8 = 6;
 const DEFAULT_RELAY_SUGGESTION_MINUTES: u32 = 10;
 const RELAY_SUGGESTION_MINUTES: [u32; 6] = [0, 5, 10, 20, 30, 60];
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransferSafetyState {
+    #[default]
+    Running,
+    Draining,
+    PausedForRestart,
+}
+
+impl TransferSafetyState {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Draining,
+            2 => Self::PausedForRestart,
+            _ => Self::Running,
+        }
+    }
+
+    fn as_u8(self) -> u8 {
+        match self {
+            Self::Running => 0,
+            Self::Draining => 1,
+            Self::PausedForRestart => 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TransferPreparationMode {
+    PauseNow,
+    FinishCurrentFiles,
+}
+
 fn default_max_concurrent_downloads() -> u8 {
     DEFAULT_MAX_CONCURRENT_DOWNLOADS
 }
@@ -131,6 +165,7 @@ pub struct TransferQueueSnapshot {
     pub active_count: usize,
     pub max_concurrent_downloads: u8,
     pub relay_suggestion_minutes: u32,
+    pub safety_state: TransferSafetyState,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +230,7 @@ pub struct TransferHub {
     transfers: Arc<RwLock<Vec<TransferSnapshot>>>,
     max_concurrent_downloads: Arc<AtomicU8>,
     relay_suggestion_minutes: Arc<AtomicU32>,
+    safety_state: Arc<AtomicU8>,
     tasks: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     next_id: Arc<AtomicU64>,
 }
@@ -204,18 +240,7 @@ impl TransferHub {
         let store = load_store(&path)?;
         let mut transfers = store.transfers;
         for transfer in &mut transfers {
-            if transfer.status.occupies_slot() {
-                transfer.status = TransferStatus::Queued;
-                transfer.speed_bytes_per_second = 0;
-                transfer.eta_seconds = None;
-                transfer.error = None;
-                transfer.connection_token = None;
-                transfer.transfer_token = None;
-            }
-            refresh_partial_size(transfer);
-            if transfer.status == TransferStatus::Completed {
-                refresh_verification(transfer);
-            }
+            reconcile_transfer_after_restart(transfer);
         }
 
         let hub = Self {
@@ -224,6 +249,7 @@ impl TransferHub {
             transfers: Arc::new(RwLock::new(transfers)),
             max_concurrent_downloads: Arc::new(AtomicU8::new(store.max_concurrent_downloads)),
             relay_suggestion_minutes: Arc::new(AtomicU32::new(store.relay_suggestion_minutes)),
+            safety_state: Arc::new(AtomicU8::new(TransferSafetyState::Running.as_u8())),
             tasks: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(AtomicU64::new(timestamp_ms())),
         };
@@ -246,7 +272,85 @@ impl TransferHub {
             active_count,
             max_concurrent_downloads: self.max_concurrent_downloads.load(Ordering::SeqCst),
             relay_suggestion_minutes: self.relay_suggestion_minutes.load(Ordering::SeqCst),
+            safety_state: self.safety_state(),
         }
+    }
+
+    pub fn safety_state(&self) -> TransferSafetyState {
+        TransferSafetyState::from_u8(self.safety_state.load(Ordering::SeqCst))
+    }
+
+    pub fn begin_restart_preparation(
+        &self,
+        mode: TransferPreparationMode,
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        let next_state = match mode {
+            TransferPreparationMode::PauseNow => TransferSafetyState::PausedForRestart,
+            TransferPreparationMode::FinishCurrentFiles => TransferSafetyState::Draining,
+        };
+        self.safety_state
+            .store(next_state.as_u8(), Ordering::SeqCst);
+
+        let ids_to_abort = {
+            let transfers = self
+                .transfers
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            transfers
+                .iter()
+                .filter(|transfer| {
+                    transfer.status != TransferStatus::Completed
+                        && (mode == TransferPreparationMode::PauseNow
+                            || transfer.status != TransferStatus::Downloading)
+                })
+                .map(|transfer| transfer.id.clone())
+                .collect::<Vec<_>>()
+        };
+        for id in ids_to_abort {
+            self.abort(&id);
+        }
+
+        self.mutate(|transfers| {
+            prepare_transfers_for_restart(transfers, mode);
+        })?;
+        Ok(self.snapshot())
+    }
+
+    pub fn finish_restart_preparation(&self) -> Result<TransferQueueSnapshot, TransferError> {
+        self.safety_state.store(
+            TransferSafetyState::PausedForRestart.as_u8(),
+            Ordering::SeqCst,
+        );
+        self.mutate(|transfers| {
+            for transfer in transfers {
+                if transfer.status != TransferStatus::Completed {
+                    let was_active = transfer.status.occupies_slot();
+                    refresh_partial_size(transfer);
+                    if was_active {
+                        transfer.status = TransferStatus::Queued;
+                        reset_runtime_state(transfer);
+                        transfer.error = None;
+                        transfer.retry_at_ms = None;
+                    }
+                    transfer.updated_at_ms = timestamp_ms();
+                }
+            }
+        })?;
+        Ok(self.snapshot())
+    }
+
+    pub fn cancel_restart_preparation(&self) -> Result<TransferQueueSnapshot, TransferError> {
+        self.safety_state
+            .store(TransferSafetyState::Running.as_u8(), Ordering::SeqCst);
+        self.persist_and_publish()?;
+        Ok(self.snapshot())
+    }
+
+    pub fn active_task_count(&self) -> usize {
+        self.tasks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len()
     }
 
     pub fn set_max_concurrent_downloads(
@@ -880,6 +984,9 @@ impl TransferHub {
     }
 
     pub fn activate_next(&self, connection_token: u32) -> Option<TransferTicket> {
+        if self.safety_state() != TransferSafetyState::Running {
+            return None;
+        }
         let ticket = {
             let mut transfers = self
                 .transfers
@@ -1323,6 +1430,65 @@ fn schedule_partial_cleanup(path: PathBuf) {
             }
         }
     });
+}
+
+fn prepare_transfers_for_restart(
+    transfers: &mut [TransferSnapshot],
+    mode: TransferPreparationMode,
+) {
+    let now = timestamp_ms();
+    for transfer in transfers {
+        if transfer.status == TransferStatus::Completed {
+            continue;
+        }
+        let keep_downloading = mode == TransferPreparationMode::FinishCurrentFiles
+            && transfer.status == TransferStatus::Downloading;
+        if keep_downloading {
+            continue;
+        }
+        if transfer.status.occupies_slot() {
+            refresh_partial_size(transfer);
+            transfer.status = TransferStatus::Queued;
+            reset_runtime_state(transfer);
+            transfer.error = None;
+            transfer.retry_at_ms = None;
+            transfer.updated_at_ms = now;
+        }
+    }
+}
+
+fn reconcile_transfer_after_restart(transfer: &mut TransferSnapshot) {
+    let final_path = Path::new(&transfer.local_path);
+    let final_file_complete = transfer.status != TransferStatus::Completed
+        && fs::metadata(final_path)
+            .map(|metadata| metadata.is_file() && metadata.len() == transfer.size_bytes)
+            .unwrap_or(false);
+    if final_file_complete {
+        transfer.status = TransferStatus::Completed;
+        transfer.transferred_bytes = transfer.size_bytes;
+        transfer.speed_bytes_per_second = 0;
+        transfer.eta_seconds = Some(0);
+        transfer.error = None;
+        transfer.retry_at_ms = None;
+        transfer.waiting_since_ms = None;
+        transfer.connection_token = None;
+        transfer.transfer_token = None;
+        refresh_verification(transfer);
+        return;
+    }
+
+    if transfer.status.occupies_slot() {
+        transfer.status = TransferStatus::Queued;
+        transfer.speed_bytes_per_second = 0;
+        transfer.eta_seconds = None;
+        transfer.error = None;
+        transfer.connection_token = None;
+        transfer.transfer_token = None;
+    }
+    refresh_partial_size(transfer);
+    if transfer.status == TransferStatus::Completed {
+        refresh_verification(transfer);
+    }
 }
 
 fn validate_request(request: &EnqueueTransferRequest) -> Result<(), TransferError> {
@@ -1985,6 +2151,98 @@ mod tests {
             load_store(&store_path).unwrap().transfers[0].transferred_bytes,
             37
         );
+    }
+
+    #[test]
+    fn safe_passage_drains_only_current_file_writers() {
+        let mut transfers = vec![
+            release_transfer(
+                "writing",
+                "release-writing",
+                "listener-a",
+                "Music\\Writing\\01.flac",
+                TransferStatus::Downloading,
+                1,
+            ),
+            release_transfer(
+                "contacting",
+                "release-contacting",
+                "listener-b",
+                "Music\\Contacting\\01.flac",
+                TransferStatus::Requesting,
+                1,
+            ),
+            release_transfer(
+                "queued",
+                "release-queued",
+                "listener-c",
+                "Music\\Queued\\01.flac",
+                TransferStatus::Queued,
+                1,
+            ),
+            release_transfer(
+                "done",
+                "release-done",
+                "listener-d",
+                "Music\\Done\\01.flac",
+                TransferStatus::Completed,
+                1,
+            ),
+        ];
+        transfers[1].connection_token = Some(42);
+        transfers[1].waiting_since_ms = Some(timestamp_ms());
+
+        prepare_transfers_for_restart(&mut transfers, TransferPreparationMode::FinishCurrentFiles);
+
+        assert_eq!(transfers[0].status, TransferStatus::Downloading);
+        assert_eq!(transfers[1].status, TransferStatus::Queued);
+        assert_eq!(transfers[1].connection_token, None);
+        assert_eq!(transfers[1].waiting_since_ms, None);
+        assert_eq!(transfers[2].status, TransferStatus::Queued);
+        assert_eq!(transfers[3].status, TransferStatus::Completed);
+    }
+
+    #[test]
+    fn safe_passage_pause_requeues_every_unfinished_file() {
+        let mut transfers = vec![release_transfer(
+            "writing",
+            "release-writing",
+            "listener-a",
+            "Music\\Writing\\01.flac",
+            TransferStatus::Downloading,
+            1,
+        )];
+        transfers[0].speed_bytes_per_second = 1_000;
+        transfers[0].eta_seconds = Some(5);
+
+        prepare_transfers_for_restart(&mut transfers, TransferPreparationMode::PauseNow);
+
+        assert_eq!(transfers[0].status, TransferStatus::Queued);
+        assert_eq!(transfers[0].speed_bytes_per_second, 0);
+        assert_eq!(transfers[0].eta_seconds, None);
+    }
+
+    #[test]
+    fn restart_reconciles_a_finalized_file_before_resuming_the_queue() {
+        let directory = tempfile::tempdir().unwrap();
+        let final_path = directory.path().join("finished.flac");
+        fs::write(&final_path, vec![4_u8; 100]).unwrap();
+        let mut transfer = release_transfer(
+            "renamed",
+            "release-renamed",
+            "listener",
+            "Music\\Album\\finished.flac",
+            TransferStatus::Downloading,
+            1,
+        );
+        transfer.local_path = final_path.to_string_lossy().into_owned();
+        transfer.transferred_bytes = 80;
+
+        reconcile_transfer_after_restart(&mut transfer);
+
+        assert_eq!(transfer.status, TransferStatus::Completed);
+        assert_eq!(transfer.transferred_bytes, 100);
+        assert_eq!(transfer.verification_status, VerificationStatus::Verified);
     }
 
     #[test]

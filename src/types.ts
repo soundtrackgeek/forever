@@ -500,6 +500,7 @@ export type TransferQueueSnapshot = {
   activeCount: number;
   maxConcurrentDownloads: number;
   relaySuggestionMinutes: number;
+  safetyState: "running" | "draining" | "pausedForRestart";
 };
 
 export type SharedRoot = {

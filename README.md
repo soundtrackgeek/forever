@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.41` adds a native Windows taskbar overlay
-> when an update is waiting, so a new Forever release stays visible even after
-> its in-app toast has been dismissed.
+> **Status:** pre-alpha. Version `0.0.42` adds **Safe Passage** so active
+> downloads are flushed, persisted, and resumed safely across app updates and
+> Windows exit requests.
 
-If `0.0.16` is installed, download and run the latest `0.0.41` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.42` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -195,6 +195,12 @@ configuration and transfers.
   changelog-backed release highlights, and restart flow
 - Native Windows taskbar update badge that stays visible while a release is
   available and clears when downloading begins or Forever is current
+- **Safe Passage** update choices can pause and flush active `.part` files
+  immediately or drain current file writers without advancing the queue;
+  unfinished work resumes automatically after the verified update restarts
+- Native close protection intercepts the title-bar close button, Alt+F4, and
+  taskbar close while downloads are writing, offering **Pause safely & exit**
+  or **Keep running** instead of abandoning active file handles
 - GitHub CI for linting, typechecking, frontend tests, Rust formatting, Clippy,
   and Rust tests
 - Automatic GitHub Releases containing NSIS `.exe` and WiX `.msi` installers

@@ -464,6 +464,26 @@ pub async fn transfers_snapshot(
 }
 
 #[tauri::command]
+pub async fn transfers_prepare_for_restart(
+    manager: State<'_, ConnectionManager>,
+    mode: downloads::TransferPreparationMode,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .prepare_transfers_for_restart(mode)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfers_cancel_restart_preparation(
+    manager: State<'_, ConnectionManager>,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .cancel_restart_preparation()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn transfer_set_max_concurrent_downloads(
     manager: State<'_, ConnectionManager>,
     max_concurrent_downloads: u8,

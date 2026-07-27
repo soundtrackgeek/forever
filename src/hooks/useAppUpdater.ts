@@ -12,6 +12,7 @@ export type UpdateStatus =
   | "checking"
   | "current"
   | "available"
+  | "preparing"
   | "downloading"
   | "ready"
   | "error";
@@ -34,17 +35,18 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.40",
-  version: "0.0.41",
-  body: `## What’s new in Forever 0.0.41
+  currentVersion: "0.0.41",
+  version: "0.0.42",
+  body: `## What’s new in Forever 0.0.42
 
 ### Added
 
-- Windows now places a small gold update badge over Forever’s taskbar icon as soon as a new release is found.
+- Safe Passage coordinates active downloads with app updates and Windows exit requests.
+- Updates can pause immediately or wait for current files to finish without starting another queued file.
 
 ### Changed
 
-- The taskbar badge remains visible when the update toast is dismissed, then clears when downloading begins or Forever is current.`,
+- Partial files are flushed to disk before Forever restarts, then resume automatically after launch.`,
   date: "2026-07-27",
 };
 
@@ -97,10 +99,13 @@ export function useAppUpdater() {
     ])
       .then(async ([{ Image }, { getCurrentWindow }]) => {
         const appWindow = getCurrentWindow();
-        const image = await applyUpdateTaskbarBadge(status === "available", {
+        const image = await applyUpdateTaskbarBadge(
+          status === "available" || status === "preparing",
+          {
           createImage: (rgba, width, height) => Image.new(rgba, width, height),
           setOverlayIcon: (icon) => appWindow.setOverlayIcon(icon),
-        });
+          },
+        );
         if (!image) return;
         if (!active) {
           await image.close();
@@ -213,32 +218,36 @@ export function useAppUpdater() {
     [],
   );
 
-  const installUpdate = useCallback(async () => {
+  const installUpdate = useCallback(async (
+    prepare?: () => Promise<unknown>,
+    rollback?: () => Promise<unknown>,
+  ) => {
     if (installInProgressRef.current) return;
     installInProgressRef.current = true;
-    setStatus("downloading");
     setProgress(0);
     setError(null);
 
-    if (!isTauri()) {
-      for (const step of [12, 28, 46, 63, 78, 91, 100]) {
-        await wait(130);
-        setProgress(step);
-      }
-      setStatus("ready");
-      installInProgressRef.current = false;
-      return;
-    }
-
-    const update = updateRef.current;
-    if (!update) {
-      setError("The update is no longer available. Check again and retry.");
-      setStatus("error");
-      installInProgressRef.current = false;
-      return;
-    }
-
     try {
+      if (prepare) {
+        setStatus("preparing");
+        await prepare();
+      }
+      setStatus("downloading");
+
+      if (!isTauri()) {
+        for (const step of [12, 28, 46, 63, 78, 91, 100]) {
+          await wait(130);
+          setProgress(step);
+        }
+        setStatus("ready");
+        return;
+      }
+
+      const update = updateRef.current;
+      if (!update) {
+        throw new Error("The update is no longer available. Check again and retry.");
+      }
+
       let downloaded = 0;
       let total = 0;
 
@@ -263,6 +272,13 @@ export function useAppUpdater() {
       setStatus("ready");
       await relaunch();
     } catch (cause) {
+      if (rollback) {
+        try {
+          await rollback();
+        } catch {
+          // Preserve the updater error; Transfers reports rollback failures.
+        }
+      }
       const message =
         cause instanceof Error ? cause.message : "The update could not install.";
       setError(message);

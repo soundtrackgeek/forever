@@ -43,6 +43,7 @@ const transfersClockStartedAtMs = Date.now();
 
 type TransfersWorkspaceProps = {
   transfers: Transfer[];
+  safetyState: "running" | "draining" | "pausedForRestart";
   maxConcurrentDownloads: number;
   relaySuggestionMinutes: number;
   relayRecords: Record<string, SearchSessionRecord>;
@@ -159,6 +160,7 @@ const isVisibleInFilter = (
 
 export function TransfersWorkspace({
   transfers,
+  safetyState,
   maxConcurrentDownloads,
   relaySuggestionMinutes,
   relayRecords,
@@ -399,6 +401,20 @@ export function TransfersWorkspace({
           <UploadSimple size={15} /> Uploads <span>{uploads.length}</span>
         </button>
       </div>
+
+      {direction === "downloads" && safetyState !== "running" ? (
+        <aside className="safe-passage-transfer-banner" role="status">
+          <ShieldCheck size={18} weight="fill" />
+          <span>
+            <small>Safe Passage · Update scheduled</small>
+            <strong>
+              {safetyState === "draining"
+                ? "Current files may finish; the queue will not advance."
+                : "Partial progress is secured for the restart."}
+            </strong>
+          </span>
+        </aside>
+      ) : null}
 
       {direction === "downloads" ? (
         <section className="transfer-queue-overview" aria-label="Download queue summary">

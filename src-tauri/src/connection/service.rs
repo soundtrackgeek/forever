@@ -4,7 +4,7 @@ use super::{
     distributed::{DistributedHub, DistributedSnapshot, RequestAdmission},
     downloads::{
         DownloadPlan, EnqueueReleaseRequest, EnqueueTransferRequest, ReleaseAlternativeSource,
-        TransferError, TransferHub, TransferQueueSnapshot, TransferTicket,
+        TransferError, TransferHub, TransferPreparationMode, TransferQueueSnapshot, TransferTicket,
     },
     folders::{FolderError, FolderHub, FolderInspection, FolderTicket},
     local_shares::{
@@ -714,6 +714,25 @@ impl ConnectionManager {
 
     pub fn current_transfers(&self) -> TransferQueueSnapshot {
         self.transfers.snapshot()
+    }
+
+    pub async fn prepare_transfers_for_restart(
+        &self,
+        mode: TransferPreparationMode,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        self.transfers.begin_restart_preparation(mode)?;
+        while self.transfers.active_task_count() > 0 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Ok(self.transfers.finish_restart_preparation()?)
+    }
+
+    pub fn cancel_restart_preparation(
+        &self,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        let snapshot = self.transfers.cancel_restart_preparation()?;
+        self.schedule_downloads();
+        Ok(snapshot)
     }
 
     pub fn set_max_concurrent_downloads(
@@ -3870,6 +3889,12 @@ async fn receive_file(
     let mut buffer = vec![0_u8; FILE_BUFFER_SIZE];
     while transferred < plan.size_bytes {
         if cancellation.load(Ordering::SeqCst) {
+            file.flush()
+                .await
+                .map_err(|error| format!("Forever could not flush the paused file: {error}"))?;
+            file.sync_data()
+                .await
+                .map_err(|error| format!("Forever could not secure the paused file: {error}"))?;
             return Ok(());
         }
         let remaining = plan.size_bytes - transferred;

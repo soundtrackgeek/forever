@@ -5,6 +5,37 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.42] - 2026-07-27
+
+### Added
+
+- **Safe Passage** gives updates with unfinished transfers two protected paths:
+  pause and install immediately, or finish current file writers without
+  starting another queued file.
+- Native close requests from the title bar, Alt+F4, or the Windows taskbar now
+  warn while downloads are active and offer **Pause safely & exit** or
+  **Keep running**.
+- Transfers and the update modal show when an update is scheduled and the
+  download queue is draining or secured for restart.
+
+### Changed
+
+- Cooperative download cancellation now flushes and syncs every `.part` file,
+  waits for its writer to release the handle, refreshes progress from the real
+  on-disk size, and only then allows installation or exit.
+- Active transfers return to the local queue for automatic resume on the next
+  launch, while deliberately paused or failed transfers retain their state.
+- If update installation fails, Forever reopens the scheduler instead of
+  leaving the queue paused. A long drain can also be changed to **Pause now**.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.42`.
+
+### Fixed
+
+- Startup recognizes an exact-size final file left by a restart between rename
+  and state persistence, preventing a completed download from being requested
+  again.
+
 ## [0.0.41] - 2026-07-27
 
 ### Added

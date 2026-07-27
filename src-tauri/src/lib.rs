@@ -55,6 +55,8 @@ pub fn run() {
             connection::search_stop_all,
             connection::search_close,
             connection::transfers_snapshot,
+            connection::transfers_prepare_for_restart,
+            connection::transfers_cancel_restart_preparation,
             connection::transfer_set_max_concurrent_downloads,
             connection::transfer_set_relay_suggestion_minutes,
             connection::transfer_enqueue,
