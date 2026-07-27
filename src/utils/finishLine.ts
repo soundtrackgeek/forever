@@ -12,6 +12,7 @@ export type ReleaseHealthState =
 
 export type ReleaseHealth = {
   state: ReleaseHealthState;
+  filedByArchive: boolean;
   completedCount: number;
   verifiedCount: number;
   pendingCount: number;
@@ -22,6 +23,13 @@ export type ReleaseHealth = {
   nextRetryAtMs: number | null;
   alternatives: ReleaseAlternativeSource[];
 };
+
+const AUDIO_FORMATS = new Set([
+  "AAC", "AIFF", "ALAC", "APE", "FLAC", "M4A", "MP3", "OGG", "OPUS", "WAV", "WMA", "WV",
+]);
+
+const isAudioTransfer = (transfer: Transfer) =>
+  AUDIO_FORMATS.has(transfer.remoteFilename.split(".").pop()?.toUpperCase() ?? "");
 
 const sourceKey = (source: ReleaseAlternativeSource) =>
   `${source.username.toLocaleLowerCase()}\u0000${source.remoteFolder
@@ -39,7 +47,10 @@ export function releaseAlternatives(transfers: Transfer[]) {
   return [...sources.values()];
 }
 
-export function releaseHealth(group: TransferGroup): ReleaseHealth {
+export function releaseHealth(
+  group: TransferGroup,
+  options: { archiveOwned?: boolean } = {},
+): ReleaseHealth {
   const completedCount = group.transfers.filter(
     (transfer) => transfer.status === "completed",
   ).length;
@@ -67,9 +78,18 @@ export function releaseHealth(group: TransferGroup): ReleaseHealth {
     group.status === "completed" &&
     group.transfers.length > 0 &&
     missingCount === group.transfers.length;
+  const audioTransfers = group.transfers.filter(isAudioTransfer);
+  const filedByArchive = Boolean(
+    options.archiveOwned
+    && group.status === "completed"
+    && audioTransfers.length > 0
+    && audioTransfers.every((transfer) => transfer.verificationStatus === "missing")
+    && mismatchCount === 0
+    && failedCount === 0,
+  );
 
   let state: ReleaseHealthState = "waiting";
-  if (fullyMoved) state = "moved";
+  if (fullyMoved || filedByArchive) state = "moved";
   else if (missingCount || mismatchCount || failedCount) state = "attention";
   else if (recovering.length) state = "recovering";
   else if (group.status === "active") state = "downloading";
@@ -80,6 +100,7 @@ export function releaseHealth(group: TransferGroup): ReleaseHealth {
 
   return {
     state,
+    filedByArchive,
     completedCount,
     verifiedCount,
     pendingCount,

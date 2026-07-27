@@ -154,14 +154,27 @@ function App() {
   const wanted = useWantedAlbums();
   const missingShelf = useMissingShelf();
   const radar = useShelfRadar();
+  const connection = useSoulseekConnection();
+  const search = useSoulseekSearch(dial.activeId);
+  const transfers = useSoulseekTransfers();
+  const transferGroups = useMemo(
+    () => groupTransfers(transfers.snapshot.transfers),
+    [transfers.snapshot.transfers],
+  );
   const archive = useArchiveInventory(
     archiveDiscovery?.selectedArtist?.name ?? null,
     archiveAlbums,
     wanted.snapshot.albums,
+    transferGroups,
   );
-  const connection = useSoulseekConnection();
-  const search = useSoulseekSearch(dial.activeId);
-  const transfers = useSoulseekTransfers();
+  const archiveOwnedReleaseIds = useMemo(
+    () => new Set(
+      [...archive.transferMatchByReleaseId.entries()]
+        .filter(([, match]) => match.ownership === "owned")
+        .map(([releaseId]) => releaseId),
+    ),
+    [archive.transferMatchByReleaseId],
+  );
   const sharing = useLocalSharing();
   const folders = useSoulseekFolders();
   const shares = useSoulseekShares();
@@ -184,6 +197,7 @@ function App() {
   const [relayNotice, setRelayNotice] = useState<{ groupId: string; title: string; count: number } | null>(null);
   const relaysStarted = useRef(new Set<string>());
   const relaysNotified = useRef(new Set<string>());
+  const transferVerificationActive = useRef(false);
   const lastFulfillmentSync = useRef("");
   const needsOnboarding = !connection.profile || !connection.hasPassword;
   const onboardingOpen =
@@ -196,15 +210,20 @@ function App() {
     search.results[0] ??
     null;
 
-  const transferGroups = useMemo(
-    () => groupTransfers(transfers.snapshot.transfers),
-    [transfers.snapshot.transfers],
-  );
-
   useEffect(() => {
     const timer = window.setInterval(() => setRelayClock(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (activeView !== "transfers") {
+      transferVerificationActive.current = false;
+      return;
+    }
+    if (!transfers.ready || transferVerificationActive.current) return;
+    transferVerificationActive.current = true;
+    void transfers.verifyCompleted().catch(() => undefined);
+  }, [activeView, transfers]);
 
   useEffect(() => {
     const minutes = transfers.snapshot.relaySuggestionMinutes;
@@ -581,6 +600,7 @@ function App() {
             messages={messages.snapshot}
             rooms={rooms.snapshot}
             archiveStatus={archive.status}
+            archiveOwnedReleaseIds={archiveOwnedReleaseIds}
             missingCount={missingStudioCount}
             missingShelfName={missingShelf.selectedArtist?.canonicalName ?? missingShelf.selectedArtist?.name ?? null}
             onOpenTransfer={openTransfer}
@@ -940,6 +960,7 @@ function App() {
             relaySuggestionMinutes={transfers.snapshot.relaySuggestionMinutes}
             relayRecords={search.records}
             online={connection.snapshot.state === "online"}
+            archiveOwnedReleaseIds={archiveOwnedReleaseIds}
             uploads={sharing.uploads.uploads}
             uploadError={sharing.error}
             error={transfers.error}

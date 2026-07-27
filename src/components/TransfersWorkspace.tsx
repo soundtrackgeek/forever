@@ -47,6 +47,7 @@ type TransfersWorkspaceProps = {
   relaySuggestionMinutes: number;
   relayRecords: Record<string, SearchSessionRecord>;
   online: boolean;
+  archiveOwnedReleaseIds: ReadonlySet<string>;
   uploads: Upload[];
   uploadError: string | null;
   error: string | null;
@@ -105,6 +106,19 @@ const formatWaitingTime = (milliseconds: number) => {
   return `${hours}h ${minutes % 60}m`;
 };
 
+const formatVerificationTime = (timestamp: number, clock: number) => {
+  const elapsed = Math.max(0, clock - timestamp);
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "Checked just now";
+  if (minutes < 60) return `Checked ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Checked ${hours}h ago`;
+  return `Checked ${new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(timestamp)}`;
+};
+
 const relaySourceScore = (source: AlbumSource, group: TransferGroup) => {
   const currentFormats = new Set(group.transfers.map((transfer) => transfer.remoteFilename.split(".").pop()?.toUpperCase()).filter(Boolean));
   const sameFormat = source.formats.some((format) => currentFormats.has(format));
@@ -130,8 +144,12 @@ const transferStatus = (transfer: Transfer) => {
   }
 };
 
-const isVisibleInFilter = (group: TransferGroup, filter: Filter) => {
-  const health = releaseHealth(group);
+const isVisibleInFilter = (
+  group: TransferGroup,
+  filter: Filter,
+  archiveOwned: boolean,
+) => {
+  const health = releaseHealth(group, { archiveOwned });
   if (filter === "all") return true;
   if (filter === "active") return group.status === "active" || group.status === "paused" || health.state === "recovering";
   if (filter === "attention") return health.state === "attention";
@@ -145,6 +163,7 @@ export function TransfersWorkspace({
   relaySuggestionMinutes,
   relayRecords,
   online,
+  archiveOwnedReleaseIds,
   uploads,
   uploadError,
   error,
@@ -178,6 +197,9 @@ export function TransfersWorkspace({
     return () => window.clearInterval(timer);
   }, []);
   const groups = useMemo(() => groupTransfers(transfers), [transfers]);
+  const healthFor = (group: TransferGroup) => releaseHealth(group, {
+    archiveOwned: Boolean(group.releaseId && archiveOwnedReleaseIds.has(group.releaseId)),
+  });
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [draggedReleaseId, setDraggedReleaseId] = useState<string | null>(null);
@@ -197,7 +219,7 @@ export function TransfersWorkspace({
   });
   const defaultOpenId =
     groups.find((group) => group.status === "active")?.id ??
-    groups.find((group) => releaseHealth(group).state === "attention")?.id ?? groups[0]?.id;
+    groups.find((group) => healthFor(group).state === "attention")?.id ?? groups[0]?.id;
   const queueSummary = useMemo(() => summarizeTransferGroups(groups), [groups]);
   const queuedGroups = useMemo(
     () => groups.filter((group) => group.status === "queued" && group.releaseId),
@@ -210,21 +232,25 @@ export function TransfersWorkspace({
 
   const counts = {
     all: groups.length,
-    active: groups.filter((group) => ["active", "paused"].includes(group.status) || releaseHealth(group).state === "recovering").length,
-    queued: groups.filter((group) => group.status === "queued" && releaseHealth(group).state !== "recovering").length,
+    active: groups.filter((group) => ["active", "paused"].includes(group.status) || healthFor(group).state === "recovering").length,
+    queued: groups.filter((group) => group.status === "queued" && healthFor(group).state !== "recovering").length,
     completed: groups.filter((group) => group.status === "completed").length,
-    attention: groups.filter((group) => releaseHealth(group).state === "attention").length,
+    attention: groups.filter((group) => healthFor(group).state === "attention").length,
   };
   const finishLineSummary = {
-    verified: groups.filter((group) => releaseHealth(group).state === "verified").length,
-    moved: groups.filter((group) => releaseHealth(group).state === "moved").length,
-    recovering: groups.filter((group) => releaseHealth(group).state === "recovering").length,
-    attention: groups.filter((group) => releaseHealth(group).state === "attention").length,
+    verified: groups.filter((group) => healthFor(group).state === "verified").length,
+    moved: groups.filter((group) => healthFor(group).state === "moved").length,
+    recovering: groups.filter((group) => healthFor(group).state === "recovering").length,
+    attention: groups.filter((group) => healthFor(group).state === "attention").length,
   };
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleGroups = groups.filter(
     (group) =>
-      isVisibleInFilter(group, filter) &&
+      isVisibleInFilter(
+        group,
+        filter,
+        Boolean(group.releaseId && archiveOwnedReleaseIds.has(group.releaseId)),
+      ) &&
       (!normalizedQuery ||
         group.title.toLocaleLowerCase().includes(normalizedQuery) ||
         group.username.toLocaleLowerCase().includes(normalizedQuery) ||
@@ -500,7 +526,13 @@ export function TransfersWorkspace({
             : 0;
           const resumable = group.status === "paused" || group.status === "failed";
           const completed = group.status === "completed";
-          const health = releaseHealth(group);
+          const health = healthFor(group);
+          const verificationTimestamps = group.transfers
+            .map((transfer) => transfer.verifiedAtMs)
+            .filter((value): value is number => typeof value === "number");
+          const verificationAge = verificationTimestamps.length > 0
+            ? formatVerificationTime(Math.min(...verificationTimestamps), clock)
+            : null;
           const retryInSeconds = health.nextRetryAtMs === null || clock === 0
             ? null
             : Math.max(0, Math.ceil((health.nextRetryAtMs - clock) / 1_000));
@@ -562,8 +594,8 @@ export function TransfersWorkspace({
                   <small>{group.transfers.length} {group.transfers.length === 1 ? "file" : "files"} · {formatBytes(group.sizeBytes)}</small>
                   <span className={`release-health-inline is-${health.state}`}>
                     {health.state === "verified" ? <ShieldCheck size={13} weight="fill" /> : moved ? <Archive size={13} weight="fill" /> : health.state === "attention" ? <WarningCircle size={13} weight="fill" /> : health.state === "recovering" ? <ArrowClockwise size={13} /> : <CheckCircle size={13} />}
-                    <strong>{health.state === "verified" ? "Verified" : moved ? "Moved" : health.state === "attention" ? "Needs attention" : health.state === "recovering" ? `Auto recovery${retryInSeconds !== null ? ` in ${retryInSeconds}s` : ""}` : `${health.completedCount}/${group.transfers.length} complete`}</strong>
-                    <small>{moved ? `${health.missingCount} ${health.missingCount === 1 ? "file" : "files"} moved from downloads` : `${health.verifiedCount} verified${health.missingCount ? ` · ${health.missingCount} missing` : ""}${health.mismatchCount ? ` · ${health.mismatchCount} size mismatch` : ""}`}</small>
+                    <strong>{health.state === "verified" ? "Verified" : health.filedByArchive ? "Filed away" : moved ? "Moved" : health.state === "attention" ? "Needs attention" : health.state === "recovering" ? `Auto recovery${retryInSeconds !== null ? ` in ${retryInSeconds}s` : ""}` : `${health.completedCount}/${group.transfers.length} complete`}</strong>
+                    <small>{moved ? `${health.missingCount} ${health.missingCount === 1 ? "file" : "files"} moved from downloads${health.filedByArchive ? " · Archive owns album" : ""}${verificationAge ? ` · ${verificationAge}` : ""}` : `${health.verifiedCount} verified${health.missingCount ? ` · ${health.missingCount} missing` : ""}${health.mismatchCount ? ` · ${health.mismatchCount} size mismatch` : ""}${verificationAge ? ` · ${verificationAge}` : ""}`}</small>
                   </span>
                   {relayAvailable ? <button
                     type="button"
@@ -648,7 +680,7 @@ export function TransfersWorkspace({
                   <strong>{completed ? "Completed" : `${formatBytes(group.transferredBytes)} / ${formatBytes(group.sizeBytes)} (${Math.round(progress)}%)`}</strong>
                   <i><b style={{ width: `${progress}%` }} /></i>
                   <small>
-                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 3${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? group.speedBytesPerSecond > 0 ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : remoteQueuePosition ? `Source queue #${remoteQueuePosition}${waitingFor ? ` · waiting ${waitingFor}` : ""} · using 1 of ${maxConcurrentDownloads} user lanes` : `${waitingTransfer?.status === "connecting" ? "Connecting to source" : "Contacting source"}${waitingFor ? ` · ${waitingFor}` : ""} · using 1 of ${maxConcurrentDownloads} user lanes` : group.status === "queued" ? `Local queue #${group.queuePosition} · Waiting for a user lane…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : moved ? "Moved out of the download folder" : "Ready in your download folder"}
+                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 3${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? group.speedBytesPerSecond > 0 ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : remoteQueuePosition ? `Source queue #${remoteQueuePosition}${waitingFor ? ` · waiting ${waitingFor}` : ""} · using 1 of ${maxConcurrentDownloads} user lanes` : `${waitingTransfer?.status === "connecting" ? "Connecting to source" : "Contacting source"}${waitingFor ? ` · ${waitingFor}` : ""} · using 1 of ${maxConcurrentDownloads} user lanes` : group.status === "queued" ? `Local queue #${group.queuePosition} · Waiting for a user lane…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : health.filedByArchive ? "Filed away in Music Library" : moved ? "Moved out of the download folder" : "Ready in your download folder"}
                   </small>
                 </span>
                 <span className="release-transfer-actions">
@@ -702,7 +734,7 @@ export function TransfersWorkspace({
                 <div className="release-file-table">
                   <section className={`finish-line-detail is-${health.state}`}>
                     <span className="finish-line-detail-icon">{health.state === "verified" ? <ShieldCheck size={19} weight="fill" /> : moved ? <Archive size={19} weight="fill" /> : health.state === "attention" ? <WarningCircle size={19} weight="fill" /> : <Timer size={19} />}</span>
-                    <span><small>Release health</small><strong>{health.state === "verified" ? "All expected files verified" : moved ? "Filed away after download" : health.state === "attention" ? "The release needs a quick check" : health.state === "recovering" ? "Forever is recovering this signal" : `${health.completedCount} of ${group.transfers.length} files complete`}</strong><p>{health.state === "verified" ? "Filename presence and expected byte size both match." : moved ? "The complete release left Forever's download folder together, so it is treated as moved instead of damaged." : health.state === "attention" ? `${health.missingCount} missing · ${health.mismatchCount} size mismatch · ${health.failedCount} failed` : "Partial progress is preserved between every safe retry."}</p></span>
+                    <span><small>Release health</small><strong>{health.state === "verified" ? "All expected files verified" : health.filedByArchive ? "Filed away in Music Library" : moved ? "Filed away after download" : health.state === "attention" ? "The release needs a quick check" : health.state === "recovering" ? "Forever is recovering this signal" : `${health.completedCount} of ${group.transfers.length} files complete`}</strong><p>{health.state === "verified" ? `Filename presence and expected byte size both match.${verificationAge ? ` ${verificationAge}.` : ""}` : health.filedByArchive ? `Music Library owns this album and every downloaded audio file has left Forever. Remaining companion files stay verified.${verificationAge ? ` ${verificationAge}.` : ""}` : moved ? `The complete release left Forever's download folder together, so it is treated as moved instead of damaged.${verificationAge ? ` ${verificationAge}.` : ""}` : health.state === "attention" ? `${health.missingCount} missing · ${health.mismatchCount} size mismatch · ${health.failedCount} failed${verificationAge ? ` · ${verificationAge}` : ""}` : "Partial progress is preserved between every safe retry."}</p></span>
                     <span className="finish-line-file-counts"><b>{health.verifiedCount}<small>Verified</small></b><b>{health.pendingCount}<small>Pending</small></b><b>{moved ? health.missingCount : health.missingCount + health.mismatchCount + health.failedCount}<small>{moved ? "Moved" : "Issues"}</small></b></span>
                     {health.alternatives.length > 0 && group.releaseId && !relayOpen ? <details className="finish-line-alternatives"><summary><ArrowClockwise size={14} /> Alternative signals <small>{health.alternatives.length}</small></summary><div>{health.alternatives.map((source) => {
                       const matchCount = group.transfers.filter((transfer) => source.files.some((file) => file.sizeBytes === transfer.sizeBytes && basename(file.remoteFilename).toLocaleLowerCase() === basename(transfer.remoteFilename).toLocaleLowerCase())).length;
@@ -764,7 +796,7 @@ export function TransfersWorkspace({
                         <span className="release-file-name"><strong>{transfer.title}</strong><small>{transfer.remoteFilename.split(".").slice(-1)[0]?.toUpperCase() ?? "FILE"}</small></span>
                         <span>{formatBytes(transfer.sizeBytes)}</span>
                         <span className="release-file-progress"><i><b style={{ width: `${fileProgress}%` }} /></i><small>{Math.round(fileProgress)}%</small></span>
-                        <span className={`release-file-status is-${fileMoved ? "moved" : transfer.verificationStatus ?? "pending"}`} title={fileMoved ? "This completed release was moved out of Forever's download folder." : transfer.verificationMessage ?? transfer.error ?? undefined}>
+                        <span className={`release-file-status is-${fileMoved ? "moved" : transfer.verificationStatus ?? "pending"}`} title={fileMoved ? health.filedByArchive ? "Music Library owns this album, so its departed audio is treated as filed away." : "This completed release was moved out of Forever's download folder." : transfer.verificationMessage ?? transfer.error ?? undefined}>
                           {transfer.verificationStatus === "verified" ? <ShieldCheck size={13} weight="fill" /> : fileMoved ? <Archive size={13} weight="fill" /> : fileIssue ? <WarningCircle size={13} weight="fill" /> : fileCompleted ? <CheckCircle size={13} weight="fill" /> : null}
                           {transfer.verificationStatus === "verified" ? "Verified" : fileMoved ? "Moved" : transfer.verificationStatus === "missing" ? "Missing" : transfer.verificationStatus === "sizeMismatch" ? "Size mismatch" : transferStatus(transfer)}
                         </span>

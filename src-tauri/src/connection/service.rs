@@ -1186,6 +1186,10 @@ impl ConnectionManager {
         Ok(self.transfers.verify_release(release_id)?)
     }
 
+    pub fn verify_completed(&self) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        Ok(self.transfers.verify_completed()?)
+    }
+
     pub fn retry_release_issues(
         &self,
         release_id: &str,

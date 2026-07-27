@@ -69,6 +69,7 @@ pub fn run() {
             connection::transfer_reorder_release,
             connection::transfer_clear_completed,
             connection::transfer_verify_release,
+            connection::transfers_verify_completed,
             connection::transfer_retry_release_issues,
             connection::transfer_switch_release_source,
             connection::transfer_relay_release_source,

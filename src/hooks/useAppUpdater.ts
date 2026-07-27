@@ -30,20 +30,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.38",
-  version: "0.0.39",
-  body: `## What’s new in Forever 0.0.39
+  currentVersion: "0.0.39",
+  version: "0.0.40",
+  body: `## What’s new in Forever 0.0.40
 
-### Added
+### Fixed
 
-- Signal Relay shows how long a release has waited, distinguishes source queues from connection attempts, and searches for another route without leaving Transfers.
-- Fresh album folders are ranked by matching format, track count, available slots, speed, and source queue length.
-- Settings can suggest alternatives after 5, 10, 20, 30, or 60 minutes, or leave suggestions off. Ten minutes is the default.
+- Transfers rechecks every completed release when the workspace opens, so missing or moved files cannot keep a stale Verified badge.
+- Reveal verifies a completed release immediately before opening its folder.
 
 ### Changed
 
-- Switching remains user-approved. Completed files stay untouched, exact mirrors retain safe partial progress, and non-identical partial files restart cleanly.
-- Signal Relay searches use separate bounded capacity, so rescue scans do not consume Dial Memory’s eight visible search presets.`,
+- Finish Line shows when its structural file check last ran.
+- When Music Library owns an album and all downloaded audio has left Forever, remaining lyrics, artwork, and metadata are treated as a safely Filed away release rather than partial loss.`,
   date: "2026-07-27",
 };
 

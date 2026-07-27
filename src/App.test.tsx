@@ -614,7 +614,7 @@ describe("Forever shell", () => {
     expect(within(workspace).queryByText("Spheric Dusk")).not.toBeInTheDocument();
   });
 
-  it("treats fully moved releases as safe and switches exact alternative sources", async () => {
+  it("treats Archive-owned departed audio as filed away and switches exact alternative sources", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
@@ -623,8 +623,9 @@ describe("Forever shell", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Completed 1" }));
     const apex = within(workspace).getByText("Apex Horizon (Deluxe)").closest("article") as HTMLElement;
-    expect(within(apex).getByText("Moved")).toBeInTheDocument();
-    expect(within(apex).getByText(/1 file moved from downloads/)).toBeInTheDocument();
+    await waitFor(() => expect(within(apex).getByText("Filed away")).toBeInTheDocument());
+    expect(within(apex).getByText(/1 file moved from downloads · Archive owns album/)).toBeInTheDocument();
+    expect(within(apex).getByText("Filed away in Music Library")).toBeInTheDocument();
     expect(within(apex).queryByText("Needs attention")).not.toBeInTheDocument();
     expect(within(apex).getByRole("button", { name: "Download Apex Horizon (Deluxe) again" })).toBeInTheDocument();
     fireEvent.click(within(apex).getByRole("button", { name: "Expand Apex Horizon (Deluxe)" }));
@@ -830,16 +831,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.39 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.40 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Signal Relay shows how long a release has waited, distinguishes source queues from connection attempts, and searches for another route without leaving Transfers.",
+        "Transfers rechecks every completed release when the workspace opens, so missing or moved files cannot keep a stale Verified badge.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Switching remains user-approved. Completed files stay untouched, exact mirrors retain safe partial progress, and non-identical partial files restart cleanly.",
+        "Finish Line shows when its structural file check last ran.",
       ),
     ).toBeInTheDocument();
   });

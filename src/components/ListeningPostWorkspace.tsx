@@ -36,6 +36,7 @@ type ListeningPostWorkspaceProps = {
   messages: MessagesSnapshot;
   rooms: RoomsSnapshot;
   archiveStatus: ArchiveStatus | null;
+  archiveOwnedReleaseIds: ReadonlySet<string>;
   missingCount: number | null;
   missingShelfName: string | null;
   onOpenTransfer: (groupId: string) => void;
@@ -89,14 +90,17 @@ const compactNumber = (value: number | null) =>
 const activityForGroup = (
   group: TransferGroup,
   onOpenTransfer: (groupId: string) => void,
+  archiveOwned: boolean,
 ): ActivityItem => {
-  const health = releaseHealth(group);
+  const health = releaseHealth(group, { archiveOwned });
   if (health.state === "moved") {
     return {
       id: group.id,
       title: group.title,
-      detail: `${group.transfers.length} ${group.transfers.length === 1 ? "file" : "files"} filed away`,
-      label: "Moved to library",
+      detail: health.filedByArchive
+        ? `${health.missingCount} ${health.missingCount === 1 ? "file" : "files"} left downloads · ${health.verifiedCount} remain`
+        : `${group.transfers.length} ${group.transfers.length === 1 ? "file" : "files"} filed away`,
+      label: health.filedByArchive ? "Filed in Music Library" : "Moved to library",
       tone: "moved",
       atMs: group.updatedAtMs,
       onOpen: () => onOpenTransfer(group.id),
@@ -176,6 +180,7 @@ export function ListeningPostWorkspace({
   messages,
   rooms,
   archiveStatus,
+  archiveOwnedReleaseIds,
   missingCount,
   missingShelfName,
   onOpenTransfer,
@@ -196,7 +201,11 @@ export function ListeningPostWorkspace({
   );
   const roomWithMention = rooms.rooms.find((room) => room.mentionCount > 0) ?? null;
   const activity = [
-    ...groups.map((group) => activityForGroup(group, onOpenTransfer)),
+    ...groups.map((group) => activityForGroup(
+      group,
+      onOpenTransfer,
+      Boolean(group.releaseId && archiveOwnedReleaseIds.has(group.releaseId)),
+    )),
     ...wanted.albums
       .filter((album) => album.fulfilled)
       .map((album) => archiveActivity(album, onOpenArchive)),

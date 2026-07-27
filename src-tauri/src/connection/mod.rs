@@ -604,6 +604,15 @@ pub async fn transfer_verify_release(
 }
 
 #[tauri::command]
+pub async fn transfers_verify_completed(
+    manager: State<'_, ConnectionManager>,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .verify_completed()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn transfer_retry_release_issues(
     manager: State<'_, ConnectionManager>,
     release_id: String,

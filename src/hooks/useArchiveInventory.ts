@@ -7,6 +7,7 @@ import type {
   ArchiveStatus,
   WantedAlbum,
 } from "../types";
+import type { TransferGroup } from "../utils/transfers";
 
 const previewStatus: ArchiveStatus = {
   path: "C:\\Users\\jtill\\AppData\\Roaming\\com.local.musiclibrary\\music-library.sqlite3",
@@ -28,6 +29,25 @@ const previewOwnedIds = new Set([
 const message = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
 
+const transferArchiveQuery = (group: TransferGroup) => {
+  const match = /^(.*?)\s+-\s+(.+?)(?:\s+\((\d{4})\))?$/.exec(group.title.trim());
+  if (!match) {
+    if (group.id !== "preview-apex-horizon-release") return null;
+    return {
+      id: group.id,
+      artist: "Nova Arc",
+      title: group.title,
+      firstReleaseDate: "2025",
+    };
+  }
+  return {
+    id: group.id,
+    artist: match[1].trim(),
+    title: match[2].trim(),
+    firstReleaseDate: match[3] ?? "",
+  };
+};
+
 const previewMatch = (album: AlbumReleaseGroup): ArchiveAlbumMatch => {
   const owned = previewOwnedIds.has(album.id);
   return {
@@ -45,11 +65,13 @@ export function useArchiveInventory(
   artist: string | null,
   albums: AlbumReleaseGroup[],
   wantedAlbums: WantedAlbum[],
+  transferGroups: TransferGroup[] = [],
 ) {
   const native = isTauri();
   const [status, setStatus] = useState<ArchiveStatus | null>(native ? null : previewStatus);
   const [matches, setMatches] = useState<ArchiveAlbumMatch[]>([]);
   const [wantedMatches, setWantedMatches] = useState<ArchiveAlbumMatch[]>([]);
+  const [transferMatches, setTransferMatches] = useState<ArchiveAlbumMatch[]>([]);
   const [loading, setLoading] = useState(native);
   const [matching, setMatching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +90,28 @@ export function useArchiveInventory(
         })
       : [],
     [wantedQueryKey],
+  );
+  const transferQueryKey = useMemo(
+    () => transferGroups
+      .filter((group) =>
+        group.status === "completed"
+        && group.transfers.some((transfer) => transfer.verificationStatus === "missing"),
+      )
+      .map(transferArchiveQuery)
+      .filter((query): query is NonNullable<ReturnType<typeof transferArchiveQuery>> => Boolean(query))
+      .slice(0, 300)
+      .map((query) => `${query.id}\u0000${query.artist}\u0000${query.title}\u0000${query.firstReleaseDate}`)
+      .join("\u0001"),
+    [transferGroups],
+  );
+  const transferQueries = useMemo(
+    () => transferQueryKey
+      ? transferQueryKey.split("\u0001").map((entry) => {
+          const [id, transferArtist, title, firstReleaseDate] = entry.split("\u0000");
+          return { id, artist: transferArtist, title, firstReleaseDate };
+        })
+      : [],
+    [transferQueryKey],
   );
 
   const readStatus = useCallback(
@@ -198,6 +242,43 @@ export function useArchiveInventory(
     };
   }, [native, revision, wantedQueries, wantedQueryKey]);
 
+  useEffect(() => {
+    let current = true;
+    if (!transferQueryKey) {
+      void Promise.resolve().then(() => {
+        if (current) setTransferMatches([]);
+      });
+      return () => {
+        current = false;
+      };
+    }
+    void (native
+      ? invoke<ArchiveMatchResponse>("archive_match_wanted", { albums: transferQueries })
+      : Promise.resolve({
+          source: previewStatus,
+          matches: transferQueries.map((album) => ({
+            albumId: album.id,
+            ownership: ["In the Kingdom", "Apex Horizon (Deluxe)"].includes(album.title) ? "owned" as const : "notOwned" as const,
+            localAlbumId: ["In the Kingdom", "Apex Horizon (Deluxe)"].includes(album.title) ? `preview-${album.id}` : null,
+            localTitle: ["In the Kingdom", "Apex Horizon (Deluxe)"].includes(album.title) ? album.title : null,
+            localArtist: ["In the Kingdom", "Apex Horizon (Deluxe)"].includes(album.title) ? album.artist : null,
+            localYear: album.title === "In the Kingdom" ? 1991 : album.title === "Apex Horizon (Deluxe)" ? 2025 : null,
+            trackCount: album.title === "In the Kingdom" ? 12 : album.title === "Apex Horizon (Deluxe)" ? 1 : null,
+          })),
+        }))
+      .then((response) => {
+        if (!current) return;
+        setTransferMatches(response.matches);
+        setStatus(response.source);
+      })
+      .catch((cause) => {
+        if (current) setError(message(cause));
+      });
+    return () => {
+      current = false;
+    };
+  }, [native, revision, transferQueries, transferQueryKey]);
+
   const matchByAlbumId = useMemo(
     () => new Map(matches.map((match) => [match.albumId, match])),
     [matches],
@@ -205,6 +286,10 @@ export function useArchiveInventory(
   const wantedMatchByAlbumId = useMemo(
     () => new Map(wantedMatches.map((match) => [match.albumId, match])),
     [wantedMatches],
+  );
+  const transferMatchByReleaseId = useMemo(
+    () => new Map(transferMatches.map((match) => [match.albumId, match])),
+    [transferMatches],
   );
 
   return useMemo(
@@ -215,8 +300,9 @@ export function useArchiveInventory(
       error,
       matchByAlbumId,
       wantedMatchByAlbumId,
+      transferMatchByReleaseId,
       refresh,
     }),
-    [error, loading, matchByAlbumId, matching, refresh, status, wantedMatchByAlbumId],
+    [error, loading, matchByAlbumId, matching, refresh, status, transferMatchByReleaseId, wantedMatchByAlbumId],
   );
 }

@@ -5,6 +5,28 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.40] - 2026-07-27
+
+### Changed
+
+- Finish Line now displays when its oldest file verification ran, making it
+  clear that structural verification is a point-in-time result.
+- A completed album owned by the read-only Music Library Archive is classified
+  as **Filed away** when all downloaded audio has left Forever even if verified
+  lyrics, artwork, or metadata remain behind.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.40`.
+
+### Fixed
+
+- Opening Transfers rechecks every completed download in one native pass, so
+  externally moved or removed files cannot retain a stale **Verified** badge.
+- **Reveal** rechecks the selected release before opening its folder, closing a
+  second path where old verification state could remain visible.
+- Genuine partial audio loss still reports **Needs attention** unless Archive
+  ownership and the complete departure of every expected audio file establish
+  that the album was deliberately filed away.
+
 ## [0.0.39] - 2026-07-27
 
 ### Added

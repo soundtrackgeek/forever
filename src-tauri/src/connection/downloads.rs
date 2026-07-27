@@ -580,6 +580,18 @@ impl TransferHub {
         Ok(self.snapshot())
     }
 
+    pub fn verify_completed(&self) -> Result<TransferQueueSnapshot, TransferError> {
+        self.mutate(|transfers| {
+            for transfer in transfers
+                .iter_mut()
+                .filter(|transfer| transfer.status == TransferStatus::Completed)
+            {
+                refresh_verification(transfer);
+            }
+        })?;
+        Ok(self.snapshot())
+    }
+
     pub fn retry_release_issues(
         &self,
         release_id: &str,
@@ -851,6 +863,7 @@ impl TransferHub {
     }
 
     pub fn reveal_release_path(&self, release_id: &str) -> Result<String, TransferError> {
+        self.verify_release(release_id)?;
         self.transfers
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

@@ -64,6 +64,36 @@ describe("Finish Line release health", () => {
     });
   });
 
+  it("treats missing audio as filed away when Archive owns the album", () => {
+    const group = groupTransfers([
+      transfer("1", "completed", {
+        remoteFilename: "Music\\Finish Line\\01.mp3",
+        verificationStatus: "missing",
+      }),
+      transfer("2", "completed", {
+        remoteFilename: "Music\\Finish Line\\01.lrc",
+        verificationStatus: "verified",
+      }),
+      transfer("3", "completed", {
+        remoteFilename: "Music\\Finish Line\\cover.jpg",
+        verificationStatus: "verified",
+      }),
+    ])[0];
+
+    expect(releaseHealth(group)).toMatchObject({
+      state: "attention",
+      filedByArchive: false,
+      verifiedCount: 2,
+      missingCount: 1,
+    });
+    expect(releaseHealth(group, { archiveOwned: true })).toMatchObject({
+      state: "moved",
+      filedByArchive: true,
+      verifiedCount: 2,
+      missingCount: 1,
+    });
+  });
+
   it("deduplicates persisted alternative sources across release files", () => {
     const alternative = {
       username: "backup-source",

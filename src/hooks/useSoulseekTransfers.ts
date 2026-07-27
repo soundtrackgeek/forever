@@ -99,7 +99,7 @@ const previewTransfers: Transfer[] = [
     releaseTitle: "Apex Horizon (Deluxe)",
     releaseFolder: "C:\\Users\\Music\\Forever\\Apex Horizon (Deluxe)",
     fileIndex: 1,
-    fileCount: 1,
+    fileCount: 2,
     title: "01 - First Light.mp3",
     username: "soulseeker7",
     remoteFilename: "Music\\Apex Horizon\\01 - First Light.mp3",
@@ -115,6 +115,29 @@ const previewTransfers: Transfer[] = [
     verificationMessage: "The completed file is no longer present in the download folder.",
     verifiedAtMs: now - 79_000,
     createdAtMs: now - 86_400_000,
+    updatedAtMs: now - 80_000,
+  },
+  {
+    id: "preview-apex-horizon-notes",
+    releaseId: "preview-apex-horizon-release",
+    releaseTitle: "Apex Horizon (Deluxe)",
+    releaseFolder: "C:\\Users\\Music\\Forever\\Apex Horizon (Deluxe)",
+    fileIndex: 2,
+    fileCount: 2,
+    title: "album.nfo",
+    username: "soulseeker7",
+    remoteFilename: "Music\\Apex Horizon\\album.nfo",
+    sizeBytes: 1_709,
+    transferredBytes: 1_709,
+    speedBytesPerSecond: 0,
+    etaSeconds: 0,
+    status: "completed",
+    queuePosition: null,
+    localPath: "C:\\Users\\Music\\Forever\\Apex Horizon (Deluxe)\\album.nfo",
+    error: null,
+    verificationStatus: "verified",
+    verifiedAtMs: now - 79_000,
+    createdAtMs: now - 86_399_999,
     updatedAtMs: now - 80_000,
   },
 ];
@@ -832,6 +855,18 @@ export function useSoulseekTransfers() {
     ), current));
   }, [native]);
 
+  const verifyCompleted = useCallback(async () => {
+    if (!native) return snapshot;
+    try {
+      const next = await invoke<TransferQueueSnapshot>("transfers_verify_completed");
+      setSnapshot(next);
+      return next;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native, snapshot]);
+
   const retryReleaseIssues = useCallback(async (releaseId: string) => {
     setError(null);
     if (native) {
@@ -991,6 +1026,7 @@ export function useSoulseekTransfers() {
       clearCompleted,
       revealRelease,
       verifyRelease,
+      verifyCompleted,
       retryReleaseIssues,
       switchReleaseSource,
       relayReleaseSource,
@@ -1021,6 +1057,7 @@ export function useSoulseekTransfers() {
       reveal,
       revealRelease,
       verifyRelease,
+      verifyCompleted,
       retryReleaseIssues,
       switchReleaseSource,
       relayReleaseSource,

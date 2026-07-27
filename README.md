@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.39` adds Signal Relay: stalled album
-> downloads can discover, compare, and safely switch to a healthier Soulseek
-> source without disturbing files that already finished.
+> **Status:** pre-alpha. Version `0.0.40` keeps Finish Line honest: completed
+> releases are rechecked when Transfers opens and before Reveal, verification
+> shows its age, and Archive-owned audio can be recognized as safely filed away.
 
-If `0.0.16` is installed, download and run the latest `0.0.39` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.40` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -141,9 +141,13 @@ configuration and transfers.
 - Bounded automatic recovery for transient peer interruptions with visible
   retry attempts and countdowns while preserving safe `.part` progress
 - **Finish Line** release health with expected-file verification, Moved,
-  Missing, and Size mismatch states, a Needs attention filter, manual
-  recheck/retry actions, and persistent completion history that never deletes
-  downloaded files
+  Missing, and Size mismatch states, a Needs attention filter, verification
+  timestamps, automatic rechecks when Transfers opens and before Reveal,
+  manual recheck/retry actions, and persistent completion history that never
+  deletes downloaded files
+- Archive-aware filing recognizes a completed, owned album when all downloaded
+  audio has moved into Music Library but lyrics, artwork, or metadata remain in
+  Forever's folder, avoiding a false partial-loss warning
 - **Signal Relay** source rescue for stalled album queues, with a configurable
   suggestion delay, fresh background Soulseek scans, ranked same-format routes,
   and an in-place approval drawer instead of an automatic source change
@@ -307,12 +311,17 @@ present at the expected byte size and sends an in-app and Windows completion
 notification. Soulseek does not provide content hashes, so this is a structural
 completion check rather than cryptographic audio verification.
 
-Use **Verify** to recheck completed files after moving or editing them. When an
-entire completed release leaves Forever's download folder together, Finish Line
-classifies it as **Moved** and keeps it in safe history; **Download again** can
-restore another copy if needed. Partial file loss still uses **Needs attention**
-and can be safely requeued with **Retry issues**. A size mismatch is reported
-but is never overwritten automatically. Album queues created from grouped
+Forever automatically rechecks every completed release when **Transfers** opens
+and rechecks the selected release immediately before **Reveal** opens its folder.
+Each health card states when its oldest file check ran; **Verify** remains
+available for an immediate manual refresh. When an entire completed release
+leaves Forever's download folder together, Finish Line classifies it as
+**Moved** and keeps it in safe history. If Music Library owns the album and all
+downloaded audio has left while lyrics, artwork, or metadata remain, it is
+classified as **Filed away** instead of damaged. **Download again** can restore
+another copy if needed. Unexplained partial file loss still uses **Needs
+attention** and can be safely requeued with **Retry issues**. A size mismatch is
+reported but is never overwritten automatically. Album queues created from grouped
 Search or Shelf Radar results retain compatible alternative listeners; expand
 the release, open **Alternative signals**, and choose **Try source** to switch
 only exact basename-and-size matches while already verified files remain

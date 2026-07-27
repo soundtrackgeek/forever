@@ -40,6 +40,7 @@ describe("TransfersWorkspace signal order", () => {
         relaySuggestionMinutes={10}
         relayRecords={{}}
         online
+        archiveOwnedReleaseIds={new Set()}
         transfers={[
           releaseTransfer("release-a", "Release A", "downloading", {
             sizeBytes: 5_000,
@@ -190,6 +191,7 @@ describe("TransfersWorkspace signal order", () => {
           },
         }}
         online
+        archiveOwnedReleaseIds={new Set()}
         transfers={[stalled]}
         uploads={[]}
         uploadError={null}
@@ -228,5 +230,82 @@ describe("TransfersWorkspace signal order", () => {
       expect.objectContaining({ owner: "faster-listener" }),
     );
     expect(onFindAlternatives).not.toHaveBeenCalled();
+  });
+
+  it("shows Archive-owned missing audio as freshly checked and filed away", () => {
+    const checkedAt = Date.now() - 121_000;
+    const audio = releaseTransfer(
+      "archive-release",
+      "Whitecross - In the Kingdom (1991)",
+      "completed",
+      {
+        id: "archive-audio",
+        fileIndex: 1,
+        fileCount: 2,
+        title: "04 - In His Hands.mp3",
+        remoteFilename: "Music\\Whitecross\\In the Kingdom\\04 - In His Hands.mp3",
+        transferredBytes: 1_000,
+        verificationStatus: "missing",
+        verifiedAtMs: checkedAt,
+      },
+    );
+    const lyric = releaseTransfer(
+      "archive-release",
+      "Whitecross - In the Kingdom (1991)",
+      "completed",
+      {
+        id: "archive-lyric",
+        fileIndex: 2,
+        fileCount: 2,
+        title: "04 - In His Hands.lrc",
+        remoteFilename: "Music\\Whitecross\\In the Kingdom\\04 - In His Hands.lrc",
+        transferredBytes: 1_000,
+        verificationStatus: "verified",
+        verifiedAtMs: checkedAt,
+      },
+    );
+
+    render(
+      <TransfersWorkspace
+        maxConcurrentDownloads={3}
+        relaySuggestionMinutes={10}
+        relayRecords={{}}
+        online
+        archiveOwnedReleaseIds={new Set(["archive-release"])}
+        transfers={[audio, lyric]}
+        uploads={[]}
+        uploadError={null}
+        error={null}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onCancel={vi.fn()}
+        onReveal={vi.fn()}
+        onPauseRelease={vi.fn()}
+        onResumeRelease={vi.fn()}
+        onCancelRelease={vi.fn()}
+        onRevealRelease={vi.fn()}
+        onReorderRelease={vi.fn()}
+        onClearCompleted={vi.fn()}
+        onVerifyRelease={vi.fn()}
+        onRetryReleaseIssues={vi.fn()}
+        onSwitchReleaseSource={vi.fn()}
+        onFindAlternatives={vi.fn()}
+        onRelayReleaseSource={vi.fn().mockResolvedValue(undefined)}
+        onDismissError={vi.fn()}
+        personByUsername={() => null}
+        onOpenPerson={vi.fn()}
+        onCancelUpload={vi.fn()}
+        onClearFinishedUploads={vi.fn()}
+        onDismissUploadError={vi.fn()}
+      />,
+    );
+
+    const release = screen
+      .getByText("Whitecross - In the Kingdom (1991)")
+      .closest("article") as HTMLElement;
+    expect(within(release).getByText("Filed away")).toBeInTheDocument();
+    expect(within(release).getAllByText("Filed away in Music Library")).toHaveLength(2);
+    expect(within(release).getByText(/Archive owns album · Checked 2m ago/)).toBeInTheDocument();
+    expect(within(release).queryByText("Needs attention")).not.toBeInTheDocument();
   });
 });
