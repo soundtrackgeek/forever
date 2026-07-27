@@ -277,6 +277,7 @@ export function useSoulseekTransfers() {
   useEffect(() => {
     if (!ready) return;
     const groups = groupTransfers(snapshot.transfers);
+    let noticeTimer: number | undefined;
     if (activityReady.current) {
       const notices: TransferActivityNotice[] = [];
       for (const group of groups) {
@@ -307,10 +308,15 @@ export function useSoulseekTransfers() {
       const next = notices.find((notice) => notice.kind === "failed")
         ?? notices.find((notice) => notice.kind === "started")
         ?? notices[0];
-      if (next) setActivityNotice(next);
+      if (next) {
+        noticeTimer = window.setTimeout(() => setActivityNotice(next), 0);
+      }
     }
     activityState.current = new Map(groups.map((group) => [group.id, group.status]));
     activityReady.current = true;
+    return () => {
+      if (noticeTimer !== undefined) window.clearTimeout(noticeTimer);
+    };
   }, [ready, snapshot.transfers]);
 
   useEffect(() => {
@@ -897,6 +903,10 @@ export function useSoulseekTransfers() {
     });
   }, [native]);
 
+  const clearCompletionNotice = useCallback(() => setCompletionNotice(null), []);
+  const clearActivityNotice = useCallback(() => setActivityNotice(null), []);
+  const clearError = useCallback(() => setError(null), []);
+
   return useMemo(
     () => ({
       ready,
@@ -918,15 +928,18 @@ export function useSoulseekTransfers() {
       retryReleaseIssues,
       switchReleaseSource,
       completionNotice,
-      clearCompletionNotice: () => setCompletionNotice(null),
+      clearCompletionNotice,
       activityNotice,
-      clearActivityNotice: () => setActivityNotice(null),
-      clearError: () => setError(null),
+      clearActivityNotice,
+      clearError,
     }),
     [
       cancel,
       cancelRelease,
       clearCompleted,
+      clearCompletionNotice,
+      clearActivityNotice,
+      clearError,
       enqueue,
       enqueueRelease,
       error,

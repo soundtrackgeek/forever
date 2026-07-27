@@ -5,6 +5,24 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.35] - 2026-07-27
+
+### Changed
+
+- Exact-release focus is initialized when Transfers opens, preserving filter
+  clearing, expansion, scrolling, and the brief highlight without synchronously
+  rewriting component state from an effect.
+- Activity-notice dismissal callbacks are stable across live progress snapshots,
+  and transition notices are scheduled after snapshot processing.
+
+### Fixed
+
+- The release quality gate no longer fails its zero-warning React lint policy on
+  Signal Breadcrumbs lifecycle handling.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.35` and describe the release
+  pipeline hotfix.
+
 ## [0.0.34] - 2026-07-27
 
 ### Added

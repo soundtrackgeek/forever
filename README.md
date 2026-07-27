@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.34` adds Signal Breadcrumbs: Album Search,
-> Missing Shelf, Wanted, and Browse Shares now keep live, clickable transfer
-> progress without pulling you away from discovery.
+> **Status:** pre-alpha. Version `0.0.35` delivers Signal Breadcrumbs with
+> React 19-compliant focus and notification lifecycles that pass the complete
+> release quality gate.
 
-If `0.0.16` is installed, download and run the latest `0.0.34` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.35` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.

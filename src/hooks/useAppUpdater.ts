@@ -30,19 +30,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.33",
-  version: "0.0.34",
-  body: `## What’s new in Forever 0.0.34
+  currentVersion: "0.0.34",
+  version: "0.0.35",
+  body: `## What’s new in Forever 0.0.35
 
 ### Added
 
-- Signal Breadcrumbs carry live Downloading progress, numbered queue position, Paused, Downloaded, and Needs attention states into Album Search, Missing Shelf, Wanted, and Browse Shares.
-- Queue, start, failure, and completion moments now surface as lightweight clickable notifications.
+- Signal Breadcrumbs now pass the full release quality gate and remain ready for the Windows installer pipeline.
+- Exact-release focus and activity notifications retain the same behavior with React 19-compliant lifecycle handling.
 
 ### Changed
 
-- Clicking any live transfer state opens Transfers, clears hiding filters, expands the exact release, and brings it into focus.
-- The bottom transfer shelf release title now opens that same exact release instead of only opening the general queue.`,
+- Transfer focus is initialized when the workspace opens instead of synchronously rewriting workspace state from an effect.
+- Stable notification callbacks prevent the automatic-dismiss timer from being recreated by live progress snapshots.`,
   date: "2026-07-27",
 };
 

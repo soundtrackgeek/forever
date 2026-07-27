@@ -309,6 +309,7 @@ function App() {
   const navigate = (view: string) => {
     if (view === "transfers") {
       setTransferShelfExpanded(false);
+      setTransferFocus(null);
     }
     if (view === "messages") {
       const unread = messages.snapshot.conversations.find(
@@ -329,14 +330,15 @@ function App() {
 
   const openTransfer = (groupId: string) => {
     setTransferFocus({ groupId, requestId: Date.now() });
-    navigate("transfers");
+    setTransferShelfExpanded(false);
+    setActiveView("transfers");
   };
 
   useEffect(() => {
     if (!transfers.activityNotice) return;
     const timer = window.setTimeout(transfers.clearActivityNotice, 6_000);
     return () => window.clearTimeout(timer);
-  }, [transfers.activityNotice]);
+  }, [transfers.activityNotice, transfers.clearActivityNotice]);
 
   const browseUser = (username: string) => {
     setSharesUsername(username);
@@ -710,6 +712,7 @@ function App() {
           )
         ) : activeView === "transfers" ? (
           <TransfersWorkspace
+            key={transferFocus?.requestId ?? "transfers"}
             transfers={transfers.snapshot.transfers}
             uploads={sharing.uploads.uploads}
             uploadError={sharing.error}

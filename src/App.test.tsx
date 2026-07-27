@@ -206,7 +206,7 @@ describe("Forever shell", () => {
     );
     expect(queued).toHaveClass("is-queued");
     expect(queued).toBeEnabled();
-    expect(screen.getByText("Release queued")).toBeInTheDocument();
+    expect(await screen.findByText("Release queued")).toBeInTheDocument();
     fireEvent.click(queued);
     expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument();
     expect(document.querySelector(".release-transfer-card.is-focus-target")).toBeInTheDocument();
@@ -733,16 +733,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.34 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.35 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Signal Breadcrumbs carry live Downloading progress, numbered queue position, Paused, Downloaded, and Needs attention states into Album Search, Missing Shelf, Wanted, and Browse Shares.",
+        "Signal Breadcrumbs now pass the full release quality gate and remain ready for the Windows installer pipeline.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Clicking any live transfer state opens Transfers, clears hiding filters, expands the exact release, and brings it into focus.",
+        "Transfer focus is initialized when the workspace opens instead of synchronously rewriting workspace state from an effect.",
       ),
     ).toBeInTheDocument();
   });

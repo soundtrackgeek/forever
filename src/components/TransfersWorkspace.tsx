@@ -143,12 +143,17 @@ export function TransfersWorkspace({
   const [query, setQuery] = useState("");
   const [draggedReleaseId, setDraggedReleaseId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<QueueDropTarget | null>(null);
-  const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(null);
+  const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(
+    focusTarget?.groupId ?? null,
+  );
   const mouseDrag = useRef<{ releaseId: string } | null>(null);
   const [expansion, setExpansion] = useState<{
     touched: boolean;
     ids: Set<string>;
-  }>({ touched: false, ids: new Set() });
+  }>({
+    touched: Boolean(focusTarget),
+    ids: new Set(focusTarget ? [focusTarget.groupId] : []),
+  });
   const defaultOpenId =
     groups.find((group) => group.status === "active")?.id ??
     groups.find((group) => releaseHealth(group).state === "attention")?.id ?? groups[0]?.id;
@@ -189,14 +194,6 @@ export function TransfersWorkspace({
 
   useEffect(() => {
     if (!focusTarget) return;
-    setDirection("downloads");
-    setFilter("all");
-    setQuery("");
-    setHighlightedGroupId(focusTarget.groupId);
-    setExpansion((current) => ({
-      touched: true,
-      ids: new Set(current.ids).add(focusTarget.groupId),
-    }));
     const frame = window.requestAnimationFrame(() => {
       const card = [...document.querySelectorAll<HTMLElement>("[data-transfer-group-id]")]
         .find((element) => element.dataset.transferGroupId === focusTarget.groupId);
