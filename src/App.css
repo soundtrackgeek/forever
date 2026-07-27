@@ -10987,6 +10987,7 @@ form.settings-panel {
 }
 
 .release-health-inline.is-verified { color: #6cc788; }
+.release-health-inline.is-moved { color: #78b9d5; }
 .release-health-inline.is-attention { color: #df8877; }
 .release-health-inline.is-recovering { color: #af87e7; }
 
@@ -11019,6 +11020,7 @@ form.settings-panel {
 }
 
 .finish-line-detail.is-verified .finish-line-detail-icon { color: #6cc788; border-color: rgba(96, 190, 128, 0.25); }
+.finish-line-detail.is-moved .finish-line-detail-icon { color: #78b9d5; border-color: rgba(91, 157, 187, 0.3); }
 .finish-line-detail.is-attention .finish-line-detail-icon { color: #df8877; border-color: rgba(207, 112, 93, 0.3); }
 
 .finish-line-detail > span:nth-child(2) {
@@ -11123,6 +11125,7 @@ form.settings-panel {
 .finish-line-alternatives button em { color: var(--amber); font-size: 8px; font-style: normal; }
 
 .release-file-status.is-verified { color: #6cc788; }
+.release-file-status.is-moved { color: #78b9d5; }
 .release-file-status.is-missing,
 .release-file-status.is-sizeMismatch { color: #df8877; }
 

@@ -1,4 +1,5 @@
 import {
+  Archive,
   ArrowLineUp,
   ArrowClockwise,
   CaretUp,
@@ -167,6 +168,7 @@ export function TransfersWorkspace({
   };
   const finishLineSummary = {
     verified: groups.filter((group) => releaseHealth(group).state === "verified").length,
+    moved: groups.filter((group) => releaseHealth(group).state === "moved").length,
     recovering: groups.filter((group) => releaseHealth(group).state === "recovering").length,
     attention: groups.filter((group) => releaseHealth(group).state === "attention").length,
   };
@@ -336,7 +338,7 @@ export function TransfersWorkspace({
           <span><small>Finish Line</small><strong>Every expected file, accounted for.</strong></span>
           <span className={finishLineSummary.recovering ? "is-recovering" : ""}><Timer size={15} /><small>Recovering</small><strong>{finishLineSummary.recovering}</strong></span>
           <span className={finishLineSummary.attention ? "is-attention" : ""}><WarningCircle size={15} /><small>Needs attention</small><strong>{finishLineSummary.attention}</strong></span>
-          <span className="is-verified"><CheckCircle size={15} weight="fill" /><small>Verified history</small><strong>{finishLineSummary.verified}</strong></span>
+          <span className="is-verified"><CheckCircle size={15} weight="fill" /><small>Safe history</small><strong>{finishLineSummary.verified + finishLineSummary.moved}</strong></span>
         </section>
       ) : null}
 
@@ -439,7 +441,8 @@ export function TransfersWorkspace({
             ? null
             : Math.max(0, Math.ceil((health.nextRetryAtMs - clock) / 1_000));
           const sourceNames = [...new Set(group.transfers.map((transfer) => transfer.username))];
-          const recoverableIssues = health.missingCount > 0 || health.failedCount > 0;
+          const moved = health.state === "moved";
+          const recoverableIssues = !moved && (health.missingCount > 0 || health.failedCount > 0);
           const knownArt = group.title.toLocaleLowerCase().includes("night geometry");
           return (
             <article
@@ -468,9 +471,9 @@ export function TransfersWorkspace({
                   </small>
                   <small>{group.transfers.length} {group.transfers.length === 1 ? "file" : "files"} · {formatBytes(group.sizeBytes)}</small>
                   <span className={`release-health-inline is-${health.state}`}>
-                    {health.state === "verified" ? <ShieldCheck size={13} weight="fill" /> : health.state === "attention" ? <WarningCircle size={13} weight="fill" /> : health.state === "recovering" ? <ArrowClockwise size={13} /> : <CheckCircle size={13} />}
-                    <strong>{health.state === "verified" ? "Verified" : health.state === "attention" ? "Needs attention" : health.state === "recovering" ? `Auto recovery${retryInSeconds !== null ? ` in ${retryInSeconds}s` : ""}` : `${health.completedCount}/${group.transfers.length} complete`}</strong>
-                    <small>{health.verifiedCount} verified{health.missingCount ? ` · ${health.missingCount} missing` : ""}{health.mismatchCount ? ` · ${health.mismatchCount} size mismatch` : ""}</small>
+                    {health.state === "verified" ? <ShieldCheck size={13} weight="fill" /> : moved ? <Archive size={13} weight="fill" /> : health.state === "attention" ? <WarningCircle size={13} weight="fill" /> : health.state === "recovering" ? <ArrowClockwise size={13} /> : <CheckCircle size={13} />}
+                    <strong>{health.state === "verified" ? "Verified" : moved ? "Moved" : health.state === "attention" ? "Needs attention" : health.state === "recovering" ? `Auto recovery${retryInSeconds !== null ? ` in ${retryInSeconds}s` : ""}` : `${health.completedCount}/${group.transfers.length} complete`}</strong>
+                    <small>{moved ? `${health.missingCount} ${health.missingCount === 1 ? "file" : "files"} moved from downloads` : `${health.verifiedCount} verified${health.missingCount ? ` · ${health.missingCount} missing` : ""}${health.mismatchCount ? ` · ${health.mismatchCount} size mismatch` : ""}`}</small>
                   </span>
                   {group.status === "queued" && group.releaseId ? (
                     <span className="release-queue-order">
@@ -535,22 +538,23 @@ export function TransfersWorkspace({
                   <strong>{completed ? "Completed" : `${formatBytes(group.transferredBytes)} / ${formatBytes(group.sizeBytes)} (${Math.round(progress)}%)`}</strong>
                   <i><b style={{ width: `${progress}%` }} /></i>
                   <small>
-                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 3${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : group.status === "queued" ? `Queue #${group.queuePosition} · Waiting for slot…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : "Ready in your download folder"}
+                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 3${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : group.status === "queued" ? `Queue #${group.queuePosition} · Waiting for slot…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : moved ? "Moved out of the download folder" : "Ready in your download folder"}
                   </small>
                 </span>
                 <span className="release-transfer-actions">
                   <button
                     type="button"
-                    aria-label={recoverableIssues ? `Retry issues in ${group.title}` : completed ? `Reveal ${group.title}` : resumable ? `Resume ${group.title}` : `Pause ${group.title}`}
+                    aria-label={recoverableIssues ? `Retry issues in ${group.title}` : moved ? `Download ${group.title} again` : completed ? `Reveal ${group.title}` : resumable ? `Resume ${group.title}` : `Pause ${group.title}`}
                     onClick={() => {
                       if (recoverableIssues && group.releaseId) onRetryReleaseIssues(group.releaseId);
+                      else if (moved && group.releaseId) onRetryReleaseIssues(group.releaseId);
                       else if (completed) invokeGroup(group, onRevealRelease, onReveal);
                       else if (resumable) invokeGroup(group, onResumeRelease, onResume);
                       else invokeGroup(group, onPauseRelease, onPause);
                     }}
                   >
-                    {recoverableIssues ? <ArrowClockwise size={17} /> : completed ? <FolderOpen size={18} /> : resumable ? <Play size={16} weight="fill" /> : <Pause size={16} weight="fill" />}
-                    <small>{recoverableIssues ? "Retry issues" : completed ? "Reveal" : resumable ? "Resume" : "Pause"}</small>
+                    {recoverableIssues || moved ? <ArrowClockwise size={17} /> : completed ? <FolderOpen size={18} /> : resumable ? <Play size={16} weight="fill" /> : <Pause size={16} weight="fill" />}
+                    <small>{recoverableIssues ? "Retry issues" : moved ? "Download again" : completed ? "Reveal" : resumable ? "Resume" : "Pause"}</small>
                   </button>
                   {completed && group.releaseId ? <button type="button" aria-label={`Verify ${group.title}`} onClick={() => onVerifyRelease(group.releaseId!)}><ShieldCheck size={17} /><small>Verify</small></button> : null}
                   <button
@@ -587,9 +591,9 @@ export function TransfersWorkspace({
               {open && (
                 <div className="release-file-table">
                   <section className={`finish-line-detail is-${health.state}`}>
-                    <span className="finish-line-detail-icon">{health.state === "verified" ? <ShieldCheck size={19} weight="fill" /> : health.state === "attention" ? <WarningCircle size={19} weight="fill" /> : <Timer size={19} />}</span>
-                    <span><small>Release health</small><strong>{health.state === "verified" ? "All expected files verified" : health.state === "attention" ? "The release needs a quick check" : health.state === "recovering" ? "Forever is recovering this signal" : `${health.completedCount} of ${group.transfers.length} files complete`}</strong><p>{health.state === "verified" ? "Filename presence and expected byte size both match." : health.state === "attention" ? `${health.missingCount} missing · ${health.mismatchCount} size mismatch · ${health.failedCount} failed` : "Partial progress is preserved between every safe retry."}</p></span>
-                    <span className="finish-line-file-counts"><b>{health.verifiedCount}<small>Verified</small></b><b>{health.pendingCount}<small>Pending</small></b><b>{health.missingCount + health.mismatchCount + health.failedCount}<small>Issues</small></b></span>
+                    <span className="finish-line-detail-icon">{health.state === "verified" ? <ShieldCheck size={19} weight="fill" /> : moved ? <Archive size={19} weight="fill" /> : health.state === "attention" ? <WarningCircle size={19} weight="fill" /> : <Timer size={19} />}</span>
+                    <span><small>Release health</small><strong>{health.state === "verified" ? "All expected files verified" : moved ? "Filed away after download" : health.state === "attention" ? "The release needs a quick check" : health.state === "recovering" ? "Forever is recovering this signal" : `${health.completedCount} of ${group.transfers.length} files complete`}</strong><p>{health.state === "verified" ? "Filename presence and expected byte size both match." : moved ? "The complete release left Forever's download folder together, so it is treated as moved instead of damaged." : health.state === "attention" ? `${health.missingCount} missing · ${health.mismatchCount} size mismatch · ${health.failedCount} failed` : "Partial progress is preserved between every safe retry."}</p></span>
+                    <span className="finish-line-file-counts"><b>{health.verifiedCount}<small>Verified</small></b><b>{health.pendingCount}<small>Pending</small></b><b>{moved ? health.missingCount : health.missingCount + health.mismatchCount + health.failedCount}<small>{moved ? "Moved" : "Issues"}</small></b></span>
                     {health.alternatives.length > 0 && group.releaseId ? <details className="finish-line-alternatives"><summary><ArrowClockwise size={14} /> Alternative signals <small>{health.alternatives.length}</small></summary><div>{health.alternatives.map((source) => {
                       const matchCount = group.transfers.filter((transfer) => source.files.some((file) => file.sizeBytes === transfer.sizeBytes && basename(file.remoteFilename).toLocaleLowerCase() === basename(transfer.remoteFilename).toLocaleLowerCase())).length;
                       return <button type="button" key={`${source.username}:${source.remoteFolder}`} disabled={matchCount === 0} onClick={() => onSwitchReleaseSource(group.releaseId!, source)}><span><strong>{source.username}</strong><small title={source.remoteFolder}>{source.remoteFolder.replace(/[\\/]/g, " / ")}</small></span><b>{matchCount}/{group.transfers.length} exact</b><em>Try source</em></button>;
@@ -604,24 +608,25 @@ export function TransfersWorkspace({
                       : 0;
                     const fileResumable = transfer.status === "paused" || transfer.status === "failed" || transfer.status === "retrying";
                     const fileCompleted = transfer.status === "completed";
-                    const fileIssue = transfer.verificationStatus === "missing" || transfer.verificationStatus === "sizeMismatch";
+                    const fileMoved = moved && transfer.verificationStatus === "missing";
+                    const fileIssue = !fileMoved && (transfer.verificationStatus === "missing" || transfer.verificationStatus === "sizeMismatch");
                     return (
                       <div className={`release-file-row is-${transfer.status}`} key={transfer.id}>
                         <span className="release-file-number">{transfer.fileIndex ?? index + 1}</span>
                         <span className="release-file-name"><strong>{transfer.title}</strong><small>{transfer.remoteFilename.split(".").slice(-1)[0]?.toUpperCase() ?? "FILE"}</small></span>
                         <span>{formatBytes(transfer.sizeBytes)}</span>
                         <span className="release-file-progress"><i><b style={{ width: `${fileProgress}%` }} /></i><small>{Math.round(fileProgress)}%</small></span>
-                        <span className={`release-file-status is-${transfer.verificationStatus ?? "pending"}`} title={transfer.verificationMessage ?? transfer.error ?? undefined}>
-                          {transfer.verificationStatus === "verified" ? <ShieldCheck size={13} weight="fill" /> : fileIssue ? <WarningCircle size={13} weight="fill" /> : fileCompleted ? <CheckCircle size={13} weight="fill" /> : null}
-                          {transfer.verificationStatus === "verified" ? "Verified" : transfer.verificationStatus === "missing" ? "Missing" : transfer.verificationStatus === "sizeMismatch" ? "Size mismatch" : transferStatus(transfer)}
+                        <span className={`release-file-status is-${fileMoved ? "moved" : transfer.verificationStatus ?? "pending"}`} title={fileMoved ? "This completed release was moved out of Forever's download folder." : transfer.verificationMessage ?? transfer.error ?? undefined}>
+                          {transfer.verificationStatus === "verified" ? <ShieldCheck size={13} weight="fill" /> : fileMoved ? <Archive size={13} weight="fill" /> : fileIssue ? <WarningCircle size={13} weight="fill" /> : fileCompleted ? <CheckCircle size={13} weight="fill" /> : null}
+                          {transfer.verificationStatus === "verified" ? "Verified" : fileMoved ? "Moved" : transfer.verificationStatus === "missing" ? "Missing" : transfer.verificationStatus === "sizeMismatch" ? "Size mismatch" : transferStatus(transfer)}
                         </span>
                         <span className="release-file-actions">
                           <button
                             type="button"
-                            aria-label={fileIssue && group.releaseId ? `Retry issues in ${group.title}` : fileCompleted ? `Reveal ${transfer.title}` : fileResumable ? `Resume ${transfer.title}` : `Pause ${transfer.title}`}
-                            onClick={() => fileIssue && group.releaseId ? onRetryReleaseIssues(group.releaseId) : fileCompleted ? onReveal(transfer.id) : fileResumable ? onResume(transfer.id) : onPause(transfer.id)}
+                            aria-label={fileMoved && group.releaseId ? `Download ${group.title} again` : fileIssue && group.releaseId ? `Retry issues in ${group.title}` : fileCompleted ? `Reveal ${transfer.title}` : fileResumable ? `Resume ${transfer.title}` : `Pause ${transfer.title}`}
+                            onClick={() => fileMoved && group.releaseId ? onRetryReleaseIssues(group.releaseId) : fileIssue && group.releaseId ? onRetryReleaseIssues(group.releaseId) : fileCompleted ? onReveal(transfer.id) : fileResumable ? onResume(transfer.id) : onPause(transfer.id)}
                           >
-                            {fileIssue ? <ArrowClockwise size={14} /> : fileCompleted ? <FolderOpen size={14} /> : ["failed", "retrying"].includes(transfer.status) ? <ArrowClockwise size={14} /> : fileResumable ? <Play size={13} weight="fill" /> : <Pause size={13} weight="fill" />}
+                            {fileMoved || fileIssue ? <ArrowClockwise size={14} /> : fileCompleted ? <FolderOpen size={14} /> : ["failed", "retrying"].includes(transfer.status) ? <ArrowClockwise size={14} /> : fileResumable ? <Play size={13} weight="fill" /> : <Pause size={13} weight="fill" />}
                           </button>
                           <button type="button" aria-label={`${fileCompleted ? "Remove" : "Cancel"} ${transfer.title}`} onClick={() => onCancel(transfer.id)}><X size={13} /></button>
                         </span>

@@ -48,6 +48,22 @@ describe("Finish Line release health", () => {
     });
   });
 
+  it("treats a fully absent completed release as moved rather than damaged", () => {
+    const group = groupTransfers([
+      transfer("1", "completed", { verificationStatus: "missing" }),
+      transfer("2", "completed", { verificationStatus: "missing" }),
+      transfer("3", "completed", { verificationStatus: "missing" }),
+    ])[0];
+
+    expect(releaseHealth(group)).toMatchObject({
+      state: "moved",
+      completedCount: 3,
+      missingCount: 3,
+      mismatchCount: 0,
+      failedCount: 0,
+    });
+  });
+
   it("deduplicates persisted alternative sources across release files", () => {
     const alternative = {
       username: "backup-source",

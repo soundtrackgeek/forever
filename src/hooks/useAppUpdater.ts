@@ -30,20 +30,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.30",
-  version: "0.0.31",
-  body: `## What’s new in Forever 0.0.31
-
-### Added
-
-- Open Frequency brings native Soulseek public rooms into a polished three-pane workspace with a searchable room dial, live chat, and a listener rail.
-- Room member cards show presence, country, upload-slot availability, speed, and shared-library totals with direct Profile, Message, Browse, Save, Ignore, and Ban actions.
-- Mentions and messages in starred rooms can raise native Windows notifications, while bounded room history and favorites stay on this device.
+  currentVersion: "0.0.31",
+  version: "0.0.32",
+  body: `## What’s new in Forever 0.0.32
 
 ### Changed
 
-- Joined rooms reconnect automatically with the Soulseek session, unread and mention counts appear in Rooms and the sidebar, and public room names and messages are safety-bounded.
-- Private room administration is intentionally deferred; v0.0.31 focuses on the public room experience.`,
+- Finish Line now recognizes a fully completed release whose entire folder has left Forever's download location as Moved, a safe history state rather than a problem.
+- Moved releases offer Download again while their absent file rows use a calm Moved label instead of Missing warnings.
+
+### Fixed
+
+- Organizing a downloaded album into a separate music library no longer produces a Needs attention card or completion-with-issues warning.
+- Partial file loss, size mismatches, and failed transfers remain visible in Needs attention so real damage is not hidden.`,
   date: "2026-07-27",
 };
 

@@ -521,7 +521,7 @@ describe("Forever shell", () => {
     expect(within(workspace).queryByText("Spheric Dusk")).not.toBeInTheDocument();
   });
 
-  it("verifies completed releases, retries missing files, and switches exact alternative sources", async () => {
+  it("treats fully moved releases as safe and switches exact alternative sources", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
@@ -530,9 +530,13 @@ describe("Forever shell", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Completed 1" }));
     const apex = within(workspace).getByText("Apex Horizon (Deluxe)").closest("article") as HTMLElement;
-    expect(within(apex).getByText("Needs attention")).toBeInTheDocument();
-    expect(within(apex).getByText(/1 missing/)).toBeInTheDocument();
-    fireEvent.click(within(apex).getByRole("button", { name: "Retry issues in Apex Horizon (Deluxe)" }));
+    expect(within(apex).getByText("Moved")).toBeInTheDocument();
+    expect(within(apex).getByText(/1 file moved from downloads/)).toBeInTheDocument();
+    expect(within(apex).queryByText("Needs attention")).not.toBeInTheDocument();
+    expect(within(apex).getByRole("button", { name: "Download Apex Horizon (Deluxe) again" })).toBeInTheDocument();
+    fireEvent.click(within(apex).getByRole("button", { name: "Expand Apex Horizon (Deluxe)" }));
+    expect(within(apex).getAllByRole("button", { name: "Download Apex Horizon (Deluxe) again" })).toHaveLength(2);
+    expect(within(apex).queryByRole("button", { name: "Reveal 01 - First Light.mp3" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: /All/ }));
     expect(within(workspace).getByText("Apex Horizon (Deluxe)")).toBeInTheDocument();
@@ -719,16 +723,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.31 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.32 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Open Frequency brings native Soulseek public rooms into a polished three-pane workspace with a searchable room dial, live chat, and a listener rail.",
+        "Finish Line now recognizes a fully completed release whose entire folder has left Forever's download location as Moved, a safe history state rather than a problem.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Mentions and messages in starred rooms can raise native Windows notifications, while bounded room history and favorites stay on this device.",
+        "Organizing a downloaded album into a separate music library no longer produces a Needs attention card or completion-with-issues warning.",
       ),
     ).toBeInTheDocument();
   });

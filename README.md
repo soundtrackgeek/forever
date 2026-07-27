@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.31` adds Open Frequency: native Soulseek
-> public rooms, live room chat and member presence, auto-rejoin, bounded local
-> history, and configurable mention/favorite-room notifications.
+> **Status:** pre-alpha. Version `0.0.32` adds Filed Away: completed releases
+> moved out of Forever's download folder now remain safe history instead of
+> becoming false Needs attention warnings.
 
-If `0.0.16` is installed, download and run the latest `0.0.31` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.32` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -117,9 +117,10 @@ configuration and transfers.
   pause, resume, retry, cancel, completion, and Show in folder controls
 - Bounded automatic recovery for transient peer interruptions with visible
   retry attempts and countdowns while preserving safe `.part` progress
-- **Finish Line** release health with expected-file verification, Missing and
-  Size mismatch states, a Needs attention filter, manual recheck/retry actions,
-  and persistent completion history that never deletes downloaded files
+- **Finish Line** release health with expected-file verification, Moved,
+  Missing, and Size mismatch states, a Needs attention filter, manual
+  recheck/retry actions, and persistent completion history that never deletes
+  downloaded files
 - Exact alternative-source switching for album queues, preserving verified
   files and accepting a replacement only when basename and byte size match
 - A full release-grouped Transfers workspace with All, Active, Queued,
@@ -272,8 +273,11 @@ present at the expected byte size and sends an in-app and Windows completion
 notification. Soulseek does not provide content hashes, so this is a structural
 completion check rather than cryptographic audio verification.
 
-Use **Verify** to recheck completed files after moving or editing them. Missing
-files can be safely requeued with **Retry issues**. A size mismatch is reported
+Use **Verify** to recheck completed files after moving or editing them. When an
+entire completed release leaves Forever's download folder together, Finish Line
+classifies it as **Moved** and keeps it in safe history; **Download again** can
+restore another copy if needed. Partial file loss still uses **Needs attention**
+and can be safely requeued with **Retry issues**. A size mismatch is reported
 but is never overwritten automatically. Album queues created from grouped
 Search or Shelf Radar results retain compatible alternative listeners; expand
 the release, open **Alternative signals**, and choose **Try source** to switch
@@ -425,7 +429,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.31 verifies the expected
+protocol does not provide chunk hashes, so v0.0.32 verifies the expected
 filename presence and byte count but cannot cryptographically verify file
 contents. Finish Line reports a size mismatch instead of replacing that local
 file automatically.

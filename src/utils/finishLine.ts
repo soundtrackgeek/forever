@@ -7,6 +7,7 @@ export type ReleaseHealthState =
   | "recovering"
   | "paused"
   | "attention"
+  | "moved"
   | "verified";
 
 export type ReleaseHealth = {
@@ -62,9 +63,14 @@ export function releaseHealth(group: TransferGroup): ReleaseHealth {
     return next === null ? transfer.retryAtMs : Math.min(next, transfer.retryAtMs);
   }, null);
   const pendingCount = group.transfers.length - verifiedCount - missingCount - mismatchCount;
+  const fullyMoved =
+    group.status === "completed" &&
+    group.transfers.length > 0 &&
+    missingCount === group.transfers.length;
 
   let state: ReleaseHealthState = "waiting";
-  if (missingCount || mismatchCount || failedCount) state = "attention";
+  if (fullyMoved) state = "moved";
+  else if (missingCount || mismatchCount || failedCount) state = "attention";
   else if (recovering.length) state = "recovering";
   else if (group.status === "active") state = "downloading";
   else if (group.status === "paused") state = "paused";

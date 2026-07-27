@@ -5,6 +5,27 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.32] - 2026-07-27
+
+### Changed
+
+- **Filed Away** adds a calm Moved state for a fully completed release whose
+  entire folder has left Forever's download location, keeping normal music
+  library organization in safe history instead of Needs attention.
+- Moved releases expose **Download again** instead of a non-working Reveal
+  action, and their individual file rows clearly read Moved.
+- Finish Line's safe-history total includes both locally verified and moved
+  releases.
+
+### Fixed
+
+- Moving a downloaded album into an external music library no longer marks
+  every original file as an issue or raises a Completed with issues warning.
+- Partial file loss, size mismatches, and failed transfers still enter Needs
+  attention, preserving warnings for genuinely incomplete or damaged releases.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.32` and describe Filed Away.
+
 ## [0.0.31] - 2026-07-27
 
 ### Added
