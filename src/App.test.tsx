@@ -283,7 +283,10 @@ describe("Forever shell", () => {
     expect(within(trackDetails).getByText(/01 - Let’s Get Rocked\.flac/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Download best" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Download best" })).toBeEnabled());
+    const queuedBest = await screen.findByRole("button", { name: "Queued #2" });
+    expect(queuedBest).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Queued.*Adrenalize from rockvault/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Download best" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Expand transfer activity" }));
     expect(screen.getByText("Def Leppard - Adrenalize (1992)")).toBeInTheDocument();
 
@@ -723,16 +726,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.32 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.33 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Finish Line now recognizes a fully completed release whose entire folder has left Forever's download location as Moved, a safe history state rather than a problem.",
+        "Queue Lights gives Missing Shelf downloads distinct live icons for Preparing, Downloading, Queued, Paused, Downloaded, and Needs attention states.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Organizing a downloaded album into a separate music library no longer produces a Needs attention card or completion-with-issues warning.",
+        "The recommended source button and its matching source-row button stay synchronized with the real Transfers queue.",
       ),
     ).toBeInTheDocument();
   });

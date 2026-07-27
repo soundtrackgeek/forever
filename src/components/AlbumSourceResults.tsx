@@ -12,8 +12,8 @@ import { useId, useMemo, useState, type FocusEvent, type MouseEvent } from "reac
 import { createPortal } from "react-dom";
 import type { AlbumSource, PersonProfile, Transfer, WantedPreferences } from "../types";
 import {
+  albumDownloadLabel,
   albumDownloadStates,
-  type AlbumDownloadState,
   type AlbumDownloadStatus,
 } from "../utils/albumDownloadState";
 import { formatAlbumBytes } from "../utils/albumSources";
@@ -30,19 +30,6 @@ type AlbumSourceResultsProps = {
   onOpenPerson: (username: string) => void;
   smartPreferences?: WantedPreferences;
 };
-
-const downloadLabel: Record<AlbumDownloadStatus, string> = {
-  downloading: "Downloading",
-  queued: "Queued",
-  paused: "Paused",
-  downloaded: "Downloaded",
-  failed: "Needs attention",
-};
-
-const labelFor = (state: AlbumDownloadState) =>
-  state.status === "queued" && state.queuePosition
-    ? `Queued #${state.queuePosition}`
-    : downloadLabel[state.status];
 
 function DownloadStateIcon({ state }: { state: AlbumDownloadStatus }) {
   if (state === "downloading") {
@@ -231,7 +218,7 @@ export function AlbumSourceResults({
               const queuedState = sourceDownloadStates.get(source.id);
               const downloadable = Boolean(source.representative.folder);
               const buttonLabel = queuedState
-                ? labelFor(queuedState)
+                ? albumDownloadLabel(queuedState)
                 : preparing
                   ? "Preparing…"
                   : "Download album";

@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.32` adds Filed Away: completed releases
-> moved out of Forever's download folder now remain safe history instead of
-> becoming false Needs attention warnings.
+> **Status:** pre-alpha. Version `0.0.33` adds Queue Lights: Missing Shelf
+> download controls now show their live Preparing, Downloading, Queued, Paused,
+> Downloaded, or Needs attention state.
 
-If `0.0.16` is installed, download and run the latest `0.0.32` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.33` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -56,7 +56,8 @@ configuration and transfers.
   lossless found, plus expandable grouped folders with listener, format, track
   count, size, upload slot, speed, queue, and track-list details
 - Direct **Download best**, per-source download, rescan, and **Watch for better**
-  actions inside Missing Shelf
+  actions inside Missing Shelf, with live transfer-state icons and queue position
+  feedback after an album is handed off
 - Batched **Owned** and **Don't own** markers across MusicBrainz discographies
   and Soulseek album-source reports, matched from the Archive's normalized
   artist, album, release-year, and track-count metadata
@@ -258,7 +259,9 @@ Completed scans stay in memory for the current app session. A release reports
 whether no sources answered, grouped sources were found, or a lossless folder
 is available. Open the signal to compare up to five responding folders and
 preview their audio tracks. **Download best** inspects the recommended remote
-folder before queueing the complete release, while **Watch for better** creates
+folder before queueing the complete release, then both the recommended button
+and its exact source-row icon follow the live Preparing, Downloading, Queued,
+Paused, Downloaded, or Needs attention state. **Watch for better** creates
 an ordinary Wanted entry using the selected Smart Match profile. Non-audio-only
 folders are excluded from album-source availability. Neither action writes to
 Music Library; downloads and watches remain in Forever's own stores.
@@ -429,7 +432,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.32 verifies the expected
+protocol does not provide chunk hashes, so v0.0.33 verifies the expected
 filename presence and byte count but cannot cryptographically verify file
 contents. Finish Line reports a size mismatch instead of replacing that local
 file automatically.

@@ -30,19 +30,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.31",
-  version: "0.0.32",
-  body: `## What’s new in Forever 0.0.32
+  currentVersion: "0.0.32",
+  version: "0.0.33",
+  body: `## What’s new in Forever 0.0.33
+
+### Added
+
+- Queue Lights gives Missing Shelf downloads distinct live icons for Preparing, Downloading, Queued, Paused, Downloaded, and Needs attention states.
+- Download best now shows the actual queue position when another release is already active.
 
 ### Changed
 
-- Finish Line now recognizes a fully completed release whose entire folder has left Forever's download location as Moved, a safe history state rather than a problem.
-- Moved releases offer Download again while their absent file rows use a calm Moved label instead of Missing warnings.
-
-### Fixed
-
-- Organizing a downloaded album into a separate music library no longer produces a Needs attention card or completion-with-issues warning.
-- Partial file loss, size mismatches, and failed transfers remain visible in Needs attention so real damage is not hidden.`,
+- The recommended source button and its matching source-row button stay synchronized with the real Transfers queue.
+- Missing Shelf no longer returns to an unchanged yellow download icon after successfully queueing an album.`,
   date: "2026-07-27",
 };
 

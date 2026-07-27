@@ -13,6 +13,19 @@ export type AlbumDownloadState = {
   queuePosition: number | null;
 };
 
+const downloadLabels: Record<AlbumDownloadStatus, string> = {
+  downloading: "Downloading",
+  queued: "Queued",
+  paused: "Paused",
+  downloaded: "Downloaded",
+  failed: "Needs attention",
+};
+
+export const albumDownloadLabel = (state: AlbumDownloadState) =>
+  state.status === "queued" && state.queuePosition
+    ? `Queued #${state.queuePosition}`
+    : downloadLabels[state.status];
+
 const normalizeRemoteFilename = (value: string) =>
   value
     .trim()

@@ -10802,6 +10802,38 @@ form.settings-panel {
   color: #ddb066;
 }
 
+.shelf-radar-download:is(.is-downloading, .is-queued, .is-paused, .is-downloaded, .is-failed):disabled,
+.shelf-radar-source-download:is(.is-downloading, .is-queued, .is-paused, .is-downloaded, .is-failed):disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.shelf-radar-download.is-downloading,
+.shelf-radar-source-download.is-downloading {
+  color: #bba0e9;
+  background: rgba(105, 72, 151, 0.24);
+  border-color: #7655a2;
+}
+
+.shelf-radar-download.is-queued,
+.shelf-radar-source-download.is-queued {
+  color: #8dbce5;
+  background: rgba(57, 101, 140, 0.22);
+  border-color: #426989;
+}
+
+.shelf-radar-download.is-downloaded,
+.shelf-radar-source-download.is-downloaded {
+  color: #82d394;
+  background: rgba(54, 124, 75, 0.2);
+  border-color: #3f7950;
+}
+
+.shelf-radar-download.is-paused,
+.shelf-radar-source-download.is-paused { color: #e5b766; border-color: #725b36; }
+.shelf-radar-download.is-failed,
+.shelf-radar-source-download.is-failed { color: #e28c7c; border-color: #754b4d; }
+
 @media (max-width: 1100px) {
   .missing-release-row {
     grid-template-columns: 25px 43px minmax(150px, 1fr) 112px 67px;

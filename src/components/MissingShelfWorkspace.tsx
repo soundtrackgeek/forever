@@ -3,10 +3,12 @@ import {
   Check,
   CheckCircle,
   CircleNotch,
+  ClockCountdown,
   Database,
   DownloadSimple,
   Eye,
   MagnifyingGlass,
+  Pause,
   Plus,
   Record,
   SlidersHorizontal,
@@ -24,12 +26,18 @@ import type {
   RadarAlbumScan,
   RadarSnapshot,
   SearchResult,
+  Transfer,
   WantedAlbum,
   WantedFormatPreference,
   WantedPreferences,
 } from "../types";
 import type { MissingShelfLoading } from "../hooks/useMissingShelf";
 import { formatAlbumBytes, groupAlbumSources } from "../utils/albumSources";
+import {
+  albumDownloadLabel,
+  albumDownloadStates,
+  type AlbumDownloadStatus,
+} from "../utils/albumDownloadState";
 import { rankAlbumSources } from "../utils/smartMatches";
 
 type MissingShelfWorkspaceProps = {
@@ -50,6 +58,7 @@ type MissingShelfWorkspaceProps = {
   radarSnapshot: RadarSnapshot;
   radarScans: ReadonlyMap<string, RadarAlbumScan>;
   radarResults: ReadonlyMap<string, SearchResult[]>;
+  transfers: Transfer[];
   onSearchArtists: (query: string) => Promise<ArchiveArtistSummary[]>;
   onSelectArtist: (artist: ArchiveArtistSummary) => Promise<AlbumCatalog | null>;
   onSelectIdentity: (artist: AlbumArtist) => Promise<AlbumCatalog | null>;
@@ -113,9 +122,18 @@ const filename = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-1)
 const speed = (bytesPerSecond: number) => bytesPerSecond > 0 ? `${formatAlbumBytes(bytesPerSecond)}/s` : "Speed unknown";
 const losslessFormats = new Set(["FLAC", "ALAC", "APE", "WAV", "AIFF", "WV"]);
 
+function RadarDownloadIcon({ status }: { status: AlbumDownloadStatus }) {
+  if (status === "downloading") return <CircleNotch className="search-spinner" size={15} />;
+  if (status === "queued") return <ClockCountdown size={15} weight="fill" />;
+  if (status === "downloaded") return <CheckCircle size={15} weight="fill" />;
+  if (status === "paused") return <Pause size={15} weight="fill" />;
+  return <WarningCircle size={15} weight="fill" />;
+}
+
 function RadarSourceDrawer({
   album,
   sources,
+  transfers,
   watched,
   preparingSourceId,
   onDownload,
@@ -124,6 +142,7 @@ function RadarSourceDrawer({
 }: {
   album: AlbumReleaseGroup;
   sources: AlbumSource[];
+  transfers: Transfer[];
   watched: boolean;
   preparingSourceId: string | null;
   onDownload: (source: AlbumSource) => void;
@@ -132,6 +151,17 @@ function RadarSourceDrawer({
 }) {
   const ranked = rankAlbumSources(sources, defaultPreferences);
   const best = ranked.find((source) => source.eligible)?.source ?? sources[0];
+  const downloadStates = useMemo(
+    () => albumDownloadStates(sources, transfers),
+    [sources, transfers],
+  );
+  const bestState = best ? downloadStates.get(best.id) : undefined;
+  const bestPreparing = best ? preparingSourceId === best.id : false;
+  const bestLabel = bestState
+    ? albumDownloadLabel(bestState)
+    : bestPreparing
+      ? "Preparing…"
+      : "Download best";
   return (
     <section className="shelf-radar-drawer">
       <header>
@@ -139,12 +169,14 @@ function RadarSourceDrawer({
         <div>
           <button type="button" className="shelf-radar-rescan" onClick={onRescan}><Broadcast size={14} /> Rescan</button>
           {!watched ? <button type="button" className="shelf-radar-watch" onClick={onWatch}><Plus size={14} weight="bold" /> Watch for better</button> : null}
-          {best ? <button type="button" className="shelf-radar-download" disabled={preparingSourceId !== null} onClick={() => onDownload(best)}>{preparingSourceId === best.id ? <CircleNotch className="search-spinner" size={15} /> : <DownloadSimple size={15} weight="bold" />} Download best</button> : null}
+          {best ? <button type="button" className={`shelf-radar-download${bestState ? ` is-${bestState.status}` : ""}`} disabled={preparingSourceId !== null || Boolean(bestState)} onClick={() => onDownload(best)} title={bestState ? `${bestLabel}. Manage this album in Transfers.` : "Download Forever's recommended source"}>{bestState ? <RadarDownloadIcon status={bestState.status} /> : bestPreparing ? <CircleNotch className="search-spinner" size={15} /> : <DownloadSimple size={15} weight="bold" />} {bestLabel}</button> : null}
         </div>
       </header>
       <div className="shelf-radar-sources">
-        {sources.slice(0, 5).map((source) => (
-          <article key={source.id}>
+        {sources.slice(0, 5).map((source) => {
+          const downloadState = downloadStates.get(source.id);
+          const downloadLabel = downloadState ? albumDownloadLabel(downloadState) : null;
+          return <article key={source.id}>
             <span><strong>{source.owner}</strong><small>{source.isPrivate ? "Private share" : "Public share"}</small></span>
             <span className="shelf-radar-folder"><strong>{source.folderName}</strong><small title={source.folder}>{source.folder.replace(/[\\/]/g, " / ")}</small></span>
             <span><strong>{source.tracks.length} tracks</strong><small>{source.formats.join(" + ") || "Unknown format"} · {formatAlbumBytes(source.totalSizeBytes)}</small></span>
@@ -154,9 +186,9 @@ function RadarSourceDrawer({
               <ol>{source.tracks.slice(0, 24).map((track) => <li key={track.id}><span>{filename(track.filename ?? track.title)}</span><small>{track.format}</small></li>)}</ol>
               {source.tracks.length > 24 ? <p>+ {source.tracks.length - 24} more tracks</p> : null}
             </details>
-            <button type="button" className="shelf-radar-source-download" disabled={preparingSourceId !== null} onClick={() => onDownload(source)} aria-label={`Download ${album.title} from ${source.owner}`}><DownloadSimple size={15} /></button>
-          </article>
-        ))}
+            <button type="button" className={`shelf-radar-source-download${downloadState ? ` is-${downloadState.status}` : ""}`} disabled={preparingSourceId !== null || Boolean(downloadState)} onClick={() => onDownload(source)} aria-label={downloadLabel ? `${downloadLabel}: ${album.title} from ${source.owner}` : `Download ${album.title} from ${source.owner}`} title={downloadLabel ? `${downloadLabel}. Manage this album in Transfers.` : `Download ${album.title} from ${source.owner}`}>{downloadState ? <RadarDownloadIcon status={downloadState.status} /> : preparingSourceId === source.id ? <CircleNotch className="search-spinner" size={15} /> : <DownloadSimple size={15} />}</button>
+          </article>;
+        })}
       </div>
     </section>
   );
@@ -180,6 +212,7 @@ export function MissingShelfWorkspace({
   radarSnapshot,
   radarScans,
   radarResults,
+  transfers,
   onSearchArtists,
   onSelectArtist,
   onSelectIdentity,
@@ -395,7 +428,7 @@ export function MissingShelfWorkspace({
                       {shelfState === "missing" ? <button type="button" className={`shelf-radar-status ${radarClass}`} disabled={!online || radarScanning} onClick={() => sources.length ? setOpenRadarAlbumId(radarOpen ? null : album.id) : scan([album])} title={sources.length ? "Show or hide available album sources" : online ? "Scan this album" : "Reconnect before scanning"}>{radarScan?.state === "scanning" ? <CircleNotch className="search-spinner" size={14} /> : sources.length ? <Eye size={14} /> : <Broadcast size={14} />}<span><strong>{radarLabel}</strong><small>{sources.length ? `${radarScan?.peerCount ?? 0} people replied` : radarScan?.state === "completed" ? "Click to rescan" : "Click to listen"}</small></span></button> : <span className="shelf-radar-unavailable">{shelfState === "wanted" ? "Watch active" : "In library"}</span>}
                       <strong className={`missing-release-state is-${shelfState}`}>{shelfState === "owned" ? <CheckCircle size={14} weight="fill" /> : shelfState === "wanted" ? <Plus size={13} weight="bold" /> : <span aria-hidden="true" />}{shelfState === "owned" ? "Own" : shelfState === "wanted" ? "Wanted" : "Missing"}</strong>
                     </article>
-                    {radarOpen ? <RadarSourceDrawer album={album} sources={sources} watched={wantedIds.has(album.id.toLowerCase())} preparingSourceId={preparingSourceId} onDownload={(source) => void queueSource(album, source, sources).catch(() => undefined)} onWatch={() => void onAddMany(selectedArtist.canonicalName ?? selectedArtist.name, [album], preferences).catch(() => undefined)} onRescan={() => scan([album])} /> : null}
+                    {radarOpen ? <RadarSourceDrawer album={album} sources={sources} transfers={transfers} watched={wantedIds.has(album.id.toLowerCase())} preparingSourceId={preparingSourceId} onDownload={(source) => void queueSource(album, source, sources).catch(() => undefined)} onWatch={() => void onAddMany(selectedArtist.canonicalName ?? selectedArtist.name, [album], preferences).catch(() => undefined)} onRescan={() => scan([album])} /> : null}
                   </div>
                 );
               })}

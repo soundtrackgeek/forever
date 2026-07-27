@@ -539,6 +539,7 @@ function App() {
                 radarSnapshot={radar.snapshot}
                 radarScans={radar.scansByAlbumId}
                 radarResults={radar.resultsByAlbumId}
+                transfers={transfers.snapshot.transfers}
                 onSearchArtists={missingShelf.loadArtists}
                 onSelectArtist={missingShelf.loadCatalog}
                 onSelectIdentity={missingShelf.selectIdentity}

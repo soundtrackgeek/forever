@@ -5,6 +5,29 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.33] - 2026-07-27
+
+### Added
+
+- **Queue Lights** gives Missing Shelf's recommended and per-source download
+  controls distinct Preparing, Downloading, Queued, Paused, Downloaded, and
+  Needs attention states driven by the real transfer queue.
+- Queued Missing Shelf releases show their exact release queue position, while
+  active downloads use an animated spinner and completed downloads use a green
+  confirmation icon.
+
+### Changed
+
+- Shelf Radar now reuses the same normalized listener-and-folder transfer-state
+  mapping as the main album search rather than ending feedback after preparation.
+
+### Fixed
+
+- Successfully queueing an album from Missing Shelf no longer returns its
+  button to the unchanged yellow download glyph with no visible confirmation.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.33` and describe Queue Lights.
+
 ## [0.0.32] - 2026-07-27
 
 ### Changed
