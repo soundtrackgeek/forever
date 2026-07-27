@@ -47,10 +47,10 @@ export function useArchiveInventory(
   wantedAlbums: WantedAlbum[],
 ) {
   const native = isTauri();
-  const [status, setStatus] = useState<ArchiveStatus | null>(null);
+  const [status, setStatus] = useState<ArchiveStatus | null>(native ? null : previewStatus);
   const [matches, setMatches] = useState<ArchiveAlbumMatch[]>([]);
   const [wantedMatches, setWantedMatches] = useState<ArchiveAlbumMatch[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(native);
   const [matching, setMatching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);

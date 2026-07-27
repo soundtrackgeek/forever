@@ -13,6 +13,7 @@ import { MissingShelfWorkspace } from "./components/MissingShelfWorkspace";
 import { ReleaseInspector } from "./components/ReleaseInspector";
 import { PeopleWorkspace } from "./components/PeopleWorkspace";
 import { RoomsWorkspace } from "./components/RoomsWorkspace";
+import { SearchPresetRail } from "./components/SearchPresetRail";
 import { SearchWorkspace, type AlbumResultView } from "./components/SearchWorkspace";
 import { SmartMatchPreferencesDialog } from "./components/SmartMatchPreferencesDialog";
 import { SmartMatchReviewDialog } from "./components/SmartMatchReviewDialog";
@@ -26,6 +27,7 @@ import { WantedAlert } from "./components/WantedAlert";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { useArchiveInventory } from "./hooks/useArchiveInventory";
 import { useAlbumDiscovery } from "./hooks/useAlbumDiscovery";
+import { useDialMemory } from "./hooks/useDialMemory";
 import { useSoulseekConnection } from "./hooks/useSoulseekConnection";
 import { useSoulseekFolders } from "./hooks/useSoulseekFolders";
 import { useSoulseekPeople } from "./hooks/useSoulseekPeople";
@@ -117,26 +119,42 @@ function App() {
   const [transferFocus, setTransferFocus] = useState<{ groupId: string; requestId: number } | null>(null);
   const [archiveFocus, setArchiveFocus] = useState<{ tab: "missing" | "wanted"; requestId: number } | null>(null);
   const [roomFocus, setRoomFocus] = useState<{ roomName: string | null; requestId: number } | null>(null);
-  const [searchMode, setSearchMode] = useState<SearchMode>("files");
-  const [albumContext, setAlbumContext] = useState<AlbumSearchContext | null>(null);
-  const [albumResultView, setAlbumResultView] = useState<AlbumResultView>("files");
-  const [query, setQuery] = useState("night geometry");
-  const [selectedResultId, setSelectedResultId] = useState<string | null>(
-    "night-geometry",
-  );
+  const dial = useDialMemory();
+  const searchMode = dial.active.mode;
+  const albumContext = dial.active.albumContext;
+  const albumResultView = dial.active.albumResultView;
+  const query = dial.active.query;
+  const selectedResultId = dial.active.selectedResultId;
+  const setQuery = (next: string) => dial.update(dial.activeId, { query: next });
+  const setSearchMode = (next: SearchMode) => dial.update(dial.activeId, { mode: next });
+  const setAlbumResultView = (next: AlbumResultView) => dial.update(dial.activeId, { albumResultView: next });
+  const setSelectedResultId = (next: string | null) => dial.update(dial.activeId, { selectedResultId: next });
+  const setAlbumContext = (next: AlbumSearchContext | null) => dial.update(dial.activeId, { albumContext: next });
+  const changeSearchMode = (mode: SearchMode) => {
+    if (mode === dial.active.mode) return;
+    const existing = dial.sessions.find((item) => item.mode === mode);
+    if (existing) {
+      dial.select(existing.id);
+      return;
+    }
+    dial.update(dial.activeId, { mode, albumContext: mode === "albums" ? null : albumContext });
+  };
   const updater = useAppUpdater();
-  const albums = useAlbumDiscovery();
-  const archiveAlbums = albums.catalog?.albums ?? emptyAlbumCatalog;
+  const albums = useAlbumDiscovery(dial.activeId);
+  const archiveDiscovery = albums.selectedArtist && albums.catalog
+    ? albums
+    : Object.values(albums.states).find((state) => state.selectedArtist && state.catalog);
+  const archiveAlbums = archiveDiscovery?.catalog?.albums ?? emptyAlbumCatalog;
   const wanted = useWantedAlbums();
   const missingShelf = useMissingShelf();
   const radar = useShelfRadar();
   const archive = useArchiveInventory(
-    albums.selectedArtist?.name ?? null,
+    archiveDiscovery?.selectedArtist?.name ?? null,
     archiveAlbums,
     wanted.snapshot.albums,
   );
   const connection = useSoulseekConnection();
-  const search = useSoulseekSearch();
+  const search = useSoulseekSearch(dial.activeId);
   const transfers = useSoulseekTransfers();
   const sharing = useLocalSharing();
   const folders = useSoulseekFolders();
@@ -314,13 +332,15 @@ function App() {
 
   const openAlbumSources = (context: AlbumSearchContext) => {
     const nextQuery = `${context.artist} ${context.title}`;
-    setQuery(nextQuery);
-    setSelectedResultId(null);
-    setAlbumContext(context);
-    setAlbumResultView("sources");
-    setSearchMode("files");
+    const sessionId = dial.create({
+      mode: "files",
+      query: nextQuery,
+      albumContext: context,
+      albumResultView: "sources",
+    });
+    if (!sessionId) return;
     setActiveView("search");
-    void search.startSearch(nextQuery).catch(() => undefined);
+    void search.startSearch(sessionId, nextQuery).catch(() => undefined);
   };
 
   const navigate = (view: string) => {
@@ -392,6 +412,58 @@ function App() {
     activeView === "search" &&
     searchMode === "files" &&
     (!albumContext || albumResultView === "files");
+  const {
+    activeId: shortcutActiveId,
+    close: closeDialShortcut,
+    create: createDialShortcut,
+    cycle: cycleDialShortcut,
+  } = dial;
+  const { closeSearch: closeSearchShortcut, markSeen: markSeenShortcut } = search;
+
+  useEffect(() => {
+    const handleDialShortcut = (event: globalThis.KeyboardEvent) => {
+      if (activeView !== "search" || !event.ctrlKey || event.altKey) return;
+      if (event.key.toLocaleLowerCase() === "t") {
+        event.preventDefault();
+        createDialShortcut({ mode: "files" });
+      } else if (event.key.toLocaleLowerCase() === "w") {
+        event.preventDefault();
+        closeDialShortcut(shortcutActiveId);
+        void closeSearchShortcut(shortcutActiveId);
+      } else if (event.key === "Tab") {
+        event.preventDefault();
+        const nextId = cycleDialShortcut(event.shiftKey ? -1 : 1);
+        if (nextId) markSeenShortcut(nextId);
+      }
+    };
+    window.addEventListener("keydown", handleDialShortcut);
+    return () => window.removeEventListener("keydown", handleDialShortcut);
+  }, [activeView, shortcutActiveId, closeDialShortcut, closeSearchShortcut, createDialShortcut, cycleDialShortcut, markSeenShortcut]);
+
+  const presetRail = (
+    <SearchPresetRail
+      sessions={dial.sessions}
+      activeId={dial.activeId}
+      records={search.records}
+      albumStates={albums.states}
+      recent={dial.recent}
+      atLimit={dial.atLimit}
+      onSelect={(id) => {
+        dial.select(id);
+        search.markSeen(id);
+        folders.clear();
+      }}
+      onCreate={() => { dial.create({ mode: "files" }); }}
+      onClose={(id) => {
+        dial.close(id);
+        void search.closeSearch(id);
+      }}
+      onTogglePin={(id, pinned) => dial.update(id, { pinned })}
+      onDuplicate={(id) => { dial.duplicate(id); }}
+      onStopAll={() => { void search.stopAllSearches(); }}
+      onReopen={(item) => { dial.reopen(item); }}
+    />
+  );
 
   return (
     <div
@@ -432,13 +504,18 @@ function App() {
             onOpenMessages={() => navigate("messages")}
             onOpenRoom={openRoom}
             onSearchAlbums={() => {
-              setSearchMode("albums");
+              if (!dial.create({ mode: "albums" })) setSearchMode("albums");
               setActiveView("search");
             }}
           />
         ) : activeView === "search" && searchMode === "files" ? (
           <>
             <SearchWorkspace
+              presetRail={presetRail}
+              sessionId={dial.activeId}
+              filter={dial.active.searchFilter}
+              sort={dial.active.searchSort}
+              layout={dial.active.searchLayout}
               searchMode={searchMode}
               albumContext={albumContext}
               albumResultView={albumResultView}
@@ -458,6 +535,9 @@ function App() {
               searchError={search.error}
               connection={connection.snapshot}
               onOpenConnection={() => setActiveView("settings")}
+              onFilterChange={(searchFilter) => dial.update(dial.activeId, { searchFilter })}
+              onSortChange={(searchSort) => dial.update(dial.activeId, { searchSort })}
+              onLayoutChange={(searchLayout) => dial.update(dial.activeId, { searchLayout })}
               onQueryChange={setQuery}
               onSearch={(nextQuery) => {
                 const normalizedQuery = nextQuery.trim();
@@ -465,9 +545,9 @@ function App() {
                 setSelectedResultId(null);
                 setAlbumContext(null);
                 setAlbumResultView("files");
-                void search.startSearch(normalizedQuery).catch(() => undefined);
+                void search.startSearch(dial.activeId, normalizedQuery).catch(() => undefined);
               }}
-              onStopSearch={() => void search.stopSearch()}
+              onStopSearch={() => void search.stopSearch(dial.activeId)}
               onSelectResult={(result) => {
                 setSelectedResultId(result.id);
                 folders.clear();
@@ -478,7 +558,7 @@ function App() {
               onBrowseUser={browseUser}
               personByUsername={people.personByUsername}
               onOpenPerson={openPerson}
-              onSearchModeChange={setSearchMode}
+              onSearchModeChange={changeSearchMode}
               onAlbumResultViewChange={setAlbumResultView}
               onToggleWanted={() => {
                 if (!albumContext) return Promise.resolve();
@@ -522,7 +602,9 @@ function App() {
           </>
         ) : activeView === "search" ? (
           <AlbumSearchWorkspace
-            query={albums.query}
+            presetRail={presetRail}
+            filter={dial.active.albumFilter}
+            query={query}
             artists={albums.artists}
             selectedArtist={albums.selectedArtist}
             catalog={albums.catalog}
@@ -534,14 +616,15 @@ function App() {
             archiveLoading={archive.loading || archive.matching}
             archiveMatches={archive.matchByAlbumId}
             wantedAlbums={wanted.byAlbumId}
-            onQueryChange={albums.setQuery}
+            onQueryChange={setQuery}
+            onFilterChange={(albumFilter) => dial.update(dial.activeId, { albumFilter })}
             onSearch={(artistQuery) => {
               void albums.searchArtists(artistQuery).catch(() => undefined);
             }}
             onSelectArtist={(artist) => {
               void albums.selectArtist(artist).catch(() => undefined);
             }}
-            onSearchModeChange={setSearchMode}
+            onSearchModeChange={changeSearchMode}
             onAddWanted={wanted.add}
             onRemoveWanted={wanted.remove}
             onSearchSoulseek={(artist, album) => {

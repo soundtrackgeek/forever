@@ -2870,13 +2870,283 @@ button:disabled {
 
 .search-workspace {
   display: grid;
-  grid-template-rows: 60px auto 224px 47px minmax(0, 1fr);
+  grid-template-rows: 60px 66px auto 182px 47px minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   padding: 0 28px 20px;
   background:
     radial-gradient(circle at 45% 8%, rgba(61, 56, 114, 0.13), transparent 42%),
     rgba(7, 11, 21, 0.7);
+}
+
+/* v0.0.37 — Dial Memory search presets. */
+.dial-memory {
+  position: relative;
+  z-index: 12;
+  display: flex;
+  min-width: 0;
+  height: 66px;
+  align-items: stretch;
+  gap: 10px;
+  margin: 0 -28px;
+  padding: 8px 28px;
+  background: rgba(9, 13, 24, 0.94);
+  border-top: 1px solid rgba(42, 48, 68, 0.78);
+  border-bottom: 1px solid #272d40;
+}
+
+.album-workspace .dial-memory {
+  margin-inline: -30px;
+  padding-inline: 30px;
+}
+
+.dial-memory-scroll {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: 7px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-color: #3c4359 transparent;
+  scrollbar-width: thin;
+}
+
+.dial-preset {
+  position: relative;
+  display: flex;
+  width: clamp(142px, 14vw, 184px);
+  min-width: 142px;
+  height: 48px;
+  overflow: hidden;
+  color: #a5a9ba;
+  background: #101523;
+  border: 1px solid #30374c;
+  border-radius: 6px;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.dial-preset:hover {
+  color: #e7e6ee;
+  background: #141929;
+  border-color: #4a4562;
+}
+
+.dial-preset.is-active {
+  color: #f0edf8;
+  background: #1c1a31;
+  border-color: #9f7ee2;
+  box-shadow: inset 0 0 0 1px rgba(170, 135, 234, 0.15), 0 0 0 2px rgba(133, 102, 204, 0.08);
+}
+
+.dial-preset-select {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-rows: 1fr 1fr;
+  align-items: center;
+  gap: 0 7px;
+  padding: 7px 23px 7px 10px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.dial-preset-select:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -3px;
+}
+
+.dial-preset-select > svg {
+  grid-row: 1 / 3;
+  color: #c5c5d2;
+}
+
+.dial-preset-select > span {
+  display: grid;
+  min-width: 0;
+  grid-row: 1 / 3;
+  gap: 2px;
+}
+
+.dial-preset-select strong,
+.dial-preset-select small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dial-preset-select strong {
+  color: inherit;
+  font-size: 9px;
+  font-weight: 610;
+  line-height: 1.2;
+}
+
+.dial-preset-select small {
+  color: #666d80;
+  font-size: 7px;
+  letter-spacing: 0.04em;
+}
+
+.dial-preset-select em {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  align-self: center;
+  color: #7f8496;
+  font-size: 8px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.dial-preset-select em.is-new { color: var(--amber); }
+.dial-preset-select em.is-listening { color: #b69be7; }
+
+.dial-wave {
+  display: none;
+  width: 12px;
+  height: 22px;
+  grid-column: 3;
+  grid-row: 1 / 3;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1px;
+}
+
+.dial-preset.is-listening .dial-preset-select em { display: none; }
+.dial-preset.is-listening .dial-wave { display: flex; }
+
+.dial-wave b {
+  display: block;
+  width: 1px;
+  height: 7px;
+  background: #a985ec;
+  animation: dial-wave 900ms ease-in-out infinite alternate;
+}
+
+.dial-wave b:nth-child(2) { height: 13px; animation-delay: -300ms; }
+.dial-wave b:nth-child(3) { height: 20px; animation-delay: -600ms; }
+
+@keyframes dial-wave {
+  to { transform: scaleY(0.45); opacity: 0.5; }
+}
+
+.dial-pin,
+.dial-close {
+  position: absolute;
+  right: 4px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  place-items: center;
+  color: #62687a;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.dial-pin { top: 4px; }
+.dial-close { bottom: 4px; }
+.dial-pin.is-pinned { color: #c5b2ee; opacity: 1; }
+.dial-preset:hover .dial-pin,
+.dial-preset:hover .dial-close,
+.dial-preset:focus-within .dial-pin,
+.dial-preset:focus-within .dial-close { opacity: 1; }
+.dial-pin:hover,
+.dial-close:hover { color: white; background: #272a3b; }
+
+.dial-memory-actions {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding-left: 9px;
+  border-left: 1px solid #2b3144;
+}
+
+.dial-new,
+.dial-utility {
+  display: inline-flex;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 9px;
+  color: #979cad;
+  font-size: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dial-new {
+  color: #d9d8e3;
+  border-color: #3c4358;
+}
+
+.dial-new:hover,
+.dial-utility:hover,
+.dial-utility.is-open { color: white; background: #171c2b; border-color: #41475c; }
+.dial-new:disabled,
+.dial-utility:disabled { color: #4e5363; cursor: default; background: transparent; border-color: transparent; }
+
+.dial-recent-wrap { position: relative; }
+.dial-recent-menu {
+  position: absolute;
+  z-index: 30;
+  top: 46px;
+  right: 0;
+  display: grid;
+  width: 220px;
+  padding: 6px;
+  background: #111624;
+  border: 1px solid #343a50;
+  border-radius: 7px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.42);
+}
+
+.dial-recent-menu > button {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  color: #aeb2c1;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.dial-recent-menu > button:hover { color: white; background: #1b2031; }
+.dial-recent-menu span { display: grid; min-width: 0; gap: 2px; }
+.dial-recent-menu strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.dial-recent-menu small { color: #666d80; font-size: 7px; }
+.dial-recent-menu p { margin: 0; padding: 14px 8px; color: #666d80; font-size: 8px; text-align: center; }
+
+@media (max-width: 1320px) {
+  .dial-utility span { display: none; }
+  .dial-utility { width: 34px; padding: 0; }
+}
+
+@media (max-width: 1080px) {
+  .dial-memory { margin-inline: -28px; padding-inline: 28px; }
+  .album-workspace .dial-memory { margin-inline: -20px; padding-inline: 20px; }
+  .dial-preset { width: 148px; min-width: 148px; }
+  .dial-preset-select em { display: none; }
+  .dial-new { width: 36px; padding: 0; }
+  .dial-new span,
+  .dial-memory-actions > .dial-utility:first-of-type { display: none; }
 }
 
 .network-toolbar {
@@ -8497,7 +8767,7 @@ form.settings-panel {
 
 .album-workspace {
   display: grid;
-  grid-template-rows: 60px auto auto minmax(0, 1fr);
+  grid-template-rows: 60px 66px auto auto minmax(0, 1fr);
   padding: 0 30px 30px;
   overflow: hidden;
 }

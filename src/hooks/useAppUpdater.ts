@@ -30,19 +30,20 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.35",
-  version: "0.0.36",
-  body: `## What’s new in Forever 0.0.36
+  currentVersion: "0.0.36",
+  version: "0.0.37",
+  body: `## What’s new in Forever 0.0.37
 
 ### Added
 
-- The Listening Post turns Home into a live command center for transfers, Wanted matches, messages, room mentions, recent activity, and Archive status.
-- Every signal opens its exact transfer, Archive tab, conversation, room, or album-search destination.
+- Dial Memory keeps up to eight independent Files and Albums searches tuned at once, with their query, filters, sort, layout, selection, results, and scroll position intact while you switch.
+- Background searches show live Listening and new-result signals. Presets can be duplicated, stopped, closed, reopened, or pinned across restarts.
+- Ctrl+T opens a search, Ctrl+W closes the current search, and Ctrl+Tab or Ctrl+Shift+Tab moves between presets.
 
 ### Changed
 
-- Forever now opens on Home after startup while first-run onboarding still takes priority for unconfigured accounts.
-- The dashboard stays fully data-driven and remains readable at Forever’s 1024×680 minimum window size.`,
+- Soulseek responses are routed to isolated native search sessions with a strict eight-session and per-session result limit.
+- Pinned searches persist only their query and view settings; live results are always reacquired from the network.`,
   date: "2026-07-27",
 };
 

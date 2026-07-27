@@ -50,6 +50,51 @@ describe("Forever shell", () => {
     expect(screen.getAllByRole("heading", { name: "Night Geometry" })).toHaveLength(2);
   });
 
+  it("keeps independent Dial Memory searches and reopens a recently closed preset", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(screen.getByRole("tab", { name: /night geometryFiles 6 results/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Def LeppardAlbums 8 albums/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /rare Bowie demosFiles/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unpin Kate Bush" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("New search (Ctrl+T)"));
+    const input = screen.getByRole("textbox", { name: "Search the network" });
+    fireEvent.change(input, { target: { value: "Def Leppard Hysteria" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.click(screen.getByRole("tab", { name: /night geometryFiles 6 results/ }));
+    expect(screen.getAllByRole("heading", { name: "Night Geometry" })).toHaveLength(2);
+    const background = await screen.findByRole(
+      "tab",
+      { name: /Def Leppard HysteriaFiles 39 new/ },
+      { timeout: 1_800 },
+    );
+
+    fireEvent.click(background);
+    expect(screen.getByDisplayValue("Def Leppard Hysteria")).toBeInTheDocument();
+    expect(screen.getAllByText(/1987 - Hysteria \[FLAC\]/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin Def Leppard Hysteria" }));
+    expect(screen.getByRole("button", { name: "Unpin Def Leppard Hysteria" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Def Leppard Hysteria" }));
+    expect(screen.queryByDisplayValue("Def Leppard Hysteria")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Recently closed/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Def Leppard Hysteria/ }));
+    expect(screen.getByDisplayValue("Def Leppard Hysteria")).toBeInTheDocument();
+    expect(screen.getByText("No signals found")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "t", ctrlKey: true });
+    expect(screen.getByRole("textbox", { name: "Search the network" })).toHaveValue("");
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true });
+    expect(screen.getByDisplayValue("Def Leppard Hysteria")).toBeInTheDocument();
+    const selected = screen.getByRole("tab", { name: /Def Leppard HysteriaFiles Ready/ });
+    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
+    expect(selected).toHaveAttribute("aria-selected", "false");
+  });
+
   it("keeps the transfer shelf collapsed by default and toggles it on demand", () => {
     render(<App />);
 
@@ -772,16 +817,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.36 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.37 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "The Listening Post turns Home into a live command center for transfers, Wanted matches, messages, room mentions, recent activity, and Archive status.",
+        "Dial Memory keeps up to eight independent Files and Albums searches tuned at once, with their query, filters, sort, layout, selection, results, and scroll position intact while you switch.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Forever now opens on Home after startup while first-run onboarding still takes priority for unconfigured accounts.",
+        "Pinned searches persist only their query and view settings; live results are always reacquired from the network.",
       ),
     ).toBeInTheDocument();
   });

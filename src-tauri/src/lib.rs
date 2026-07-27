@@ -51,6 +51,8 @@ pub fn run() {
             connection::search_snapshot,
             connection::search_start,
             connection::search_stop,
+            connection::search_stop_all,
+            connection::search_close,
             connection::transfers_snapshot,
             connection::transfer_enqueue,
             connection::transfer_enqueue_release,

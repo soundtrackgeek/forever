@@ -3,16 +3,18 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.36` adds The Listening Post, a live Home
-> command center for transfers, Wanted matches, conversations, rooms, recent
-> activity, and the read-only Archive.
+> **Status:** pre-alpha. Version `0.0.37` adds Dial Memory: eight independent
+> Files or Albums searches with background-result signals, pinned presets, and
+> fast keyboard switching.
 
-If `0.0.16` is installed, download and run the latest `0.0.36` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.37` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
 
-![Forever The Listening Post Home](design/implementation/listening-post-0.0.36-desktop.png)
+![Forever Dial Memory search presets](design/implementation/dial-memory-0.0.37-desktop.png)
+
+![Forever Dial Memory at the minimum window size](design/implementation/dial-memory-0.0.37-minimum.png)
 
 ![Forever Finish Line transfer health](design/implementation/finish-line-0.0.30-desktop.png)
 
@@ -34,6 +36,14 @@ configuration and transfers.
 - Live Soulseek search with direct and indirect peer-response handling,
   streamed and deduplicated results, a 15-second response window, and bounded
   protocol parsing
+- **Dial Memory** keeps up to eight Files and Albums searches open independently,
+  routes live responses to the correct background preset, highlights unseen
+  results, and preserves each search's filters, sort, layout, selection, and
+  scroll position while switching
+- Search presets can be duplicated, stopped, closed, reopened, or pinned across
+  restarts. Pinned presets persist only their query and view settings—never
+  stale network results—and support **Ctrl+T**, **Ctrl+W**, **Ctrl+Tab**, and
+  **Ctrl+Shift+Tab**
 - Working lossless/compressed filters, ready/speed/size sorting, stop control,
   and a live file inspector with source speed, queue, and share visibility
 - A Files/Albums search switch with MusicBrainz artist matching, artist
@@ -207,7 +217,9 @@ connection flow. The browser preview simulates connection state; run
 login, network search, folder browsing, downloads, and uploads. Search for an artist,
 album, track, or filename while connected; results stream into the table as
 peers respond. Each search listens for responses for 15 seconds and can be
-stopped early. Select a live file and choose **Browse folder** to request its
+stopped early. Open up to eight independent searches from the preset rail;
+background results stay with their originating preset and show a new-result
+count until opened. Select a live file and choose **Browse folder** to request its
 complete source folder. Choose the files you want, then select **Download**;
 Forever creates a safe release folder beneath the download location configured
 in Connection settings and adds the files in their displayed order. Choose the

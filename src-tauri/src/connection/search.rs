@@ -1,7 +1,7 @@
 use super::protocol::SearchResponse;
 use serde::Serialize;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -11,6 +11,7 @@ pub const SEARCH_EVENT: &str = "forever://search";
 pub const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
 const SEARCH_RESULT_LIMIT: usize = 5_000;
 const SEARCH_EVENT_BATCH_SIZE: usize = 200;
+const SEARCH_SESSION_LIMIT: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +28,7 @@ pub enum SearchState {
 pub struct SearchSnapshot {
     pub state: SearchState,
     pub token: Option<u32>,
+    pub client_id: String,
     pub query: String,
     pub result_count: u32,
     pub peer_count: u32,
@@ -40,6 +42,7 @@ impl SearchSnapshot {
         Self {
             state: SearchState::Idle,
             token: None,
+            client_id: String::new(),
             query: String::new(),
             result_count: 0,
             peer_count: 0,
@@ -97,7 +100,7 @@ impl SearchRuntime {
         }
     }
 
-    fn start(&mut self, token: u32, query: String) -> SearchSnapshot {
+    fn start(&mut self, token: u32, client_id: String, query: String) -> SearchSnapshot {
         self.seen.clear();
         self.peers.clear();
         self.next_result_id = 0;
@@ -105,6 +108,7 @@ impl SearchRuntime {
         self.snapshot = SearchSnapshot {
             state: SearchState::Searching,
             token: Some(token),
+            client_id,
             query,
             result_count: 0,
             peer_count: 0,
@@ -203,41 +207,69 @@ impl SearchRuntime {
 #[derive(Clone)]
 pub struct SearchHub {
     app: AppHandle,
-    runtime: Arc<Mutex<SearchRuntime>>,
+    runtimes: Arc<Mutex<HashMap<u32, SearchRuntime>>>,
 }
 
 impl SearchHub {
     pub fn new(app: AppHandle) -> Self {
         Self {
             app,
-            runtime: Arc::new(Mutex::new(SearchRuntime::new())),
+            runtimes: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub fn current(&self) -> SearchSnapshot {
-        self.runtime
+    pub fn snapshots(&self) -> Vec<SearchSnapshot> {
+        let mut snapshots = self
+            .runtimes
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .snapshot
-            .clone()
+            .values()
+            .map(|runtime| runtime.snapshot.clone())
+            .collect::<Vec<_>>();
+        snapshots.sort_by_key(|snapshot| snapshot.started_at_ms.unwrap_or_default());
+        snapshots
     }
 
-    pub fn start(&self, token: u32, query: String) -> SearchSnapshot {
-        let snapshot = self
-            .runtime
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .start(token, query);
+    pub fn start(
+        &self,
+        token: u32,
+        client_id: String,
+        query: String,
+    ) -> Result<SearchSnapshot, String> {
+        let snapshot = {
+            let mut runtimes = self
+                .runtimes
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let existing = runtimes.iter().find_map(|(token, runtime)| {
+                (runtime.snapshot.client_id == client_id).then_some(*token)
+            });
+            if let Some(existing) = existing {
+                runtimes.remove(&existing);
+            } else if runtimes.len() >= SEARCH_SESSION_LIMIT {
+                return Err(format!(
+                    "Dial Memory can hold at most {SEARCH_SESSION_LIMIT} searches. Close one before starting another."
+                ));
+            }
+            let mut runtime = SearchRuntime::new();
+            let snapshot = runtime.start(token, client_id, query);
+            runtimes.insert(token, runtime);
+            snapshot
+        };
         self.emit("started", snapshot.clone(), Vec::new());
-        snapshot
+        Ok(snapshot)
     }
 
     pub fn record(&self, response: SearchResponse) {
+        let token = response.token;
         let (snapshot, results, limit_reached) = {
-            let mut runtime = self
-                .runtime
+            let mut runtimes = self
+                .runtimes
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(runtime) = runtimes.get_mut(&token) else {
+                return;
+            };
             let results = runtime.record(response);
             let limit_reached = runtime.seen.len() >= SEARCH_RESULT_LIMIT;
             (runtime.snapshot.clone(), results, limit_reached)
@@ -250,63 +282,123 @@ impl SearchHub {
             self.emit("results", snapshot.clone(), batch.to_vec());
         }
         if limit_reached {
-            self.complete_with_message("Result limit reached. Refine the search for fewer files.");
+            self.complete_with_message(
+                token,
+                "Result limit reached. Refine the search for fewer files.",
+            );
         }
     }
 
-    pub fn stop(&self) -> SearchSnapshot {
+    pub fn stop(&self, client_id: &str) -> Option<SearchSnapshot> {
         let stopped = {
-            let mut runtime = self
-                .runtime
+            let mut runtimes = self
+                .runtimes
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let runtime = runtimes
+                .values_mut()
+                .find(|runtime| runtime.snapshot.client_id == client_id)?;
             runtime.finish(SearchState::Stopped, "Search stopped.".to_owned())
         };
-        if let Some(snapshot) = stopped {
+        if let Some(snapshot) = &stopped {
             self.emit("stopped", snapshot.clone(), Vec::new());
-            snapshot
-        } else {
-            self.current()
         }
+        stopped
     }
 
-    pub fn fail(&self, message: impl Into<String>) {
-        let snapshot = self
-            .runtime
+    pub fn stop_all(&self) -> Vec<SearchSnapshot> {
+        let stopped = {
+            let mut runtimes = self
+                .runtimes
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            runtimes
+                .values_mut()
+                .filter_map(|runtime| {
+                    runtime.finish(SearchState::Stopped, "Search stopped.".to_owned())
+                })
+                .collect::<Vec<_>>()
+        };
+        for snapshot in &stopped {
+            self.emit("stopped", snapshot.clone(), Vec::new());
+        }
+        stopped
+    }
+
+    pub fn close(&self, client_id: &str) -> bool {
+        let mut runtimes = self
+            .runtimes
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .finish(SearchState::Error, message.into());
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let token = runtimes.iter().find_map(|(token, runtime)| {
+            (runtime.snapshot.client_id == client_id).then_some(*token)
+        });
+        token.is_some_and(|token| runtimes.remove(&token).is_some())
+    }
+
+    pub fn fail(&self, client_id: &str, message: impl Into<String>) {
+        let message = message.into();
+        let snapshot = {
+            let mut runtimes = self
+                .runtimes
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            runtimes
+                .values_mut()
+                .find(|runtime| runtime.snapshot.client_id == client_id)
+                .and_then(|runtime| runtime.finish(SearchState::Error, message))
+        };
         if let Some(snapshot) = snapshot {
             self.emit("error", snapshot, Vec::new());
         }
     }
 
-    pub fn expire_if_due(&self) {
-        let snapshot = {
-            let mut runtime = self
-                .runtime
+    pub fn fail_all(&self, message: impl Into<String>) {
+        let message = message.into();
+        let failed = {
+            let mut runtimes = self
+                .runtimes
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if runtime
-                .deadline
-                .is_some_and(|deadline| Instant::now() >= deadline)
-            {
-                runtime.finish_for_count()
-            } else {
-                None
-            }
+            runtimes
+                .values_mut()
+                .filter_map(|runtime| runtime.finish(SearchState::Error, message.clone()))
+                .collect::<Vec<_>>()
         };
-        if let Some(snapshot) = snapshot {
+        for snapshot in failed {
+            self.emit("error", snapshot, Vec::new());
+        }
+    }
+
+    pub fn expire_if_due(&self) {
+        let snapshots = {
+            let mut runtimes = self
+                .runtimes
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            runtimes
+                .values_mut()
+                .filter_map(|runtime| {
+                    runtime
+                        .deadline
+                        .is_some_and(|deadline| Instant::now() >= deadline)
+                        .then(|| runtime.finish_for_count())
+                        .flatten()
+                })
+                .collect::<Vec<_>>()
+        };
+        for snapshot in snapshots {
             self.emit("completed", snapshot, Vec::new());
         }
     }
 
-    fn complete_with_message(&self, message: &str) {
+    fn complete_with_message(&self, token: u32, message: &str) {
         let snapshot = self
-            .runtime
+            .runtimes
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .finish(SearchState::Completed, message.to_owned());
+            .get_mut(&token)
+            .and_then(|runtime| runtime.finish(SearchState::Completed, message.to_owned()));
         if let Some(snapshot) = snapshot {
             self.emit("completed", snapshot, Vec::new());
         }
@@ -362,7 +454,7 @@ mod tests {
     #[test]
     fn ignores_stale_tokens_and_deduplicates_results() {
         let mut runtime = SearchRuntime::new();
-        runtime.start(42, "artist track".to_owned());
+        runtime.start(42, "session-a".to_owned(), "artist track".to_owned());
 
         assert!(runtime.record(response(41, "listener")).is_empty());
         assert_eq!(runtime.record(response(42, "listener")).len(), 1);
@@ -372,15 +464,33 @@ mod tests {
     }
 
     #[test]
-    fn starting_a_new_search_clears_previous_session_state() {
-        let mut runtime = SearchRuntime::new();
-        runtime.start(1, "first".to_owned());
-        runtime.record(response(1, "listener"));
+    fn independent_sessions_keep_results_and_expire_separately() {
+        let first = SearchRuntime::new();
+        let second = SearchRuntime::new();
+        let mut runtimes = HashMap::from([(1, first), (2, second)]);
+        runtimes
+            .get_mut(&1)
+            .unwrap()
+            .start(1, "one".to_owned(), "first".to_owned());
+        runtimes
+            .get_mut(&2)
+            .unwrap()
+            .start(2, "two".to_owned(), "second".to_owned());
 
-        let snapshot = runtime.start(2, "second".to_owned());
-        assert_eq!(snapshot.result_count, 0);
-        assert_eq!(snapshot.peer_count, 0);
-        assert_eq!(snapshot.query, "second");
-        assert!(runtime.record(response(1, "listener")).is_empty());
+        assert_eq!(
+            runtimes
+                .get_mut(&1)
+                .unwrap()
+                .record(response(1, "listener"))
+                .len(),
+            1
+        );
+        assert_eq!(runtimes.get(&1).unwrap().snapshot.result_count, 1);
+        assert_eq!(runtimes.get(&2).unwrap().snapshot.result_count, 0);
+        assert!(runtimes
+            .get_mut(&2)
+            .unwrap()
+            .record(response(1, "listener"))
+            .is_empty());
     }
 }

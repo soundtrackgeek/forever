@@ -481,7 +481,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.36</h2>
+              <h2>Forever 0.0.37</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="update-interval-field">
                 <span>Automatic update checks</span>

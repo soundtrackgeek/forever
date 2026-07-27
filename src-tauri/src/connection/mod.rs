@@ -700,21 +700,40 @@ pub async fn connection_diagnostics(
 #[tauri::command]
 pub async fn search_snapshot(
     manager: State<'_, ConnectionManager>,
-) -> Result<SearchSnapshot, String> {
-    Ok(manager.current_search())
+) -> Result<Vec<SearchSnapshot>, String> {
+    Ok(manager.current_searches())
 }
 
 #[tauri::command]
 pub async fn search_start(
     manager: State<'_, ConnectionManager>,
+    client_id: String,
     query: String,
 ) -> Result<SearchSnapshot, String> {
     manager
-        .start_search(query)
+        .start_search(client_id, query)
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub async fn search_stop(manager: State<'_, ConnectionManager>) -> Result<SearchSnapshot, String> {
-    Ok(manager.stop_search())
+pub async fn search_stop(
+    manager: State<'_, ConnectionManager>,
+    client_id: String,
+) -> Result<Option<SearchSnapshot>, String> {
+    Ok(manager.stop_search(&client_id))
+}
+
+#[tauri::command]
+pub async fn search_stop_all(
+    manager: State<'_, ConnectionManager>,
+) -> Result<Vec<SearchSnapshot>, String> {
+    Ok(manager.stop_all_searches())
+}
+
+#[tauri::command]
+pub async fn search_close(
+    manager: State<'_, ConnectionManager>,
+    client_id: String,
+) -> Result<bool, String> {
+    Ok(manager.close_search(&client_id))
 }

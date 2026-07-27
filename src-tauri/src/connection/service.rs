@@ -593,8 +593,8 @@ impl ConnectionManager {
         self.diagnostics.recent()
     }
 
-    pub fn current_search(&self) -> SearchSnapshot {
-        self.search.current()
+    pub fn current_searches(&self) -> Vec<SearchSnapshot> {
+        self.search.snapshots()
     }
 
     pub fn current_wanted(&self) -> WantedSnapshot {
@@ -1390,8 +1390,13 @@ impl ConnectionManager {
         }
     }
 
-    pub fn start_search(&self, query: String) -> Result<SearchSnapshot, ConnectionServiceError> {
+    pub fn start_search(
+        &self,
+        client_id: String,
+        query: String,
+    ) -> Result<SearchSnapshot, ConnectionServiceError> {
         let query = query.trim().to_owned();
+        let client_id = client_id.trim().to_owned();
         if query.is_empty() {
             return Err(ConnectionServiceError::InvalidSearch(
                 "Enter something to search for.".to_owned(),
@@ -1401,6 +1406,16 @@ impl ConnectionManager {
             return Err(ConnectionServiceError::InvalidSearch(format!(
                 "Search queries can be at most {MAX_SEARCH_QUERY_BYTES} bytes."
             )));
+        }
+        if client_id.is_empty()
+            || client_id.len() > 64
+            || !client_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(ConnectionServiceError::InvalidSearch(
+                "The search session identifier is invalid.".to_owned(),
+            ));
         }
         if self.current_snapshot().state != ConnectionState::Online {
             return Err(ConnectionServiceError::SearchUnavailable);
@@ -1417,13 +1432,18 @@ impl ConnectionManager {
             token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
         }
 
-        let snapshot = self.search.start(token, query.clone());
+        let snapshot = self
+            .search
+            .start(token, client_id.clone(), query.clone())
+            .map_err(ConnectionServiceError::InvalidSearch)?;
         if sender
             .send(ConnectionCommand::StartSearch { token, query })
             .is_err()
         {
-            self.search
-                .fail("The Soulseek connection changed before the search could start.");
+            self.search.fail(
+                &client_id,
+                "The Soulseek connection changed before the search could start.",
+            );
             return Err(ConnectionServiceError::SearchUnavailable);
         }
         self.diagnostics.record(
@@ -1434,13 +1454,32 @@ impl ConnectionManager {
         Ok(snapshot)
     }
 
-    pub fn stop_search(&self) -> SearchSnapshot {
-        let snapshot = self.search.stop();
-        if snapshot.state == SearchState::Stopped {
+    pub fn stop_search(&self, client_id: &str) -> Option<SearchSnapshot> {
+        let snapshot = self.search.stop(client_id);
+        if snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.state == SearchState::Stopped)
+        {
             self.diagnostics
                 .record("info", "search_stopped", "The live search was stopped.");
         }
         snapshot
+    }
+
+    pub fn stop_all_searches(&self) -> Vec<SearchSnapshot> {
+        let snapshots = self.search.stop_all();
+        if !snapshots.is_empty() {
+            self.diagnostics.record(
+                "info",
+                "searches_stopped",
+                "All live searches were stopped.",
+            );
+        }
+        snapshots
+    }
+
+    pub fn close_search(&self, client_id: &str) -> bool {
+        self.search.close(client_id)
     }
 
     pub fn current_snapshot(&self) -> ConnectionSnapshot {
@@ -1626,7 +1665,7 @@ impl ConnectionManager {
             self.wanted.connection_lost();
             self.radar.connection_lost();
             self.search
-                .fail("Search stopped because the Soulseek connection was interrupted.");
+                .fail_all("Search stopped because the Soulseek connection was interrupted.");
 
             match outcome {
                 Ok(()) => {
@@ -2566,7 +2605,7 @@ impl ConnectionManager {
     fn stop_active_task(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.clear_command_sender();
-        self.search.stop();
+        self.search.stop_all();
         self.transfers.connection_lost();
         self.folders.connection_lost();
         self.shares.connection_lost();

@@ -5,6 +5,41 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.37] - 2026-07-27
+
+### Added
+
+- **Dial Memory** adds a compact radio-preset rail for keeping up to eight
+  independent Files and Albums searches open at once, with per-search queries,
+  filters, sorting, layout, selection, result data, and scroll position.
+- Background presets report live **Listening** state and unseen-result counts;
+  searches can be duplicated, stopped together, closed, and reopened from a
+  bounded Recently closed menu.
+- Pinned presets restore their query and view settings after restart without
+  persisting stale Soulseek results. **Ctrl+T**, **Ctrl+W**, **Ctrl+Tab**, and
+  **Ctrl+Shift+Tab** provide complete keyboard navigation.
+- Desktop, minimum-window, and generated concept references document the Dial
+  Memory design, with a frontend regression covering the full background,
+  pin, close, reopen, and keyboard workflow.
+
+### Changed
+
+- The Rust search hub now owns isolated runtimes keyed by client session ID,
+  routes each Soulseek response to its originating session, and applies the
+  existing result ceiling independently to every search.
+- Choosing a MusicBrainz album source now opens a separate file-search preset
+  rather than replacing the album catalog that launched it.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.37` and describe Dial Memory
+  accurately.
+
+### Fixed
+
+- Archive ownership context remains available when discovery opens a separate
+  Soulseek source search.
+- Compact icon-only preset controls retain accessible names at Forever's
+  1024×680 minimum window size.
+
 ## [0.0.36] - 2026-07-27
 
 ### Added

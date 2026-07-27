@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useCallback, useMemo, useState } from "react";
 import type { AlbumArtist, AlbumCatalog, AlbumReleaseGroup } from "../types";
+import { PREVIEW_DIAL_IDS } from "./useDialMemory";
 
 const previewArtist: AlbumArtist = {
   id: "7249b899-8db8-43e7-9e6e-22f1e736024e",
@@ -36,88 +37,120 @@ const previewCatalog: AlbumCatalog = {
 const errorMessage = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
 
-export function useAlbumDiscovery() {
-  const native = isTauri();
-  const [query, setQuery] = useState(native ? "" : "Def Leppard");
-  const [artists, setArtists] = useState<AlbumArtist[]>(native ? [] : [previewArtist]);
-  const [selectedArtist, setSelectedArtist] = useState<AlbumArtist | null>(
-    native ? null : previewArtist,
-  );
-  const [catalog, setCatalog] = useState<AlbumCatalog | null>(
-    native ? null : previewCatalog,
-  );
-  const [loading, setLoading] = useState<"idle" | "artists" | "catalog">("idle");
-  const [error, setError] = useState<string | null>(null);
+export type AlbumDiscoveryState = {
+  artists: AlbumArtist[];
+  selectedArtist: AlbumArtist | null;
+  catalog: AlbumCatalog | null;
+  loading: "idle" | "artists" | "catalog";
+  error: string | null;
+};
 
-  const selectArtist = useCallback(
-    async (artist: AlbumArtist) => {
-      setSelectedArtist(artist);
-      setCatalog(null);
-      setLoading("catalog");
-      setError(null);
+const idleState = (): AlbumDiscoveryState => ({
+  artists: [],
+  selectedArtist: null,
+  catalog: null,
+  loading: "idle",
+  error: null,
+});
+
+export function useAlbumDiscovery(activeSessionId: string) {
+  const native = isTauri();
+  const [states, setStates] = useState<Record<string, AlbumDiscoveryState>>(() => native ? {} : {
+    [PREVIEW_DIAL_IDS.defLeppard]: {
+      artists: [previewArtist],
+      selectedArtist: previewArtist,
+      catalog: previewCatalog,
+      loading: "idle",
+      error: null,
+    } satisfies AlbumDiscoveryState,
+  } as Record<string, AlbumDiscoveryState>);
+  const current = states[activeSessionId] ?? idleState();
+
+  const patch = useCallback((sessionId: string, next: Partial<AlbumDiscoveryState>) => {
+    setStates((all) => ({
+      ...all,
+      [sessionId]: { ...(all[sessionId] ?? idleState()), ...next },
+    }));
+  }, []);
+
+  const loadArtist = useCallback(
+    async (sessionId: string, artist: AlbumArtist) => {
+      patch(sessionId, { selectedArtist: artist, catalog: null, loading: "catalog", error: null });
       try {
         const next = native
           ? await invoke<AlbumCatalog>("album_catalog", { artistId: artist.id })
           : previewCatalog;
-        setCatalog(next);
+        patch(sessionId, { catalog: next });
         return next;
       } catch (cause) {
-        setError(errorMessage(cause));
+        patch(sessionId, { error: errorMessage(cause) });
         throw cause;
       } finally {
-        setLoading("idle");
+        setStates((all) => ({
+          ...all,
+          [sessionId]: { ...(all[sessionId] ?? idleState()), loading: "idle" },
+        }));
       }
     },
-    [native],
+    [native, patch],
+  );
+
+  const selectArtist = useCallback(
+    async (artist: AlbumArtist) => {
+      return loadArtist(activeSessionId, artist);
+    },
+    [activeSessionId, loadArtist],
   );
 
   const searchArtists = useCallback(
     async (nextQuery: string) => {
       const normalized = nextQuery.trim();
       if (!normalized) return [];
-      setQuery(normalized);
-      setArtists([]);
-      setSelectedArtist(null);
-      setCatalog(null);
-      setLoading("artists");
-      setError(null);
+      const sessionId = activeSessionId;
+      patch(sessionId, {
+        artists: [],
+        selectedArtist: null,
+        catalog: null,
+        loading: "artists",
+        error: null,
+      });
       try {
         const next = native
           ? await invoke<AlbumArtist[]>("album_artists_search", { query: normalized })
           : [previewArtist];
-        setArtists(next);
+        patch(sessionId, { artists: next });
         const first = next[0];
         const runnerUp = next[1];
         const exact = first?.name.localeCompare(normalized, undefined, { sensitivity: "accent" }) === 0;
         if (first && (next.length === 1 || (exact && first.score > (runnerUp?.score ?? 0)))) {
-          await selectArtist(first);
+          await loadArtist(sessionId, first);
         }
         return next;
       } catch (cause) {
-        setError(errorMessage(cause));
+        patch(sessionId, { error: errorMessage(cause) });
         throw cause;
       } finally {
-        setLoading((current) => (current === "artists" ? "idle" : current));
+        setStates((all) => {
+          const existing = all[sessionId] ?? idleState();
+          return existing.loading === "artists"
+            ? { ...all, [sessionId]: { ...existing, loading: "idle" } }
+            : all;
+        });
       }
     },
-    [native, selectArtist],
+    [activeSessionId, loadArtist, native, patch],
   );
 
-  const clearError = useCallback(() => setError(null), []);
+  const clearError = useCallback(() => patch(activeSessionId, { error: null }), [activeSessionId, patch]);
 
   return useMemo(
     () => ({
-      query,
-      artists,
-      selectedArtist,
-      catalog,
-      loading,
-      error,
-      setQuery,
+      states,
+      ...current,
       searchArtists,
       selectArtist,
       clearError,
     }),
-    [artists, catalog, clearError, error, loading, query, searchArtists, selectArtist, selectedArtist],
+    [clearError, current, searchArtists, selectArtist, states],
   );
 }

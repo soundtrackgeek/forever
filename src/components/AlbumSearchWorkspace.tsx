@@ -7,7 +7,7 @@ import {
   Record,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { useDeferredValue, useMemo, useState, type FormEvent } from "react";
+import { useDeferredValue, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { AlbumArtist, AlbumCatalog, AlbumReleaseGroup, ConnectionSnapshot, WantedAlbum } from "../types";
 import type { ArchiveAlbumMatch } from "../types";
 import { ArchiveOwnershipBadge } from "./ArchiveOwnershipBadge";
@@ -15,9 +15,11 @@ import { CountryFlag } from "./CountryFlag";
 import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
 import { WantedToggle } from "./WantedToggle";
 
-type AlbumFilter = "studio" | "live" | "compilation" | "ep" | "all";
+export type AlbumFilter = "studio" | "live" | "compilation" | "ep" | "all";
 
 type AlbumSearchWorkspaceProps = {
+  presetRail: ReactNode;
+  filter: AlbumFilter;
   query: string;
   artists: AlbumArtist[];
   selectedArtist: AlbumArtist | null;
@@ -31,6 +33,7 @@ type AlbumSearchWorkspaceProps = {
   archiveMatches: ReadonlyMap<string, ArchiveAlbumMatch>;
   wantedAlbums: ReadonlyMap<string, WantedAlbum>;
   onQueryChange: (query: string) => void;
+  onFilterChange: (filter: AlbumFilter) => void;
   onSearch: (query: string) => void;
   onSelectArtist: (artist: AlbumArtist) => void;
   onSearchModeChange: (mode: SearchMode) => void;
@@ -89,6 +92,8 @@ function AlbumCover({ album }: { album: AlbumReleaseGroup }) {
 }
 
 export function AlbumSearchWorkspace({
+  presetRail,
+  filter,
   query,
   artists,
   selectedArtist,
@@ -102,6 +107,7 @@ export function AlbumSearchWorkspace({
   archiveMatches,
   wantedAlbums,
   onQueryChange,
+  onFilterChange,
   onSearch,
   onSelectArtist,
   onSearchModeChange,
@@ -111,7 +117,6 @@ export function AlbumSearchWorkspace({
   onOpenConnection,
   onDismissError,
 }: AlbumSearchWorkspaceProps) {
-  const [filter, setFilter] = useState<AlbumFilter>("studio");
   const deferredCatalog = useDeferredValue(catalog);
   const online = connection.state === "online";
   const visibleAlbums = useMemo(
@@ -137,7 +142,7 @@ export function AlbumSearchWorkspace({
   };
 
   return (
-    <section className="album-workspace" aria-label="Album discovery">
+    <section className="album-workspace" id="dial-search-surface" aria-label="Album discovery">
       <div className="album-network-toolbar">
         <button
           type="button"
@@ -172,6 +177,8 @@ export function AlbumSearchWorkspace({
         </form>
         <span className="album-source-note">MusicBrainz catalog</span>
       </div>
+
+      {presetRail}
 
       <header className="album-heading">
         <span className="eyebrow"><Disc size={14} /> Album signal</span>
@@ -231,7 +238,7 @@ export function AlbumSearchWorkspace({
                 role="tab"
                 aria-selected={filter === value}
                 className={filter === value ? "is-active" : ""}
-                onClick={() => setFilter(value)}
+                onClick={() => onFilterChange(value)}
                 key={value}
               >
                 {filterLabels[value]} <small>{counts[value]}</small>

@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { searchResults as previewResults } from "../data/mockData";
 import type {
   LiveSearchResult,
@@ -8,12 +8,14 @@ import type {
   SearchResult,
   SearchSnapshot,
 } from "../types";
+import { PREVIEW_DIAL_IDS } from "./useDialMemory";
 
 const PREVIEW_QUERY = "night geometry";
 
 const previewSnapshot = (): SearchSnapshot => ({
   state: "completed",
   token: 1,
+  clientId: PREVIEW_DIAL_IDS.night,
   query: PREVIEW_QUERY,
   resultCount: previewResults.length,
   peerCount: previewResults.length,
@@ -22,16 +24,17 @@ const previewSnapshot = (): SearchSnapshot => ({
   finishedAtMs: Date.now(),
 });
 
-const idleSnapshot: SearchSnapshot = {
+const idleSnapshot = (clientId: string, query = ""): SearchSnapshot => ({
   state: "idle",
   token: null,
-  query: "",
+  clientId,
+  query,
   resultCount: 0,
   peerCount: 0,
   message: "Ready for a live search.",
   startedAtMs: null,
   finishedAtMs: null,
-};
+});
 
 const formatBytes = (bytes: number) => {
   if (bytes < 1_000) return `${bytes} B`;
@@ -207,22 +210,60 @@ const previewNetworkResults = [
 const errorMessage = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
 
-export function useSoulseekSearch() {
+export type SearchSessionRecord = {
+  snapshot: SearchSnapshot;
+  results: SearchResult[];
+  error: string | null;
+  unseenCount: number;
+};
+
+const previewRecords = (): Record<string, SearchSessionRecord> => ({
+  [PREVIEW_DIAL_IDS.night]: {
+    snapshot: previewSnapshot(),
+    results: previewResults,
+    error: null,
+    unseenCount: 0,
+  },
+  [PREVIEW_DIAL_IDS.bowie]: {
+    snapshot: {
+      state: "searching",
+      token: 3,
+      clientId: PREVIEW_DIAL_IDS.bowie,
+      query: "rare Bowie demos",
+      resultCount: 0,
+      peerCount: 0,
+      message: "Listening across the Soulseek network…",
+      startedAtMs: Date.now(),
+      finishedAtMs: null,
+    },
+    results: [],
+    error: null,
+    unseenCount: 0,
+  },
+});
+
+export function useSoulseekSearch(activeSessionId: string) {
   const native = isTauri();
-  const [snapshot, setSnapshot] = useState<SearchSnapshot>(
-    native ? idleSnapshot : previewSnapshot(),
-  );
-  const [results, setResults] = useState<SearchResult[]>(
-    native ? [] : previewResults,
+  const [records, setRecords] = useState<Record<string, SearchSessionRecord>>(
+    () => native ? {} : previewRecords(),
   );
   const [ready, setReady] = useState(!native);
-  const [error, setError] = useState<string | null>(null);
-  const previewGeneration = useRef(0);
-  const timers = useRef<number[]>([]);
+  const activeRef = useRef(activeSessionId);
+  const previewGenerations = useRef(new Map<string, number>());
+  const timers = useRef(new Map<string, number[]>());
 
-  const clearPreviewTimers = useCallback(() => {
-    timers.current.forEach((timer) => window.clearTimeout(timer));
-    timers.current = [];
+  useEffect(() => {
+    activeRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  const clearPreviewTimers = useCallback((clientId?: string) => {
+    const entries = clientId
+      ? [[clientId, timers.current.get(clientId) ?? []] as const]
+      : [...timers.current.entries()];
+    entries.forEach(([id, values]) => {
+      values.forEach((timer) => window.clearTimeout(timer));
+      timers.current.delete(id);
+    });
   }, []);
 
   useEffect(() => {
@@ -232,30 +273,56 @@ export function useSoulseekSearch() {
 
     void listen<SearchEvent>("forever://search", (event) => {
       if (!mounted) return;
-      setSnapshot(event.payload.snapshot);
-      if (event.payload.event === "started") {
-        setResults([]);
-        setError(null);
-      } else if (event.payload.results.length > 0) {
-        setResults((current) => [
+      const { snapshot, results: incoming, event: kind } = event.payload;
+      const clientId = snapshot.clientId;
+      if (!clientId) return;
+      setRecords((current) => {
+        const existing = current[clientId] ?? {
+          snapshot: idleSnapshot(clientId, snapshot.query),
+          results: [],
+          error: null,
+          unseenCount: 0,
+        };
+        return {
           ...current,
-          ...event.payload.results.map(presentLiveSearchResult),
-        ]);
-      } else if (event.payload.event === "error") {
-        setError(event.payload.snapshot.message);
-      }
+          [clientId]: {
+            snapshot,
+            results: kind === "started"
+              ? []
+              : incoming.length > 0
+                ? [...existing.results, ...incoming.map(presentLiveSearchResult)]
+                : existing.results,
+            error: kind === "error" ? snapshot.message : kind === "started" ? null : existing.error,
+            unseenCount: incoming.length > 0 && activeRef.current !== clientId
+              ? existing.unseenCount + incoming.length
+              : existing.unseenCount,
+          },
+        };
+      });
     }).then((dispose) => {
       if (mounted) unlisten = dispose;
       else dispose();
     });
 
-    void invoke<SearchSnapshot>("search_snapshot")
-      .then((next) => {
-        if (mounted) setSnapshot(next);
+    void invoke<SearchSnapshot[]>("search_snapshot")
+      .then((snapshots) => {
+        if (!mounted) return;
+        setRecords((current) => snapshots.reduce<Record<string, SearchSessionRecord>>(
+          (next, snapshot) => ({
+            ...next,
+            [snapshot.clientId]: {
+              snapshot,
+              results: current[snapshot.clientId]?.results ?? [],
+              error: snapshot.state === "error"
+                ? snapshot.message
+                : current[snapshot.clientId]?.error ?? null,
+              unseenCount: current[snapshot.clientId]?.unseenCount ?? 0,
+            },
+          }),
+          {},
+        ));
       })
-      .catch((cause) => {
-        if (mounted) setError(errorMessage(cause));
-      })
+      .catch(() => undefined)
       .finally(() => {
         if (mounted) setReady(true);
       });
@@ -266,39 +333,58 @@ export function useSoulseekSearch() {
     };
   }, [native]);
 
-  useEffect(() => clearPreviewTimers, [clearPreviewTimers]);
+  useEffect(() => () => clearPreviewTimers(), [clearPreviewTimers]);
+
+  const markSeen = useCallback((clientId: string) => {
+    setRecords((current) => {
+      const record = current[clientId];
+      return !record || record.unseenCount === 0
+        ? current
+        : { ...current, [clientId]: { ...record, unseenCount: 0 } };
+    });
+  }, []);
 
   const startSearch = useCallback(
-    async (rawQuery: string) => {
+    async (clientId: string, rawQuery: string) => {
       const query = rawQuery.trim();
       if (!query) throw new Error("Enter something to search for.");
-      setError(null);
 
       if (native) {
         try {
-          const next = await invoke<SearchSnapshot>("search_start", { query });
-          setSnapshot(next);
-          setResults([]);
+          const next = await invoke<SearchSnapshot>("search_start", { clientId, query });
+          setRecords((current) => ({
+            ...current,
+            [clientId]: { snapshot: next, results: [], error: null, unseenCount: 0 },
+          }));
           return next;
         } catch (cause) {
           const message = errorMessage(cause);
-          setError(message);
-          setSnapshot((current) => ({
+          setRecords((current) => ({
             ...current,
-            state: "error",
-            query,
-            message,
-            finishedAtMs: Date.now(),
+            [clientId]: {
+              snapshot: {
+                ...(current[clientId]?.snapshot ?? idleSnapshot(clientId, query)),
+                state: "error",
+                query,
+                message,
+                finishedAtMs: Date.now(),
+              },
+              results: current[clientId]?.results ?? [],
+              error: message,
+              unseenCount: current[clientId]?.unseenCount ?? 0,
+            },
           }));
           throw cause;
         }
       }
 
-      clearPreviewTimers();
-      const generation = ++previewGeneration.current;
+      clearPreviewTimers(clientId);
+      const generation = (previewGenerations.current.get(clientId) ?? 0) + 1;
+      previewGenerations.current.set(clientId, generation);
       const started: SearchSnapshot = {
         state: "searching",
         token: generation + 1,
+        clientId,
         query,
         resultCount: 0,
         peerCount: 0,
@@ -306,8 +392,10 @@ export function useSoulseekSearch() {
         startedAtMs: Date.now(),
         finishedAtMs: null,
       };
-      setSnapshot(started);
-      setResults([]);
+      setRecords((current) => ({
+        ...current,
+        [clientId]: { snapshot: started, results: [], error: null, unseenCount: 0 },
+      }));
 
       const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
       const matches = previewNetworkResults.filter((result) =>
@@ -322,66 +410,116 @@ export function useSoulseekSearch() {
       const secondBatch = matches.slice(3);
 
       const streamBatch = (batch: SearchResult[], total: number) => {
-        if (previewGeneration.current !== generation) return;
-        setResults((current) => [...current, ...batch]);
-        setSnapshot((current) => ({
-          ...current,
-          resultCount: total,
-          peerCount: matchingPeople,
-          message: `Receiving files from ${matchingPeople} ${matchingPeople === 1 ? "person" : "people"}…`,
-        }));
+        if (previewGenerations.current.get(clientId) !== generation) return;
+        setRecords((current) => {
+          const record = current[clientId];
+          if (!record) return current;
+          return { ...current, [clientId]: {
+            ...record,
+            results: [...record.results, ...batch],
+            unseenCount: activeRef.current === clientId ? record.unseenCount : record.unseenCount + batch.length,
+            snapshot: {
+              ...record.snapshot,
+              resultCount: total,
+              peerCount: matchingPeople,
+              message: `Receiving files from ${matchingPeople} ${matchingPeople === 1 ? "person" : "people"}…`,
+            },
+          } };
+        });
       };
 
-      timers.current.push(
+      timers.current.set(clientId, [
         window.setTimeout(() => streamBatch(firstBatch, firstBatch.length), 260),
         window.setTimeout(
           () => streamBatch(secondBatch, matches.length),
           580,
         ),
         window.setTimeout(() => {
-          if (previewGeneration.current !== generation) return;
-          setSnapshot((current) => ({
-            ...current,
-            state: "completed",
-            resultCount: matches.length,
-            peerCount: matchingPeople,
-            message:
-              matches.length === 0
+          if (previewGenerations.current.get(clientId) !== generation) return;
+          setRecords((current) => {
+            const record = current[clientId];
+            return !record ? current : { ...current, [clientId]: { ...record, snapshot: {
+              ...record.snapshot,
+              state: "completed",
+              resultCount: matches.length,
+              peerCount: matchingPeople,
+              message: matches.length === 0
                 ? "No matching files arrived."
                 : `Found ${matches.length} files from ${matchingPeople} ${matchingPeople === 1 ? "person" : "people"}.`,
-            finishedAtMs: Date.now(),
-          }));
+              finishedAtMs: Date.now(),
+            } } };
+          });
         }, 820),
-      );
+      ]);
       return started;
     },
     [clearPreviewTimers, native],
   );
 
-  const stopSearch = useCallback(async () => {
+  const stopSearch = useCallback(async (clientId = activeSessionId) => {
     if (native) {
-      const next = await invoke<SearchSnapshot>("search_stop");
-      setSnapshot(next);
+      const next = await invoke<SearchSnapshot | null>("search_stop", { clientId });
+      if (next) setRecords((current) => {
+        const record = current[clientId];
+        return record ? { ...current, [clientId]: { ...record, snapshot: next } } : current;
+      });
       return next;
     }
-    clearPreviewTimers();
-    previewGeneration.current += 1;
-    const stopped = {
-      ...snapshot,
-      state: "stopped" as const,
-      message: "Search stopped.",
-      finishedAtMs: Date.now(),
-    };
-    setSnapshot(stopped);
+    clearPreviewTimers(clientId);
+    previewGenerations.current.set(clientId, (previewGenerations.current.get(clientId) ?? 0) + 1);
+    const existing = records[clientId];
+    if (!existing) return null;
+    const stopped: SearchSnapshot = { ...existing.snapshot, state: "stopped", message: "Search stopped.", finishedAtMs: Date.now() };
+    setRecords((current) => ({ ...current, [clientId]: { ...current[clientId], snapshot: stopped } }));
     return stopped;
-  }, [clearPreviewTimers, native, snapshot]);
+  }, [activeSessionId, clearPreviewTimers, native, records]);
+
+  const stopAllSearches = useCallback(async () => {
+    if (native) {
+      const stopped = await invoke<SearchSnapshot[]>("search_stop_all");
+      setRecords((current) => stopped.reduce((next, snapshot) => {
+        const record = next[snapshot.clientId];
+        return record ? { ...next, [snapshot.clientId]: { ...record, snapshot } } : next;
+      }, current));
+      return stopped;
+    }
+    clearPreviewTimers();
+    setRecords((current) => Object.fromEntries(Object.entries(current).map(([id, record]) => [id, {
+      ...record,
+      snapshot: record.snapshot.state === "searching"
+        ? { ...record.snapshot, state: "stopped", message: "Search stopped.", finishedAtMs: Date.now() }
+        : record.snapshot,
+    }])));
+    return [];
+  }, [clearPreviewTimers, native]);
+
+  const closeSearch = useCallback(async (clientId: string) => {
+    clearPreviewTimers(clientId);
+    if (native) await invoke<boolean>("search_close", { clientId });
+    setRecords((current) => {
+      const remaining = { ...current };
+      delete remaining[clientId];
+      return remaining;
+    });
+  }, [clearPreviewTimers, native]);
+
+  const active = useMemo<SearchSessionRecord>(() => records[activeSessionId] ?? {
+    snapshot: idleSnapshot(activeSessionId),
+    results: [],
+    error: null,
+    unseenCount: 0,
+  }, [activeSessionId, records]);
 
   return {
     ready,
-    snapshot,
-    results,
-    error,
+    records,
+    snapshot: active.snapshot,
+    results: active.results,
+    error: active.error,
     startSearch,
     stopSearch,
+    stopAllSearches,
+    closeSearch,
+    markSeen,
   };
 }

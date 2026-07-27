@@ -232,6 +232,7 @@ export type SearchState =
 export type SearchSnapshot = {
   state: SearchState;
   token: number | null;
+  clientId: string;
   query: string;
   resultCount: number;
   peerCount: number;

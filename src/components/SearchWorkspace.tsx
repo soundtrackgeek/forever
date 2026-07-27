@@ -17,10 +17,13 @@ import {
 } from "@phosphor-icons/react";
 import {
   useDeferredValue,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import type {
   AlbumSearchContext,
@@ -40,11 +43,16 @@ import { CountryFlag } from "./CountryFlag";
 import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
 import { WantedToggle } from "./WantedToggle";
 
-type Filter = "all" | "lossless" | "compressed";
-type Sort = "best" | "ready" | "fast" | "small";
+export type SearchFilter = "all" | "lossless" | "compressed";
+export type SearchSort = "best" | "ready" | "fast" | "small";
 export type AlbumResultView = "sources" | "files";
 
 type SearchWorkspaceProps = {
+  presetRail: ReactNode;
+  sessionId: string;
+  filter: SearchFilter;
+  sort: SearchSort;
+  layout: "list" | "grid";
   searchMode: SearchMode;
   albumContext: AlbumSearchContext | null;
   albumResultView: AlbumResultView;
@@ -60,6 +68,9 @@ type SearchWorkspaceProps = {
   searchError: string | null;
   connection: ConnectionSnapshot;
   onOpenConnection: () => void;
+  onFilterChange: (filter: SearchFilter) => void;
+  onSortChange: (sort: SearchSort) => void;
+  onLayoutChange: (layout: "list" | "grid") => void;
   onQueryChange: (query: string) => void;
   onSearch: (query: string) => void;
   onStopSearch: () => void;
@@ -119,13 +130,13 @@ function AlbumResultArtwork({ context }: { context: AlbumSearchContext }) {
   );
 }
 
-const filterLabels: Record<Filter, string> = {
+const filterLabels: Record<SearchFilter, string> = {
   all: "All types",
   lossless: "Lossless audio",
   compressed: "Compressed audio",
 };
 
-const sortLabels: Record<Sort, string> = {
+const sortLabels: Record<SearchSort, string> = {
   best: "Best match",
   ready: "Ready first",
   fast: "Fastest first",
@@ -133,6 +144,11 @@ const sortLabels: Record<Sort, string> = {
 };
 
 export function SearchWorkspace({
+  presetRail,
+  sessionId,
+  filter,
+  sort,
+  layout,
   searchMode,
   albumContext,
   albumResultView,
@@ -148,6 +164,9 @@ export function SearchWorkspace({
   searchError,
   connection,
   onOpenConnection,
+  onFilterChange,
+  onSortChange,
+  onLayoutChange,
   onQueryChange,
   onSearch,
   onStopSearch,
@@ -162,11 +181,17 @@ export function SearchWorkspace({
   onAlbumResultViewChange,
   onToggleWanted,
 }: SearchWorkspaceProps) {
-  const [filter, setFilter] = useState<Filter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [sort, setSort] = useState<Sort>("best");
   const [sortOpen, setSortOpen] = useState(false);
-  const [layout, setLayout] = useState<"list" | "grid">("list");
+  const resultListRef = useRef<HTMLDivElement>(null);
+  const scrollBySession = useRef(new Map<string, number>());
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      if (resultListRef.current) resultListRef.current.scrollTop = scrollBySession.current.get(sessionId) ?? 0;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [sessionId]);
   const online = connection.state === "online";
   const searching = search.state === "searching";
   const preview = search.message.startsWith("Preview data");
@@ -273,7 +298,7 @@ export function SearchWorkspace({
   };
 
   return (
-    <section className="search-workspace" aria-label="Search workspace">
+    <section className="search-workspace" id="dial-search-surface" aria-label="Search workspace">
       <div className="network-toolbar">
         <button
           type="button"
@@ -360,7 +385,7 @@ export function SearchWorkspace({
                   className={filter === value ? "is-active" : ""}
                   key={value}
                   onClick={() => {
-                    setFilter(value);
+                    onFilterChange(value);
                     setFilterOpen(false);
                   }}
                 >
@@ -371,6 +396,8 @@ export function SearchWorkspace({
           )}
         </div>
       </div>
+
+      {presetRail}
 
       <header className="workspace-heading">
         <h1>Across the network</h1>
@@ -551,14 +578,14 @@ export function SearchWorkspace({
             </button>
             {sortOpen && (
               <div className="sort-popover" role="menu">
-                {(Object.keys(sortLabels) as Sort[]).map((value) => (
+                {(Object.keys(sortLabels) as SearchSort[]).map((value) => (
                   <button
                     type="button"
                     role="menuitem"
                     className={sort === value ? "is-active" : ""}
                     key={value}
                     onClick={() => {
-                      setSort(value);
+                      onSortChange(value);
                       setSortOpen(false);
                     }}
                   >
@@ -573,7 +600,7 @@ export function SearchWorkspace({
               type="button"
               className={layout === "list" ? "is-active" : ""}
               aria-label="List view"
-              onClick={() => setLayout("list")}
+              onClick={() => onLayoutChange("list")}
             >
               <ListBullets size={18} />
             </button>
@@ -581,7 +608,7 @@ export function SearchWorkspace({
               type="button"
               className={layout === "grid" ? "is-active" : ""}
               aria-label="Grid view"
-              onClick={() => setLayout("grid")}
+              onClick={() => onLayoutChange("grid")}
             >
               <GridFour size={17} />
             </button>
@@ -611,7 +638,7 @@ export function SearchWorkspace({
           <span />
         </div>
 
-        <div className="result-list" aria-live="polite">
+        <div className="result-list" ref={resultListRef} onScroll={(event) => scrollBySession.current.set(sessionId, event.currentTarget.scrollTop)} aria-live="polite">
           {visibleResults.length === 0 ? (
             <div className="empty-results">
               {searching ? (
