@@ -50,6 +50,8 @@ type ConnectionSettingsProps = {
   onSetUploadSlots: (slots: number) => Promise<unknown>;
   messageNotificationsEnabled: boolean;
   onMessageNotificationsChange: (enabled: boolean) => void;
+  roomNotificationsEnabled: boolean;
+  onRoomNotificationsChange: (enabled: boolean) => void;
 };
 
 const formatBytes = (bytes: number) => {
@@ -114,6 +116,8 @@ export function ConnectionSettings({
   onSetUploadSlots,
   messageNotificationsEnabled,
   onMessageNotificationsChange,
+  roomNotificationsEnabled,
+  onRoomNotificationsChange,
 }: ConnectionSettingsProps) {
   const [draft, setDraft] = useState(profile);
   const [password, setPassword] = useState("");
@@ -477,7 +481,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.19</h2>
+              <h2>Forever 0.0.31</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="update-interval-field">
                 <span>Automatic update checks</span>
@@ -514,6 +518,22 @@ export function ConnectionSettings({
                 <span>
                   <strong><BellRinging size={13} /> Private-message alerts</strong>
                   <small>Show a Windows notification when a new message arrives.</small>
+                </span>
+              </label>
+              <label className="toggle-row message-notification-preference">
+                <input
+                  type="checkbox"
+                  checked={roomNotificationsEnabled}
+                  onChange={(event) =>
+                    onRoomNotificationsChange(event.target.checked)
+                  }
+                />
+                <span className="toggle-visual" aria-hidden="true">
+                  <i />
+                </span>
+                <span>
+                  <strong><BellRinging size={13} /> Room alerts</strong>
+                  <small>Notify for mentions and new messages in starred rooms.</small>
                 </span>
               </label>
               <button

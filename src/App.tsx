@@ -11,6 +11,7 @@ import { MessagesWorkspace } from "./components/MessagesWorkspace";
 import { MissingShelfWorkspace } from "./components/MissingShelfWorkspace";
 import { ReleaseInspector } from "./components/ReleaseInspector";
 import { PeopleWorkspace } from "./components/PeopleWorkspace";
+import { RoomsWorkspace } from "./components/RoomsWorkspace";
 import { SearchWorkspace, type AlbumResultView } from "./components/SearchWorkspace";
 import { SmartMatchPreferencesDialog } from "./components/SmartMatchPreferencesDialog";
 import { SmartMatchReviewDialog } from "./components/SmartMatchReviewDialog";
@@ -33,6 +34,7 @@ import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
 import { useLocalSharing } from "./hooks/useLocalSharing";
 import { useMissingShelf } from "./hooks/useMissingShelf";
 import { usePrivateMessages } from "./hooks/usePrivateMessages";
+import { useSoulseekRooms } from "./hooks/useSoulseekRooms";
 import { useShelfRadar } from "./hooks/useShelfRadar";
 import { useWantedAlbums } from "./hooks/useWantedAlbums";
 import type {
@@ -61,11 +63,6 @@ const viewDetails = {
     icon: Radio,
     title: "The signal starts here",
     copy: "Home discovery will arrive after the first search-and-download release.",
-  },
-  rooms: {
-    icon: Radio,
-    title: "Rooms are tuned for later",
-    copy: "Community rooms and chat are deliberately outside the v0.1.0 scope.",
   },
   transfers: {
     icon: DownloadSimple,
@@ -141,6 +138,7 @@ function App() {
   const shares = useSoulseekShares();
   const people = useSoulseekPeople();
   const messages = usePrivateMessages();
+  const rooms = useSoulseekRooms();
   const [sharesUsername, setSharesUsername] = useState<string | null>(null);
   const [selectedUsername, setSelectedUsername] = useState<string | null>("audiophile92");
   const [selectedMessageUsername, setSelectedMessageUsername] = useState<string | null>(
@@ -369,6 +367,7 @@ function App() {
           username={connection.snapshot.username}
           connectionState={connection.snapshot.state}
           unreadMessages={messages.snapshot.unreadCount}
+          unreadRooms={rooms.snapshot.unreadCount}
           onNavigate={navigate}
           onCheckForUpdates={() => void updater.checkForUpdates(true)}
         />
@@ -561,6 +560,35 @@ function App() {
               />
             )}
           />
+        ) : activeView === "rooms" ? (
+          <RoomsWorkspace
+            snapshot={rooms.snapshot}
+            ready={rooms.ready}
+            error={rooms.error ?? people.error}
+            people={people.snapshot}
+            onRefresh={rooms.refresh}
+            onJoin={rooms.join}
+            onLeave={rooms.leave}
+            onSend={rooms.send}
+            onMarkRead={rooms.markRead}
+            onSetRoomFavorite={rooms.setFavorite}
+            onOpenPerson={openPerson}
+            onMessageUser={openMessages}
+            onBrowseUser={browseUser}
+            onSetPersonFavorite={(username, favorite) =>
+              void people.setFavorite(username, favorite).catch(() => undefined)
+            }
+            onSetIgnored={(username, ignored) =>
+              void people.setIgnored(username, ignored).catch(() => undefined)
+            }
+            onSetBlocked={(username, blocked) =>
+              void people.setBlocked(username, blocked).catch(() => undefined)
+            }
+            onDismissError={() => {
+              rooms.clearError();
+              people.clearError();
+            }}
+          />
         ) : activeView === "messages" ? (
           <MessagesWorkspace
             snapshot={messages.snapshot}
@@ -722,6 +750,8 @@ function App() {
             onSetUploadSlots={sharing.setUploadSlots}
             messageNotificationsEnabled={messages.notificationsEnabled}
             onMessageNotificationsChange={messages.setNotificationsEnabled}
+            roomNotificationsEnabled={rooms.notificationsEnabled}
+            onRoomNotificationsChange={rooms.setNotificationsEnabled}
           />
         ) : (
           <PlaceholderView

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { UPDATE_CHECK_INTERVAL_STORAGE_KEY } from "./hooks/useAppUpdater";
 import { MESSAGE_NOTIFICATION_STORAGE_KEY } from "./hooks/usePrivateMessages";
+import { ROOM_NOTIFICATION_STORAGE_KEY } from "./hooks/useSoulseekRooms";
 import { MESSAGE_DRAFTS_STORAGE_KEY } from "./components/MessagesWorkspace";
 
 describe("Forever shell", () => {
@@ -63,17 +64,25 @@ describe("Forever shell", () => {
     ).toBeInTheDocument();
   });
 
-  it("navigates to a staged view and back to search", () => {
+  it("joins, reads, and writes in the public Rooms workspace", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Rooms" }));
-    expect(
-      screen.getByRole("heading", { name: "Rooms are tuned for later" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Rooms" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Lossless Listening" })).toBeInTheDocument();
+    expect(screen.getByText(/Japanese pressing/)).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Return to search" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: /Post-Punk/ }));
+    expect(screen.getByText(/previewing directory/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Join" }));
+
+    const composer = await screen.findByRole("textbox", { name: "Message Post-Punk" });
+    fireEvent.change(composer, { target: { value: "The signal is clear." } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(await screen.findByText("The signal is clear.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(
       screen.getByRole("heading", { name: "Across the network" }),
     ).toBeInTheDocument();
@@ -670,6 +679,12 @@ describe("Forever shell", () => {
     expect(notifications).toBeChecked();
     fireEvent.click(notifications);
     expect(window.localStorage.getItem(MESSAGE_NOTIFICATION_STORAGE_KEY)).toBe("false");
+    const roomNotifications = screen.getByRole("checkbox", {
+      name: /Room alerts/,
+    });
+    expect(roomNotifications).toBeChecked();
+    fireEvent.click(roomNotifications);
+    expect(window.localStorage.getItem(ROOM_NOTIFICATION_STORAGE_KEY)).toBe("false");
   });
 
   it("checks for updates every five minutes by default and saves a new cadence", () => {
@@ -704,16 +719,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.30 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.31 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Finish Line verifies every completed file by filename presence and expected byte size, then highlights missing or mismatched files without touching unsafe data.",
+        "Open Frequency brings native Soulseek public rooms into a polished three-pane workspace with a searchable room dial, live chat, and a listener rail.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Album downloads remember exact alternative sources, so a stalled release can switch listeners without downloading already verified files again.",
+        "Mentions and messages in starred rooms can raise native Windows notifications, while bounded room history and favorites stay on this device.",
       ),
     ).toBeInTheDocument();
   });

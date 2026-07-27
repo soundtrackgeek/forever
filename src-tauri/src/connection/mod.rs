@@ -8,6 +8,7 @@ mod messages;
 mod people;
 mod protocol;
 mod radar;
+mod rooms;
 mod search;
 mod service;
 mod settings;
@@ -41,12 +42,75 @@ pub fn initialize(app: &AppHandle) -> Result<ConnectionManager, String> {
             sharing: config_directory.join("sharing.json"),
             people: config_directory.join("people.json"),
             messages: config_directory.join("messages.json"),
+            rooms: config_directory.join("rooms.json"),
             wanted: config_directory.join("wanted.json"),
             diagnostics: config_directory.join("logs").join("connection.log"),
         },
         download_directory,
     )
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn rooms_snapshot(
+    manager: State<'_, ConnectionManager>,
+) -> Result<rooms::RoomsSnapshot, String> {
+    Ok(manager.current_rooms())
+}
+
+#[tauri::command]
+pub async fn rooms_refresh(
+    manager: State<'_, ConnectionManager>,
+) -> Result<rooms::RoomsSnapshot, String> {
+    manager.refresh_rooms().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn rooms_join(
+    manager: State<'_, ConnectionManager>,
+    room: String,
+) -> Result<rooms::RoomsSnapshot, String> {
+    manager.join_room(room).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn rooms_leave(
+    manager: State<'_, ConnectionManager>,
+    room: String,
+) -> Result<rooms::RoomsSnapshot, String> {
+    manager.leave_room(room).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn rooms_send(
+    manager: State<'_, ConnectionManager>,
+    room: String,
+    message: String,
+) -> Result<rooms::RoomsSnapshot, String> {
+    manager
+        .send_room_message(room, message)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn rooms_mark_read(
+    manager: State<'_, ConnectionManager>,
+    room: String,
+) -> Result<rooms::RoomsSnapshot, String> {
+    manager
+        .mark_room_read(&room)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn rooms_set_favorite(
+    manager: State<'_, ConnectionManager>,
+    room: String,
+    favorite: bool,
+) -> Result<rooms::RoomsSnapshot, String> {
+    manager
+        .set_room_favorite(&room, favorite)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

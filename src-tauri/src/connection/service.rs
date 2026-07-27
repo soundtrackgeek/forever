@@ -17,34 +17,39 @@ use super::{
         accept_children_frame, branch_level_frame, branch_root_frame, cant_connect_to_peer_frame,
         connect_to_peer_frame, file_search_frame, file_search_response_frame,
         folder_contents_request_frame, folder_contents_response_frame, get_peer_address_frame,
-        have_no_parent_frame, login_frame, message_acked_frame, message_user_frame,
-        parse_cant_connect_token, parse_connect_to_peer, parse_distributed_branch_level,
-        parse_distributed_branch_root, parse_distributed_search, parse_embedded_distributed_search,
-        parse_filename, parse_folder_contents_request, parse_folder_contents_response,
-        parse_login_response, parse_peer_address, parse_possible_parents, parse_private_message,
-        parse_queue_position, parse_search_response, parse_server_search_request,
-        parse_shared_file_list_response, parse_transfer_request, parse_transfer_response,
-        parse_upload_denied, parse_user_info_response, parse_user_interests, parse_user_stats,
+        have_no_parent_frame, join_room_frame, leave_room_frame, login_frame, message_acked_frame,
+        message_user_frame, parse_cant_connect_token, parse_connect_to_peer,
+        parse_distributed_branch_level, parse_distributed_branch_root, parse_distributed_search,
+        parse_embedded_distributed_search, parse_filename, parse_folder_contents_request,
+        parse_folder_contents_response, parse_join_room, parse_leave_room, parse_login_response,
+        parse_peer_address, parse_possible_parents, parse_private_message, parse_queue_position,
+        parse_room_chat_message, parse_room_list, parse_search_response,
+        parse_server_search_request, parse_shared_file_list_response, parse_transfer_request,
+        parse_transfer_response, parse_upload_denied, parse_user_info_response,
+        parse_user_interests, parse_user_joined_room, parse_user_left_room, parse_user_stats,
         parse_user_status, parse_watch_user, peer_init_frame, pierce_firewall_frame,
         place_in_queue_request_frame, place_in_queue_response_frame, queue_upload_frame,
         read_distributed_frame, read_frame, read_peer_frame, read_peer_init, read_profile_frame,
-        server_ping_frame, set_online_frame, set_wait_port_frame, shared_counts_frame,
-        shared_file_list_request_frame, shared_file_list_response_frame, transfer_request_frame,
-        transfer_response_frame, unwatch_user_frame, upload_denied_frame, user_info_request_frame,
-        user_info_response_frame, user_interests_frame, user_stats_frame, watch_user_frame,
-        write_raw_frame, ConnectToPeer, DistributedFrame, DistributedSearch, Frame, LoginResponse,
-        ParentCandidate, PeerAddress, PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE,
-        CONNECT_TO_PEER_CODE, DISTRIBUTED_BRANCH_LEVEL_CODE, DISTRIBUTED_BRANCH_ROOT_CODE,
-        DISTRIBUTED_SEARCH_CODE, EMBEDDED_MESSAGE_CODE, FILE_SEARCH_CODE,
-        FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE,
-        GET_PEER_ADDRESS_CODE, MESSAGE_USER_CODE, PLACE_IN_QUEUE_REQUEST_CODE,
+        room_list_frame, say_chatroom_frame, server_ping_frame, set_online_frame,
+        set_wait_port_frame, shared_counts_frame, shared_file_list_request_frame,
+        shared_file_list_response_frame, transfer_request_frame, transfer_response_frame,
+        unwatch_user_frame, upload_denied_frame, user_info_request_frame, user_info_response_frame,
+        user_interests_frame, user_stats_frame, watch_user_frame, write_raw_frame, ConnectToPeer,
+        DistributedFrame, DistributedSearch, Frame, LoginResponse, ParentCandidate, PeerAddress,
+        PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE,
+        DISTRIBUTED_BRANCH_LEVEL_CODE, DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_SEARCH_CODE,
+        EMBEDDED_MESSAGE_CODE, FILE_SEARCH_CODE, FILE_SEARCH_RESPONSE_CODE,
+        FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE, GET_PEER_ADDRESS_CODE,
+        JOIN_ROOM_CODE, LEAVE_ROOM_CODE, MESSAGE_USER_CODE, PLACE_IN_QUEUE_REQUEST_CODE,
         PLACE_IN_QUEUE_RESPONSE_CODE, POSSIBLE_PARENTS_CODE, QUEUE_UPLOAD_CODE, RELOGGED_CODE,
-        RESET_DISTRIBUTED_CODE, SHARED_FILE_LIST_REQUEST_CODE, SHARED_FILE_LIST_RESPONSE_CODE,
-        TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE, UPLOAD_FAILED_CODE, USER_INFO_REQUEST_CODE,
-        USER_INFO_RESPONSE_CODE, USER_INTERESTS_CODE, USER_STATS_CODE, USER_STATUS_CODE,
+        RESET_DISTRIBUTED_CODE, ROOM_LIST_CODE, SAY_CHATROOM_CODE, SHARED_FILE_LIST_REQUEST_CODE,
+        SHARED_FILE_LIST_RESPONSE_CODE, TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE,
+        UPLOAD_FAILED_CODE, USER_INFO_REQUEST_CODE, USER_INFO_RESPONSE_CODE, USER_INTERESTS_CODE,
+        USER_JOINED_ROOM_CODE, USER_LEFT_ROOM_CODE, USER_STATS_CODE, USER_STATUS_CODE,
         WATCH_USER_CODE,
     },
     radar::{RadarAlbumRequest, RadarError, RadarHub, RadarSnapshot},
+    rooms::{valid_room_message, valid_room_name, RoomsError, RoomsHub, RoomsSnapshot},
     search::{SearchHub, SearchSnapshot, SearchState},
     settings::{ConnectionProfile, SettingsStore},
     shares::{
@@ -311,6 +316,17 @@ enum ConnectionCommand {
         username: String,
         message: String,
     },
+    RefreshRooms,
+    JoinRoom {
+        room: String,
+    },
+    LeaveRoom {
+        room: String,
+    },
+    SendRoomMessage {
+        room: String,
+        message: String,
+    },
     InspectFolder {
         ticket: FolderTicket,
     },
@@ -384,6 +400,7 @@ pub struct ConnectionManager {
     shares: SharesHub,
     people: PeopleHub,
     messages: MessagesHub,
+    rooms: RoomsHub,
     transfers: TransferHub,
     local_shares: LocalSharesHub,
     uploads: UploadHub,
@@ -396,6 +413,7 @@ pub struct ConnectionPaths {
     pub sharing: PathBuf,
     pub people: PathBuf,
     pub messages: PathBuf,
+    pub rooms: PathBuf,
     pub wanted: PathBuf,
     pub diagnostics: PathBuf,
 }
@@ -420,6 +438,7 @@ impl ConnectionManager {
         let distributed = DistributedHub::new(app.clone());
         let people = PeopleHub::new(app.clone(), paths.people)?;
         let messages = MessagesHub::new(app.clone(), paths.messages)?;
+        let rooms = RoomsHub::new(app.clone(), paths.rooms)?;
         let wanted = WantedHub::new(app.clone(), paths.wanted)?;
         let radar = RadarHub::new(app.clone());
 
@@ -447,6 +466,7 @@ impl ConnectionManager {
             shares: SharesHub::default(),
             people,
             messages,
+            rooms,
             transfers,
             local_shares,
             uploads,
@@ -542,6 +562,7 @@ impl ConnectionManager {
 
     pub fn disconnect(&self) -> Result<ConnectionSnapshot, ConnectionServiceError> {
         self.stop_active_task();
+        self.rooms.disconnected();
         let snapshot = match self.settings.load()? {
             Some(profile) => ConnectionSnapshot::offline(&profile),
             None => ConnectionSnapshot::unconfigured(),
@@ -554,6 +575,7 @@ impl ConnectionManager {
 
     pub fn reset(&self) -> Result<ConnectionBootstrap, ConnectionServiceError> {
         self.stop_active_task();
+        self.rooms.disconnected();
         if let Some(profile) = self.settings.load()? {
             self.vault.forget(&profile.username)?;
         }
@@ -697,6 +719,76 @@ impl ConnectionManager {
 
     pub fn current_messages(&self) -> MessagesSnapshot {
         self.messages.snapshot()
+    }
+
+    pub fn current_rooms(&self) -> RoomsSnapshot {
+        self.rooms.snapshot()
+    }
+
+    pub fn refresh_rooms(&self) -> Result<RoomsSnapshot, ConnectionServiceError> {
+        self.send_room_command(ConnectionCommand::RefreshRooms)?;
+        Ok(self.rooms.snapshot())
+    }
+
+    pub fn join_room(&self, room: String) -> Result<RoomsSnapshot, ConnectionServiceError> {
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::RoomsUnavailable);
+        }
+        let room = valid_room_name(&room)?;
+        let snapshot = self.rooms.request_join(&room)?;
+        self.send_room_command(ConnectionCommand::JoinRoom { room })?;
+        Ok(snapshot)
+    }
+
+    pub fn leave_room(&self, room: String) -> Result<RoomsSnapshot, ConnectionServiceError> {
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::RoomsUnavailable);
+        }
+        let room = valid_room_name(&room)?;
+        let snapshot = self.rooms.request_leave(&room)?;
+        self.send_room_command(ConnectionCommand::LeaveRoom { room })?;
+        Ok(snapshot)
+    }
+
+    pub fn send_room_message(
+        &self,
+        room: String,
+        message: String,
+    ) -> Result<RoomsSnapshot, ConnectionServiceError> {
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::RoomsUnavailable);
+        }
+        let room = valid_room_name(&room)?;
+        let message = valid_room_message(&message)?;
+        self.send_room_command(ConnectionCommand::SendRoomMessage { room, message })?;
+        Ok(self.rooms.snapshot())
+    }
+
+    pub fn mark_room_read(&self, room: &str) -> Result<RoomsSnapshot, ConnectionServiceError> {
+        Ok(self.rooms.mark_read(room)?)
+    }
+
+    pub fn set_room_favorite(
+        &self,
+        room: &str,
+        favorite: bool,
+    ) -> Result<RoomsSnapshot, ConnectionServiceError> {
+        Ok(self.rooms.set_favorite(room, favorite)?)
+    }
+
+    fn send_room_command(&self, command: ConnectionCommand) -> Result<(), ConnectionServiceError> {
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::RoomsUnavailable);
+        }
+        let sender = self
+            .command_sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .ok_or(ConnectionServiceError::RoomsUnavailable)?;
+        sender
+            .send(command)
+            .map_err(|_| ConnectionServiceError::RoomsUnavailable)
     }
 
     pub fn send_private_message(
@@ -1523,6 +1615,7 @@ impl ConnectionManager {
             let _ = self.messages.fail_queued(
                 "The Soulseek connection was interrupted before this message was sent.",
             );
+            self.rooms.disconnected();
             self.transfers.connection_lost();
             self.uploads.connection_lost();
             self.folders.connection_lost();
@@ -1728,6 +1821,11 @@ impl ConnectionManager {
             retry_in_seconds: None,
             updated_at_ms: connected_at_ms,
         });
+        self.rooms.connected();
+        let _ = command_sender.send(ConnectionCommand::RefreshRooms);
+        for room in self.rooms.desired_rooms() {
+            let _ = command_sender.send(ConnectionCommand::JoinRoom { room });
+        }
         let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
         let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
         for username in self.people.saved_users_to_watch() {
@@ -1780,7 +1878,38 @@ impl ConnectionManager {
                             "relogged",
                         ));
                     }
-                    if frame.code == MESSAGE_USER_CODE {
+                    if frame.code == ROOM_LIST_CODE {
+                        if let Ok(rooms) = parse_room_list(&frame) {
+                            self.rooms.update_list(rooms);
+                        }
+                    } else if frame.code == JOIN_ROOM_CODE {
+                        if let Ok(room) = parse_join_room(&frame) {
+                            let _ = self.rooms.joined(room);
+                        }
+                    } else if frame.code == LEAVE_ROOM_CODE {
+                        if let Ok(room) = parse_leave_room(&frame) {
+                            let _ = self.rooms.left(&room);
+                        }
+                    } else if frame.code == USER_JOINED_ROOM_CODE {
+                        if let Ok((room, member)) = parse_user_joined_room(&frame) {
+                            let _ = self.rooms.user_joined(&room, member);
+                        }
+                    } else if frame.code == USER_LEFT_ROOM_CODE {
+                        if let Ok((room, username)) = parse_user_left_room(&frame) {
+                            let _ = self.rooms.user_left(&room, &username);
+                        }
+                    } else if frame.code == SAY_CHATROOM_CODE {
+                        if let Ok(message) = parse_room_chat_message(&frame) {
+                            if !self.people.is_ignored(&message.username) {
+                                let _ = self.rooms.record_message(
+                                    &message.room,
+                                    &message.username,
+                                    &message.message,
+                                    &profile.username,
+                                );
+                            }
+                        }
+                    } else if frame.code == MESSAGE_USER_CODE {
                         if let Ok(message) = parse_private_message(&frame) {
                             if !self.people.is_ignored(&message.username) {
                                 self.people.remember(&message.username).map_err(|error| {
@@ -1821,10 +1950,12 @@ impl ConnectionManager {
                         }
                     } else if frame.code == USER_STATUS_CODE {
                         if let Ok((username, status, privileged)) = parse_user_status(&frame) {
+                            self.rooms.update_status(&username, status);
                             self.people.update_status(&username, status, privileged);
                         }
                     } else if frame.code == USER_STATS_CODE {
                         if let Ok(stats) = parse_user_stats(&frame) {
+                            self.rooms.update_stats(&stats);
                             self.people.update_stats(stats);
                         }
                     } else if frame.code == USER_INTERESTS_CODE {
@@ -2098,6 +2229,44 @@ impl ConnectionManager {
                                     "message_store_failed",
                                 )
                             })?;
+                        }
+                        Some(ConnectionCommand::RefreshRooms) => {
+                            write_raw_frame(&mut server_writer, &room_list_frame())
+                                .await
+                                .map_err(|error| ConnectionFailure::retryable(
+                                    format!("The public room directory could not be refreshed: {error}"),
+                                    "room_list_failed",
+                                ))?;
+                        }
+                        Some(ConnectionCommand::JoinRoom { room }) => {
+                            write_raw_frame(&mut server_writer, &join_room_frame(&room))
+                                .await
+                                .map_err(|error| ConnectionFailure::retryable(
+                                    format!("The public room could not be joined: {error}"),
+                                    "room_join_failed",
+                                ))?;
+                        }
+                        Some(ConnectionCommand::LeaveRoom { room }) => {
+                            write_raw_frame(&mut server_writer, &leave_room_frame(&room))
+                                .await
+                                .map_err(|error| ConnectionFailure::retryable(
+                                    format!("The public room could not be left: {error}"),
+                                    "room_leave_failed",
+                                ))?;
+                        }
+                        Some(ConnectionCommand::SendRoomMessage { room, message }) => {
+                            let frame = say_chatroom_frame(&room, &message).map_err(|error| {
+                                ConnectionFailure::fatal(
+                                    format!("The room message is invalid: {error}"),
+                                    "room_message_invalid",
+                                )
+                            })?;
+                            write_raw_frame(&mut server_writer, &frame)
+                                .await
+                                .map_err(|error| ConnectionFailure::retryable(
+                                    format!("The room message could not be sent: {error}"),
+                                    "room_message_failed",
+                                ))?;
                         }
                         Some(ConnectionCommand::InspectFolder { ticket }) => {
                             write_raw_frame(
@@ -3784,6 +3953,8 @@ pub enum ConnectionServiceError {
     #[error("{0}")]
     Messages(#[from] MessagesError),
     #[error("{0}")]
+    Rooms(#[from] RoomsError),
+    #[error("{0}")]
     Wanted(#[from] WantedError),
     #[error("{0}")]
     Radar(#[from] RadarError),
@@ -3817,6 +3988,8 @@ pub enum ConnectionServiceError {
     ProfileTimeout,
     #[error("Connect to Soulseek before sending private messages.")]
     MessagesUnavailable,
+    #[error("Connect to Soulseek before using public rooms.")]
+    RoomsUnavailable,
     #[error("{0}")]
     InvalidSearch(String),
     #[error("Could not initialize connection diagnostics: {0}")]

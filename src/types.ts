@@ -178,6 +178,50 @@ export type MessagesSnapshot = {
   updatedAtMs: number;
 };
 
+export type RoomMessage = {
+  id: string;
+  room: string;
+  username: string;
+  body: string;
+  sentAtMs: number;
+  own: boolean;
+  unread: boolean;
+  mention: boolean;
+};
+
+export type RoomMember = {
+  username: string;
+  status: number;
+  averageSpeed: number;
+  uploadCount: number;
+  sharedFileCount: number;
+  sharedDirectoryCount: number;
+  slotsFree: boolean;
+  countryCode: string | null;
+};
+
+export type SoulseekRoom = {
+  name: string;
+  userCount: number;
+  joined: boolean;
+  joining: boolean;
+  autoJoin: boolean;
+  favorite: boolean;
+  unreadCount: number;
+  mentionCount: number;
+  lastMessageAtMs: number | null;
+  messages: RoomMessage[];
+  members: RoomMember[];
+};
+
+export type RoomsSnapshot = {
+  rooms: SoulseekRoom[];
+  connected: boolean;
+  unreadCount: number;
+  mentionCount: number;
+  updatedAtMs: number;
+};
+
 export type SearchState =
   | "idle"
   | "searching"

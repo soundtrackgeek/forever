@@ -14,6 +14,11 @@ pub const GET_PEER_ADDRESS_CODE: u32 = 3;
 pub const WATCH_USER_CODE: u32 = 5;
 pub const UNWATCH_USER_CODE: u32 = 6;
 pub const USER_STATUS_CODE: u32 = 7;
+pub const SAY_CHATROOM_CODE: u32 = 13;
+pub const JOIN_ROOM_CODE: u32 = 14;
+pub const LEAVE_ROOM_CODE: u32 = 15;
+pub const USER_JOINED_ROOM_CODE: u32 = 16;
+pub const USER_LEFT_ROOM_CODE: u32 = 17;
 pub const CONNECT_TO_PEER_CODE: u32 = 18;
 pub const MESSAGE_USER_CODE: u32 = 22;
 pub const MESSAGE_ACKED_CODE: u32 = 23;
@@ -24,6 +29,7 @@ pub const SHARED_COUNTS_CODE: u32 = 35;
 pub const USER_STATS_CODE: u32 = 36;
 pub const RELOGGED_CODE: u32 = 41;
 pub const USER_INTERESTS_CODE: u32 = 57;
+pub const ROOM_LIST_CODE: u32 = 64;
 pub const HAVE_NO_PARENT_CODE: u32 = 71;
 pub const EMBEDDED_MESSAGE_CODE: u32 = 93;
 pub const ACCEPT_CHILDREN_CODE: u32 = 100;
@@ -74,6 +80,10 @@ const MAX_PROFILE_PICTURE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_USER_INTERESTS: usize = 500;
 const MAX_USER_INTEREST_BYTES: usize = 250;
 const MAX_PRIVATE_MESSAGE_BYTES: usize = 8 * 1024;
+const MAX_ROOM_NAME_BYTES: usize = 24;
+const MAX_ROOM_MESSAGE_BYTES: usize = 4 * 1024;
+const MAX_ROOM_LIST: usize = 5_000;
+const MAX_ROOM_MEMBERS: usize = 5_000;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Frame {
@@ -128,6 +138,37 @@ pub struct UserStats {
     pub upload_count: u32,
     pub shared_file_count: u32,
     pub shared_directory_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoomListing {
+    pub name: String,
+    pub user_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoomMemberData {
+    pub username: String,
+    pub status: u32,
+    pub average_speed: u32,
+    pub upload_count: u32,
+    pub shared_file_count: u32,
+    pub shared_directory_count: u32,
+    pub slots_free: bool,
+    pub country_code: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoomJoin {
+    pub room: String,
+    pub members: Vec<RoomMemberData>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoomChatMessage {
+    pub room: String,
+    pub username: String,
+    pub message: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -314,6 +355,38 @@ pub fn message_user_frame(username: &str, message: &str) -> Result<Vec<u8>, Prot
 
 pub fn message_acked_frame(id: u32) -> Vec<u8> {
     encode_message(MESSAGE_ACKED_CODE, &id.to_le_bytes())
+}
+
+pub fn room_list_frame() -> Vec<u8> {
+    encode_message(ROOM_LIST_CODE, &[])
+}
+
+pub fn join_room_frame(room: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(room.len() + 8);
+    push_string(&mut payload, room);
+    push_u32(&mut payload, 0);
+    encode_message(JOIN_ROOM_CODE, &payload)
+}
+
+pub fn leave_room_frame(room: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(room.len() + 4);
+    push_string(&mut payload, room);
+    encode_message(LEAVE_ROOM_CODE, &payload)
+}
+
+pub fn say_chatroom_frame(room: &str, message: &str) -> Result<Vec<u8>, ProtocolError> {
+    if room.is_empty()
+        || room.len() > MAX_ROOM_NAME_BYTES
+        || !room.is_ascii()
+        || message.is_empty()
+        || message.len() > MAX_ROOM_MESSAGE_BYTES
+    {
+        return Err(ProtocolError::InvalidRoomMessage);
+    }
+    let mut payload = Vec::with_capacity(room.len() + message.len() + 8);
+    push_string(&mut payload, room);
+    push_string(&mut payload, message);
+    Ok(encode_message(SAY_CHATROOM_CODE, &payload))
 }
 
 pub fn have_no_parent_frame(has_no_parent: bool) -> Vec<u8> {
@@ -873,6 +946,147 @@ pub fn parse_user_status(frame: &Frame) -> Result<(String, u32, bool), ProtocolE
     ))
 }
 
+pub fn parse_room_list(frame: &Frame) -> Result<Vec<RoomListing>, ProtocolError> {
+    expect_code(frame, ROOM_LIST_CODE)?;
+    let mut reader = PayloadReader::new(&frame.payload);
+    let room_count = bounded_count(reader.read_u32()?, MAX_ROOM_LIST, "rooms")?;
+    let mut names = Vec::with_capacity(room_count);
+    for _ in 0..room_count {
+        names.push(read_room_name(&mut reader)?);
+    }
+    let count_count = bounded_count(reader.read_u32()?, MAX_ROOM_LIST, "room counts")?;
+    let mut counts = Vec::with_capacity(count_count);
+    for _ in 0..count_count {
+        counts.push(reader.read_u32()?);
+    }
+    Ok(names
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| RoomListing {
+            name,
+            user_count: counts.get(index).copied().unwrap_or_default(),
+        })
+        .collect())
+}
+
+pub fn parse_join_room(frame: &Frame) -> Result<RoomJoin, ProtocolError> {
+    expect_code(frame, JOIN_ROOM_CODE)?;
+    let mut reader = PayloadReader::new(&frame.payload);
+    let room = read_room_name(&mut reader)?;
+    let user_count = bounded_count(reader.read_u32()?, MAX_ROOM_MEMBERS, "room users")?;
+    let mut usernames = Vec::with_capacity(user_count);
+    for _ in 0..user_count {
+        usernames.push(read_network_username(&mut reader)?);
+    }
+    let status_count = bounded_count(reader.read_u32()?, MAX_ROOM_MEMBERS, "room statuses")?;
+    let mut statuses = Vec::with_capacity(status_count);
+    for _ in 0..status_count {
+        statuses.push(reader.read_u32()?);
+    }
+    let stats_count = bounded_count(reader.read_u32()?, MAX_ROOM_MEMBERS, "room statistics")?;
+    let mut statistics = Vec::with_capacity(stats_count);
+    for _ in 0..stats_count {
+        statistics.push((
+            reader.read_u32()?,
+            reader.read_u32()?,
+            reader.read_u32()?,
+            reader.read_u32()?,
+            reader.read_u32()?,
+        ));
+    }
+    let slots_count = bounded_count(reader.read_u32()?, MAX_ROOM_MEMBERS, "room slot states")?;
+    let mut slots = Vec::with_capacity(slots_count);
+    for _ in 0..slots_count {
+        slots.push(reader.read_u32()? == 0);
+    }
+    let country_count = if reader.remaining() >= 4 {
+        bounded_count(reader.read_u32()?, MAX_ROOM_MEMBERS, "room countries")?
+    } else {
+        0
+    };
+    let mut countries = Vec::with_capacity(country_count);
+    for _ in 0..country_count {
+        countries.push(normalize_country_code(reader.read_string_lossy()?));
+    }
+    let members = usernames
+        .into_iter()
+        .enumerate()
+        .map(|(index, username)| {
+            let (average_speed, upload_count, _unknown, shared_file_count, shared_directory_count) =
+                statistics.get(index).copied().unwrap_or_default();
+            RoomMemberData {
+                username,
+                status: statuses.get(index).copied().unwrap_or_default(),
+                average_speed,
+                upload_count,
+                shared_file_count,
+                shared_directory_count,
+                slots_free: slots.get(index).copied().unwrap_or(false),
+                country_code: countries.get(index).cloned().flatten(),
+            }
+        })
+        .collect();
+    Ok(RoomJoin { room, members })
+}
+
+pub fn parse_room_chat_message(frame: &Frame) -> Result<RoomChatMessage, ProtocolError> {
+    expect_code(frame, SAY_CHATROOM_CODE)?;
+    let mut reader = PayloadReader::new(&frame.payload);
+    let room = read_room_name(&mut reader)?;
+    let username = read_network_username(&mut reader)?;
+    let message = reader.read_string_lossy()?;
+    if message.is_empty() || message.len() > MAX_ROOM_MESSAGE_BYTES {
+        return Err(ProtocolError::InvalidRoomMessage);
+    }
+    Ok(RoomChatMessage {
+        room,
+        username,
+        message,
+    })
+}
+
+pub fn parse_leave_room(frame: &Frame) -> Result<String, ProtocolError> {
+    expect_code(frame, LEAVE_ROOM_CODE)?;
+    read_room_name(&mut PayloadReader::new(&frame.payload))
+}
+
+pub fn parse_user_joined_room(frame: &Frame) -> Result<(String, RoomMemberData), ProtocolError> {
+    expect_code(frame, USER_JOINED_ROOM_CODE)?;
+    let mut reader = PayloadReader::new(&frame.payload);
+    let room = read_room_name(&mut reader)?;
+    let username = read_network_username(&mut reader)?;
+    let status = reader.read_u32()?;
+    let average_speed = reader.read_u32()?;
+    let upload_count = reader.read_u32()?;
+    let _unknown = reader.read_u32()?;
+    let shared_file_count = reader.read_u32()?;
+    let shared_directory_count = reader.read_u32()?;
+    let slots_free = reader.read_u32()? == 0;
+    let country_code = normalize_country_code(reader.read_string_lossy()?);
+    Ok((
+        room,
+        RoomMemberData {
+            username,
+            status,
+            average_speed,
+            upload_count,
+            shared_file_count,
+            shared_directory_count,
+            slots_free,
+            country_code,
+        },
+    ))
+}
+
+pub fn parse_user_left_room(frame: &Frame) -> Result<(String, String), ProtocolError> {
+    expect_code(frame, USER_LEFT_ROOM_CODE)?;
+    let mut reader = PayloadReader::new(&frame.payload);
+    Ok((
+        read_room_name(&mut reader)?,
+        read_network_username(&mut reader)?,
+    ))
+}
+
 pub fn parse_user_stats(frame: &Frame) -> Result<UserStats, ProtocolError> {
     if frame.code != USER_STATS_CODE {
         return Err(ProtocolError::UnexpectedCode {
@@ -955,6 +1169,40 @@ fn read_network_username(reader: &mut PayloadReader<'_>) -> Result<String, Proto
         return Err(ProtocolError::InvalidUserData);
     }
     Ok(username)
+}
+
+fn read_room_name(reader: &mut PayloadReader<'_>) -> Result<String, ProtocolError> {
+    let room = reader.read_string_lossy()?;
+    let valid = !room.is_empty()
+        && room.len() <= MAX_ROOM_NAME_BYTES
+        && room.is_ascii()
+        && !room.starts_with(' ')
+        && !room.ends_with(' ')
+        && !room.contains("  ")
+        && room
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() || byte == b' ');
+    valid
+        .then_some(room)
+        .ok_or(ProtocolError::InvalidRoomMessage)
+}
+
+fn expect_code(frame: &Frame, expected: u32) -> Result<(), ProtocolError> {
+    if frame.code != expected {
+        return Err(ProtocolError::UnexpectedCode {
+            expected,
+            actual: frame.code,
+        });
+    }
+    Ok(())
+}
+
+fn bounded_count(count: u32, maximum: usize, kind: &'static str) -> Result<usize, ProtocolError> {
+    let count = count as usize;
+    if count > maximum {
+        return Err(ProtocolError::InvalidCount { kind, count });
+    }
+    Ok(count)
 }
 
 fn normalize_country_code(value: String) -> Option<String> {
@@ -1705,6 +1953,8 @@ pub enum ProtocolError {
     InvalidUserInfo,
     #[error("Soulseek private-message fields are invalid")]
     InvalidPrivateMessage,
+    #[error("Soulseek room or room-message fields are invalid")]
+    InvalidRoomMessage,
     #[error("Unexpected Soulseek peer initialization code {0}")]
     UnexpectedPeerInitCode(u8),
     #[error("Soulseek {kind} count {count} exceeds the safety limit")]
@@ -1788,6 +2038,96 @@ mod tests {
         assert!(
             message_user_frame("listener", &"x".repeat(MAX_PRIVATE_MESSAGE_BYTES + 1)).is_err()
         );
+    }
+
+    #[test]
+    fn public_room_commands_and_messages_follow_the_server_protocol() {
+        assert_eq!(decoded_frame(&room_list_frame()).code, ROOM_LIST_CODE);
+
+        let join = decoded_frame(&join_room_frame("Lossless Listening"));
+        assert_eq!(join.code, JOIN_ROOM_CODE);
+        let mut join_reader = PayloadReader::new(&join.payload);
+        assert_eq!(
+            join_reader.read_string_lossy().unwrap(),
+            "Lossless Listening"
+        );
+        assert_eq!(join_reader.read_u32().unwrap(), 0);
+
+        let leave = decoded_frame(&leave_room_frame("Lossless Listening"));
+        assert_eq!(leave.code, LEAVE_ROOM_CODE);
+        assert_eq!(parse_leave_room(&leave).unwrap(), "Lossless Listening");
+
+        let outgoing =
+            decoded_frame(&say_chatroom_frame("Lossless Listening", "quiet pressing").unwrap());
+        assert_eq!(outgoing.code, SAY_CHATROOM_CODE);
+        let mut incoming_payload = encoded_string("Lossless Listening");
+        incoming_payload.extend(encoded_string("needle_drop"));
+        incoming_payload.extend(encoded_string("quiet pressing"));
+        assert_eq!(
+            parse_room_chat_message(&Frame {
+                code: SAY_CHATROOM_CODE,
+                payload: incoming_payload,
+            })
+            .unwrap(),
+            RoomChatMessage {
+                room: "Lossless Listening".to_owned(),
+                username: "needle_drop".to_owned(),
+                message: "quiet pressing".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_bounded_public_room_directory_and_member_arrays() {
+        let mut directory = 2_u32.to_le_bytes().to_vec();
+        directory.extend(encoded_string("Lossless Listening"));
+        directory.extend(encoded_string("Ambient / Drone"));
+        directory.extend(2_u32.to_le_bytes());
+        directory.extend(124_u32.to_le_bytes());
+        directory.extend(61_u32.to_le_bytes());
+        let rooms = parse_room_list(&Frame {
+            code: ROOM_LIST_CODE,
+            payload: directory,
+        })
+        .unwrap();
+        assert_eq!(rooms[0].name, "Lossless Listening");
+        assert_eq!(rooms[1].user_count, 61);
+
+        let mut joined = encoded_string("Lossless Listening");
+        joined.extend(1_u32.to_le_bytes());
+        joined.extend(encoded_string("needle_drop"));
+        joined.extend(1_u32.to_le_bytes());
+        joined.extend(2_u32.to_le_bytes());
+        joined.extend(1_u32.to_le_bytes());
+        joined.extend(18_200_000_u32.to_le_bytes());
+        joined.extend(4_u32.to_le_bytes());
+        joined.extend(0_u32.to_le_bytes());
+        joined.extend(184_210_u32.to_le_bytes());
+        joined.extend(12_940_u32.to_le_bytes());
+        joined.extend(1_u32.to_le_bytes());
+        joined.extend(0_u32.to_le_bytes());
+        joined.extend(1_u32.to_le_bytes());
+        joined.extend(encoded_string("no"));
+        let room = parse_join_room(&Frame {
+            code: JOIN_ROOM_CODE,
+            payload: joined,
+        })
+        .unwrap();
+        assert_eq!(room.members.len(), 1);
+        assert_eq!(room.members[0].country_code.as_deref(), Some("NO"));
+        assert_eq!(room.members[0].shared_file_count, 184_210);
+        assert!(room.members[0].slots_free);
+
+        let oversized = (u32::try_from(MAX_ROOM_LIST).unwrap() + 1)
+            .to_le_bytes()
+            .to_vec();
+        assert!(matches!(
+            parse_room_list(&Frame {
+                code: ROOM_LIST_CODE,
+                payload: oversized,
+            }),
+            Err(ProtocolError::InvalidCount { .. })
+        ));
     }
 
     #[test]

@@ -20,6 +20,7 @@ type AppSidebarProps = {
   username: string | null;
   connectionState: ConnectionState;
   unreadMessages: number;
+  unreadRooms: number;
   onNavigate: (view: string) => void;
   onCheckForUpdates: () => void;
 };
@@ -41,6 +42,7 @@ export function AppSidebar({
   username,
   connectionState,
   unreadMessages,
+  unreadRooms,
   onNavigate,
   onCheckForUpdates,
 }: AppSidebarProps) {
@@ -86,6 +88,11 @@ export function AppSidebar({
               {item.id === "messages" && unreadMessages > 0 ? (
                 <b className="nav-unread" aria-label={`${unreadMessages} unread messages`}>
                   {unreadMessages > 99 ? "99+" : unreadMessages}
+                </b>
+              ) : null}
+              {item.id === "rooms" && unreadRooms > 0 ? (
+                <b className="nav-unread" aria-label={`${unreadRooms} unread room messages`}>
+                  {unreadRooms > 99 ? "99+" : unreadRooms}
                 </b>
               ) : null}
             </button>

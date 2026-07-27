@@ -5,6 +5,44 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.31] - 2026-07-27
+
+### Added
+
+- **Open Frequency**, a native Soulseek public-room workspace with a searchable
+  room directory, Joined/Stars/All filters, join/leave controls, live chat,
+  unread totals, mention highlighting, and room favorites.
+- A live listener rail with online/away/offline presence, country flags,
+  upload-slot availability, reported speed, shared files, and folder totals.
+- Direct room-member actions for Profile, Message, Browse shares, Save user,
+  Ignore, and Ban using Forever's existing People and safety stores.
+- Native Windows notifications for mentions and new messages in starred rooms,
+  controlled by a separate preference in Connection settings.
+- Bounded on-device room history for up to 64 rooms and 250 messages per room,
+  with persisted favorites and automatic rejoin preferences.
+- Soulseek protocol support for public room lists, join/leave, room messages,
+  member arrivals/departures, and live member status/stat updates.
+- Rust regression coverage for bounded room parsing, protocol frames, room-name
+  validation, mention boundaries, and history limits, plus a frontend room-flow
+  regression test.
+
+### Changed
+
+- Joined public rooms automatically rejoin whenever Forever reconnects to the
+  Soulseek server, while member lists remain session-only.
+- Ignored users' new public-room messages are filtered through the same local
+  safety preference as their private messages and search activity.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.31` and describe Open
+  Frequency accurately.
+
+### Fixed
+
+- The Rooms navigation item now opens a working workspace instead of its early
+  placeholder, and exposes its unread total without compressing the label.
+- Room, member, and message panes collapse cleanly without horizontal overflow
+  at Forever's 1024×680 minimum window size.
+
 ## [0.0.30] - 2026-07-27
 
 ### Added

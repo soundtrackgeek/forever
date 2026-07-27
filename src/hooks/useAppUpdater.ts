@@ -30,20 +30,20 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.29",
-  version: "0.0.30",
-  body: `## What’s new in Forever 0.0.30
+  currentVersion: "0.0.30",
+  version: "0.0.31",
+  body: `## What’s new in Forever 0.0.31
 
 ### Added
 
-- Finish Line verifies every completed file by filename presence and expected byte size, then highlights missing or mismatched files without touching unsafe data.
-- Interrupted peer transfers recover automatically with bounded retry countdowns while preserving safe partial progress.
-- Album downloads remember exact alternative sources, so a stalled release can switch listeners without downloading already verified files again.
+- Open Frequency brings native Soulseek public rooms into a polished three-pane workspace with a searchable room dial, live chat, and a listener rail.
+- Room member cards show presence, country, upload-slot availability, speed, and shared-library totals with direct Profile, Message, Browse, Save, Ignore, and Ban actions.
+- Mentions and messages in starred rooms can raise native Windows notifications, while bounded room history and favorites stay on this device.
 
 ### Changed
 
-- Transfers now includes release-health totals, a Needs attention filter, manual Verify and Retry issues actions, completion alerts, and persistent completed history.
-- Clear history removes only Forever's transfer records; completed files stay in the download folder, and Music Library remains strictly SQLite read-only and query-only.`,
+- Joined rooms reconnect automatically with the Soulseek session, unread and mention counts appear in Rooms and the sidebar, and public room names and messages are safety-bounded.
+- Private room administration is intentionally deferred; v0.0.31 focuses on the public room experience.`,
   date: "2026-07-27",
 };
 
