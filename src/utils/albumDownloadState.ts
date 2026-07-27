@@ -11,6 +11,10 @@ export type AlbumDownloadStatus =
 export type AlbumDownloadState = {
   status: AlbumDownloadStatus;
   queuePosition: number | null;
+  groupId: string;
+  releaseId: string | null;
+  title: string;
+  progressPercent: number;
 };
 
 const downloadLabels: Record<AlbumDownloadStatus, string> = {
@@ -24,7 +28,9 @@ const downloadLabels: Record<AlbumDownloadStatus, string> = {
 export const albumDownloadLabel = (state: AlbumDownloadState) =>
   state.status === "queued" && state.queuePosition
     ? `Queued #${state.queuePosition}`
-    : downloadLabels[state.status];
+    : state.status === "downloading"
+      ? `Downloading · ${state.progressPercent}%`
+      : downloadLabels[state.status];
 
 const normalizeRemoteFilename = (value: string) =>
   value
@@ -49,10 +55,18 @@ const downloadStatus = (status: TransferGroupStatus): AlbumDownloadStatus => {
   return status;
 };
 
-export function albumDownloadStates(
-  sources: AlbumSource[],
-  transfers: Transfer[],
-): Map<string, AlbumDownloadState> {
+const stateForGroup = (group: ReturnType<typeof groupTransfers>[number]): AlbumDownloadState => ({
+  status: downloadStatus(group.status),
+  queuePosition: group.queuePosition,
+  groupId: group.id,
+  releaseId: group.releaseId,
+  title: group.title,
+  progressPercent: group.sizeBytes
+    ? Math.min(100, Math.round((group.transferredBytes / group.sizeBytes) * 100))
+    : 0,
+});
+
+const latestStateByFolder = (transfers: Transfer[]) => {
   const groupByFolder = new Map<
     string,
     { createdAtMs: number; state: AlbumDownloadState }
@@ -66,14 +80,42 @@ export function albumDownloadStates(
       if (!current || group.createdAtMs >= current.createdAtMs) {
         groupByFolder.set(key, {
           createdAtMs: group.createdAtMs,
-          state: {
-            status: downloadStatus(group.status),
-            queuePosition: group.queuePosition,
-          },
+          state: stateForGroup(group),
         });
       }
     }
   }
+
+  return groupByFolder;
+};
+
+export function albumDownloadStateForFolder(
+  username: string,
+  folder: string,
+  transfers: Transfer[],
+): AlbumDownloadState | undefined {
+  return latestStateByFolder(transfers).get(sourceKey(username, folder))?.state;
+}
+
+export function albumDownloadStatesByTitle(
+  transfers: Transfer[],
+): Map<string, AlbumDownloadState> {
+  const states = new Map<string, { createdAtMs: number; state: AlbumDownloadState }>();
+  for (const group of groupTransfers(transfers)) {
+    const key = group.title.trim().toLocaleLowerCase();
+    const current = states.get(key);
+    if (!current || group.createdAtMs >= current.createdAtMs) {
+      states.set(key, { createdAtMs: group.createdAtMs, state: stateForGroup(group) });
+    }
+  }
+  return new Map([...states].map(([key, value]) => [key, value.state]));
+}
+
+export function albumDownloadStates(
+  sources: AlbumSource[],
+  transfers: Transfer[],
+): Map<string, AlbumDownloadState> {
+  const groupByFolder = latestStateByFolder(transfers);
 
   const states = new Map<string, AlbumDownloadState>();
   for (const source of sources) {

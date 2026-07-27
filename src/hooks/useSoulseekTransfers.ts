@@ -184,6 +184,13 @@ export type TransferCompletionNotice = {
   message: string;
 };
 
+export type TransferActivityNotice = {
+  groupId: string;
+  title: string;
+  kind: "queued" | "started" | "failed";
+  message: string;
+};
+
 export function useSoulseekTransfers() {
   const native = isTauri();
   const [snapshot, setSnapshot] = useState<TransferQueueSnapshot>(
@@ -192,8 +199,11 @@ export function useSoulseekTransfers() {
   const [ready, setReady] = useState(!native);
   const [error, setError] = useState<string | null>(null);
   const [completionNotice, setCompletionNotice] = useState<TransferCompletionNotice | null>(null);
+  const [activityNotice, setActivityNotice] = useState<TransferActivityNotice | null>(null);
   const completionState = useRef<Map<string, string>>(new Map());
   const completionReady = useRef(false);
+  const activityState = useRef<Map<string, string>>(new Map());
+  const activityReady = useRef(false);
 
   useEffect(() => {
     if (!native) return;
@@ -263,6 +273,45 @@ export function useSoulseekTransfers() {
     );
     completionReady.current = true;
   }, [native, snapshot.transfers]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const groups = groupTransfers(snapshot.transfers);
+    if (activityReady.current) {
+      const notices: TransferActivityNotice[] = [];
+      for (const group of groups) {
+        const previous = activityState.current.get(group.id);
+        if (group.status === "failed" && previous !== "failed") {
+          notices.push({
+            groupId: group.id,
+            title: group.title,
+            kind: "failed",
+            message: "The release needs attention in Transfers.",
+          });
+        } else if (group.status === "active" && previous !== "active") {
+          notices.push({
+            groupId: group.id,
+            title: group.title,
+            kind: "started",
+            message: "The signal is live and progress is now visible everywhere.",
+          });
+        } else if (!previous && group.status === "queued") {
+          notices.push({
+            groupId: group.id,
+            title: group.title,
+            kind: "queued",
+            message: `Added to release queue #${group.queuePosition ?? 1}.`,
+          });
+        }
+      }
+      const next = notices.find((notice) => notice.kind === "failed")
+        ?? notices.find((notice) => notice.kind === "started")
+        ?? notices[0];
+      if (next) setActivityNotice(next);
+    }
+    activityState.current = new Map(groups.map((group) => [group.id, group.status]));
+    activityReady.current = true;
+  }, [ready, snapshot.transfers]);
 
   useEffect(() => {
     if (native) return;
@@ -870,6 +919,8 @@ export function useSoulseekTransfers() {
       switchReleaseSource,
       completionNotice,
       clearCompletionNotice: () => setCompletionNotice(null),
+      activityNotice,
+      clearActivityNotice: () => setActivityNotice(null),
       clearError: () => setError(null),
     }),
     [
@@ -891,6 +942,7 @@ export function useSoulseekTransfers() {
       retryReleaseIssues,
       switchReleaseSource,
       completionNotice,
+      activityNotice,
       snapshot,
     ],
   );

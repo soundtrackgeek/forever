@@ -25,6 +25,7 @@ type AlbumSourceResultsProps = {
   transfers: Transfer[];
   searching: boolean;
   onQueueAlbumSource: (source: AlbumSource) => Promise<void>;
+  onOpenTransfer: (groupId: string) => void;
   onBrowseUser: (username: string) => void;
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
@@ -143,6 +144,7 @@ export function AlbumSourceResults({
   transfers,
   searching,
   onQueueAlbumSource,
+  onOpenTransfer,
   onBrowseUser,
   personByUsername,
   onOpenPerson,
@@ -268,9 +270,9 @@ export function AlbumSourceResults({
                     <button
                       type="button"
                       className={`album-source-download${queuedState ? ` is-${queuedState.status}` : ""}`}
-                      disabled={!downloadable || preparingSourceId !== null || Boolean(queuedState)}
-                      title={queuedState ? `${buttonLabel}. Manage this album in Transfers.` : downloadable ? "Inspect the folder and download every file" : "This result has no source folder"}
-                      onClick={() => void queueAlbum(source)}
+                      disabled={!downloadable || (preparingSourceId !== null && !queuedState)}
+                      title={queuedState ? `${buttonLabel}. Open this album in Transfers.` : downloadable ? "Inspect the folder and download every file" : "This result has no source folder"}
+                      onClick={() => queuedState ? onOpenTransfer(queuedState.groupId) : void queueAlbum(source)}
                     >
                       {queuedState ? <DownloadStateIcon state={queuedState.status} /> : preparing ? <CircleNotch className="search-spinner" size={16} /> : <DownloadSimple size={16} weight="bold" />}
                       {buttonLabel}

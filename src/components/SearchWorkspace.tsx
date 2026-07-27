@@ -66,6 +66,7 @@ type SearchWorkspaceProps = {
   onSelectResult: (result: SearchResult) => void;
   onQueueDownload: (result: SearchResult) => void;
   onQueueAlbumSource: (source: AlbumSource) => Promise<void>;
+  onOpenTransfer: (groupId: string) => void;
   onBrowseUser: (username: string) => void;
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
@@ -153,6 +154,7 @@ export function SearchWorkspace({
   onSelectResult,
   onQueueDownload,
   onQueueAlbumSource,
+  onOpenTransfer,
   onBrowseUser,
   personByUsername,
   onOpenPerson,
@@ -593,6 +595,7 @@ export function SearchWorkspace({
           transfers={transfers}
           searching={searching}
           onQueueAlbumSource={onQueueAlbumSource}
+          onOpenTransfer={onOpenTransfer}
           onBrowseUser={onBrowseUser}
           personByUsername={personByUsername}
           onOpenPerson={onOpenPerson}

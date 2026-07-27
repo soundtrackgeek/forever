@@ -187,7 +187,7 @@ describe("Forever shell", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Download album" })[0]);
     const downloading = await screen.findByRole(
       "button",
-      { name: "Downloading" },
+      { name: /Downloading · \d+%/ },
       { timeout: 1_500 },
     );
     expect(downloading).toHaveClass("is-downloading");
@@ -205,8 +205,11 @@ describe("Forever shell", () => {
       { timeout: 1_500 },
     );
     expect(queued).toHaveClass("is-queued");
-
-    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
+    expect(queued).toBeEnabled();
+    expect(screen.getByText("Release queued")).toBeInTheDocument();
+    fireEvent.click(queued);
+    expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument();
+    expect(document.querySelector(".release-transfer-card.is-focus-target")).toBeInTheDocument();
     expect(
       screen.getAllByText("Def Leppard - Hysteria (1987)").length,
     ).toBeGreaterThan(0);
@@ -284,14 +287,15 @@ describe("Forever shell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Download best" }));
     const queuedBest = await screen.findByRole("button", { name: "Queued #2" });
-    expect(queuedBest).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Queued.*Adrenalize from rockvault/ })).toBeDisabled();
+    expect(queuedBest).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Queued.*Adrenalize from rockvault/ })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Download best" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Expand transfer activity" }));
-    expect(screen.getByText("Def Leppard - Adrenalize (1992)")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Watch for better" }));
     await waitFor(() => expect(within(adrenalize).getAllByText("Wanted").length).toBeGreaterThan(0));
+    fireEvent.click(queuedBest);
+    expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument();
+    expect(document.querySelector(".release-transfer-card.is-focus-target")).toHaveTextContent("Def Leppard - Adrenalize (1992)");
   });
 
   it("watches missing albums and opens newly available sources without changing Archive", async () => {
@@ -364,7 +368,7 @@ describe("Forever shell", () => {
 
     expect(await within(screen.getByRole("dialog")).findByRole("button", { name: "Queued" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Close Smart Match review" }));
-    expect(within(highAndDry).getByRole("button", { name: "Queued" })).toBeDisabled();
+    expect(within(highAndDry).getByRole("button", { name: /Queued #\d+/ })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("tab", { name: /Fulfilled/ }));
     expect(screen.getByText("Hysteria")).toBeInTheDocument();
@@ -467,9 +471,12 @@ describe("Forever shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download selection" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: /Downloading · \d+%|Queued #\d+/ })).toBeInTheDocument(),
     );
-    expect(screen.getAllByText("audiophile92 selection").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: /audiophile92’s shares/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Downloading · \d+%|Queued #\d+/ }));
+    expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument();
+    expect(document.querySelector(".release-transfer-card.is-focus-target")).toHaveTextContent("audiophile92 selection");
   });
 
   it("searches folders and expands or collapses the share hierarchy", async () => {
@@ -726,16 +733,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.33 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.34 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Queue Lights gives Missing Shelf downloads distinct live icons for Preparing, Downloading, Queued, Paused, Downloaded, and Needs attention states.",
+        "Signal Breadcrumbs carry live Downloading progress, numbered queue position, Paused, Downloaded, and Needs attention states into Album Search, Missing Shelf, Wanted, and Browse Shares.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "The recommended source button and its matching source-row button stay synchronized with the real Transfers queue.",
+        "Clicking any live transfer state opens Transfers, clears hiding filters, expands the exact release, and brings it into focus.",
       ),
     ).toBeInTheDocument();
   });

@@ -5,6 +5,35 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.34] - 2026-07-27
+
+### Added
+
+- **Signal Breadcrumbs** show live Downloading progress, numbered queue
+  position, Paused, Downloaded, and Needs attention states in Album Search,
+  Missing Shelf, Wanted, and Browse Shares.
+- Lightweight clickable notifications now announce when a release is queued,
+  starts downloading, fails, or completes.
+- Transfer state actions and release titles in the bottom shelf open Transfers,
+  expand the exact release, scroll it into view, and briefly highlight it.
+
+### Changed
+
+- Album and share downloads remain in their discovery workspace after queueing;
+  the user chooses when to follow a persistent state breadcrumb into Transfers.
+- Live state is derived from the persisted transfer snapshot, so it follows
+  queue reordering, progress, pause, completion, failure, removal, and restart.
+
+### Fixed
+
+- Wanted and Browse Shares no longer lose useful transfer feedback after their
+  initial handoff, and only the selected listener/folder is marked active.
+- Opening a breadcrumb clears transfer filters and search text that could hide
+  the requested release.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.34` and describe Signal
+  Breadcrumbs.
+
 ## [0.0.33] - 2026-07-27
 
 ### Added

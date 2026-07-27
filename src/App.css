@@ -4154,6 +4154,24 @@ button:disabled {
   color: #bfc1cd;
 }
 
+.transfer-release-link {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  color: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.transfer-release-link:hover strong,
+.transfer-release-link:focus-visible strong {
+  color: #f1e8ff;
+}
+
 .transfer-name small {
   color: #7f8396;
 }
@@ -7398,6 +7416,21 @@ form.settings-panel {
   border-color: #2c3040;
   box-shadow: none;
 }
+
+.shares-download:is(.is-downloading, .is-downloaded) {
+  color: #07160d;
+  background: linear-gradient(180deg, #78d696, #4caf70);
+  border-color: #8ce1a6;
+}
+
+.shares-download.is-queued {
+  color: #f4f7ff;
+  background: linear-gradient(180deg, #5277c9, #38599d);
+  border-color: #6e91df;
+}
+
+.shares-download.is-paused { color: #e7d4ff; background: #4f3d70; border-color: #7a5ca6; }
+.shares-download.is-failed { color: #ffd7d7; background: #6f3440; border-color: #a65865; }
 
 .share-cache-note {
   margin-top: 8px;
@@ -11179,6 +11212,9 @@ form.settings-panel {
 
 .finish-line-toast.is-verified { border-color: #315844; }
 .finish-line-toast.is-attention { border-color: #68454c; }
+.finish-line-toast.is-queued { border-color: #426989; }
+.finish-line-toast.is-started { border-color: #4c6e58; }
+.finish-line-toast.is-failed { border-color: #68454c; }
 
 .finish-line-toast-open {
   display: grid;
@@ -11195,6 +11231,9 @@ form.settings-panel {
 }
 
 .finish-line-toast.is-attention .finish-line-toast-open { color: #df8877; }
+.finish-line-toast.is-queued .finish-line-toast-open { color: #8dbce5; }
+.finish-line-toast.is-started .finish-line-toast-open { color: #74d18e; }
+.finish-line-toast.is-failed .finish-line-toast-open { color: #df8877; }
 .finish-line-toast-open > span:last-child { display: grid; min-width: 0; gap: 2px; }
 .finish-line-toast-open small { color: var(--amber); font-size: 7px; letter-spacing: 0.1em; text-transform: uppercase; }
 .finish-line-toast-open strong { overflow: hidden; color: #eeecf2; font-size: 11px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
@@ -11220,6 +11259,66 @@ form.settings-panel {
 
 @media (prefers-reduced-motion: reduce) {
   .finish-line-toast { animation: none; }
+}
+
+/* v0.0.34 — Signal Breadcrumbs */
+.album-source-actions > .album-source-download.is-downloading {
+  color: #07160d;
+  background: linear-gradient(180deg, #78d696, #4caf70);
+  border-color: #8ce1a6;
+}
+
+.album-source-actions > .album-source-download.is-queued {
+  color: #f4f7ff;
+  background: linear-gradient(180deg, #5277c9, #38599d);
+  border-color: #6e91df;
+}
+
+.album-source-actions > .album-source-download.is-downloaded {
+  color: #9be8b4;
+  background: rgba(52, 135, 81, 0.2);
+  border-color: #3e9d61;
+}
+
+.album-source-actions > .album-source-download.is-paused {
+  color: #d9c4fa;
+  background: rgba(116, 82, 168, 0.22);
+  border-color: #6d5494;
+}
+
+.album-source-actions > .album-source-download.is-failed {
+  color: #f3a4aa;
+  background: rgba(157, 51, 62, 0.18);
+  border-color: #8e404b;
+}
+
+.wanted-actions .wanted-download-best.is-downloading,
+.wanted-actions .wanted-download-best.is-downloaded {
+  color: #90d69a;
+  background: rgba(68, 145, 79, 0.1);
+  border-color: rgba(91, 174, 104, 0.35);
+}
+
+.wanted-actions .wanted-download-best.is-paused { color: #d9c4fa; border-color: #6d5494; }
+.wanted-actions .wanted-download-best.is-failed { color: #f3a4aa; border-color: #8e404b; }
+
+.release-transfer-card.is-focus-target {
+  border-color: #a784e7;
+  box-shadow:
+    inset 2px 0 0 #c6a5ff,
+    0 0 0 1px rgba(174, 135, 236, 0.22),
+    0 0 26px rgba(126, 86, 181, 0.2);
+  outline: none;
+  animation: transfer-focus-pulse 900ms ease-out;
+}
+
+@keyframes transfer-focus-pulse {
+  from { transform: translateY(2px); filter: brightness(1.24); }
+  to { transform: translateY(0); filter: brightness(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .release-transfer-card.is-focus-target { animation: none; }
 }
 
 /* v0.0.31 — Open Frequency */

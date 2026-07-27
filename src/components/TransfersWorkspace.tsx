@@ -59,6 +59,7 @@ type TransfersWorkspaceProps = {
   onCancelUpload: (id: string) => void;
   onClearFinishedUploads: () => void;
   onDismissUploadError: () => void;
+  focusTarget?: { groupId: string; requestId: number } | null;
 };
 
 const formatBytes = (bytes: number) => {
@@ -129,6 +130,7 @@ export function TransfersWorkspace({
   onCancelUpload,
   onClearFinishedUploads,
   onDismissUploadError,
+  focusTarget = null,
 }: TransfersWorkspaceProps) {
   const [direction, setDirection] = useState<"downloads" | "uploads">("downloads");
   const [clock, setClock] = useState(0);
@@ -141,6 +143,7 @@ export function TransfersWorkspace({
   const [query, setQuery] = useState("");
   const [draggedReleaseId, setDraggedReleaseId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<QueueDropTarget | null>(null);
+  const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(null);
   const mouseDrag = useRef<{ releaseId: string } | null>(null);
   const [expansion, setExpansion] = useState<{
     touched: boolean;
@@ -183,6 +186,29 @@ export function TransfersWorkspace({
           transfer.title.toLocaleLowerCase().includes(normalizedQuery),
         )),
   );
+
+  useEffect(() => {
+    if (!focusTarget) return;
+    setDirection("downloads");
+    setFilter("all");
+    setQuery("");
+    setHighlightedGroupId(focusTarget.groupId);
+    setExpansion((current) => ({
+      touched: true,
+      ids: new Set(current.ids).add(focusTarget.groupId),
+    }));
+    const frame = window.requestAnimationFrame(() => {
+      const card = [...document.querySelectorAll<HTMLElement>("[data-transfer-group-id]")]
+        .find((element) => element.dataset.transferGroupId === focusTarget.groupId);
+      card?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      card?.focus({ preventScroll: true });
+    });
+    const highlightTimer = window.setTimeout(() => setHighlightedGroupId(null), 1_800);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(highlightTimer);
+    };
+  }, [focusTarget]);
 
   const invokeGroup = (
     group: TransferGroup,
@@ -446,8 +472,10 @@ export function TransfersWorkspace({
           const knownArt = group.title.toLocaleLowerCase().includes("night geometry");
           return (
             <article
-              className={`release-transfer-card is-${group.status} health-${health.state}${draggedReleaseId === group.releaseId ? " is-reordering" : ""}${dropTarget?.id === group.id ? ` is-drop-${dropTarget.placement}` : ""}`}
+              className={`release-transfer-card is-${group.status} health-${health.state}${highlightedGroupId === group.id ? " is-focus-target" : ""}${draggedReleaseId === group.releaseId ? " is-reordering" : ""}${dropTarget?.id === group.id ? ` is-drop-${dropTarget.placement}` : ""}`}
+              data-transfer-group-id={group.id}
               data-queue-group-id={group.status === "queued" && group.releaseId ? group.id : undefined}
+              tabIndex={-1}
               key={group.id}
             >
               <div className="release-transfer-summary">

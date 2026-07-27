@@ -46,6 +46,7 @@ import type {
   WantedAlbum,
 } from "./types";
 import { groupAlbumSources } from "./utils/albumSources";
+import { albumDownloadStatesByTitle, type AlbumDownloadState } from "./utils/albumDownloadState";
 
 const emptyAlbumCatalog: AlbumReleaseGroup[] = [];
 
@@ -112,6 +113,7 @@ function PlaceholderView({
 function App() {
   const [activeView, setActiveView] = useState("search");
   const [transferShelfExpanded, setTransferShelfExpanded] = useState(false);
+  const [transferFocus, setTransferFocus] = useState<{ groupId: string; requestId: number } | null>(null);
   const [searchMode, setSearchMode] = useState<SearchMode>("files");
   const [albumContext, setAlbumContext] = useState<AlbumSearchContext | null>(null);
   const [albumResultView, setAlbumResultView] = useState<AlbumResultView>("files");
@@ -188,21 +190,20 @@ function App() {
     });
   }, [fulfillmentRequests, fulfillmentSignature, wanted]);
 
-  const queuedWantedAlbumIds = useMemo(() => {
-    const releaseTitles = new Set(
-      transfers.snapshot.transfers
-        .map((transfer) => transfer.releaseTitle)
-        .filter((title): title is string => Boolean(title)),
-    );
-    return new Set(wanted.snapshot.albums
-      .filter((album) => releaseTitles.has(albumDownloadTitle({
+  const wantedDownloadStateByAlbumId = useMemo(() => {
+    const stateByTitle = albumDownloadStatesByTitle(transfers.snapshot.transfers);
+    const states = new Map<string, AlbumDownloadState>();
+    for (const album of wanted.snapshot.albums) {
+      const state = stateByTitle.get(albumDownloadTitle({
         albumId: album.albumId,
         artist: album.artist,
         title: album.title,
         coverArtUrl: album.coverArtUrl ?? "",
         firstReleaseDate: album.firstReleaseDate,
-      }, album.title)))
-      .map((album) => album.albumId));
+      }, album.title).toLocaleLowerCase());
+      if (state) states.set(album.albumId, state);
+    }
+    return states;
   }, [transfers.snapshot.transfers, wanted.snapshot.albums]);
 
   const queueDownload = (result: SearchResult) => {
@@ -326,6 +327,17 @@ function App() {
     setActiveView(view);
   };
 
+  const openTransfer = (groupId: string) => {
+    setTransferFocus({ groupId, requestId: Date.now() });
+    navigate("transfers");
+  };
+
+  useEffect(() => {
+    if (!transfers.activityNotice) return;
+    const timer = window.setTimeout(transfers.clearActivityNotice, 6_000);
+    return () => window.clearTimeout(timer);
+  }, [transfers.activityNotice]);
+
   const browseUser = (username: string) => {
     setSharesUsername(username);
     setActiveView("browse");
@@ -410,6 +422,7 @@ function App() {
               }}
               onQueueDownload={queueDownload}
               onQueueAlbumSource={queueAlbumSource}
+              onOpenTransfer={openTransfer}
               onBrowseUser={browseUser}
               personByUsername={people.personByUsername}
               onOpenPerson={openPerson}
@@ -508,7 +521,8 @@ function App() {
             onCheckWanted={wanted.check}
             onSetWantedPaused={wanted.setPaused}
             onRemoveWanted={wanted.remove}
-            queuedAlbumIds={queuedWantedAlbumIds}
+            downloadStateByAlbumId={wantedDownloadStateByAlbumId}
+            onOpenTransfer={openTransfer}
             onReviewBest={(album) => void inspectSmartMatch(album)}
             onEditPreferences={setPreferencesAlbum}
             onOpenWanted={(album) => openAlbumSources({
@@ -553,6 +567,7 @@ function App() {
                   coverArtUrl: album.coverArtUrl,
                   firstReleaseDate: album.firstReleaseDate,
                 }, source, sources)}
+                onOpenTransfer={openTransfer}
                 onDismissError={() => {
                   missingShelf.clearError();
                   radar.clearError();
@@ -674,17 +689,16 @@ function App() {
               onSearch={(shareQuery, extension) =>
                 void shares.search(sharesUsername, shareQuery, extension).catch(() => undefined)
               }
+              transfers={transfers.snapshot.transfers}
               onDownload={(title, remoteFolder, files) => {
-                void transfers
-                  .enqueueRelease({
-                    title,
-                    username: sharesUsername,
-                    remoteFolder,
-                    files,
-                  })
-                  .then(() => navigate("transfers"))
-                  .catch(() => undefined);
+                return transfers.enqueueRelease({
+                  title,
+                  username: sharesUsername,
+                  remoteFolder,
+                  files,
+                }).then(() => undefined);
               }}
+              onOpenTransfer={openTransfer}
             />
           ) : (
             <BrowseSharesHome
@@ -719,6 +733,7 @@ function App() {
             onCancelUpload={(id) => void sharing.cancelUpload(id).catch(() => undefined)}
             onClearFinishedUploads={() => void sharing.clearFinishedUploads().catch(() => undefined)}
             onDismissUploadError={sharing.clearError}
+            focusTarget={transferFocus}
           />
         ) : activeView === "settings" && connection.profile ? (
           <ConnectionSettings
@@ -777,6 +792,7 @@ function App() {
         onCancelRelease={(id) => void transfers.cancelRelease(id).catch(() => undefined)}
         onRevealRelease={(id) => void transfers.revealRelease(id).catch(() => undefined)}
         onViewAll={() => navigate("transfers")}
+        onOpenTransfer={openTransfer}
         onDismissError={transfers.clearError}
         personByUsername={people.personByUsername}
         onOpenPerson={openPerson}
@@ -785,11 +801,21 @@ function App() {
 
       {transfers.completionNotice ? (
         <aside className={`finish-line-toast is-${transfers.completionNotice.kind}`} role="status" aria-live="polite">
-          <button type="button" className="finish-line-toast-open" onClick={() => navigate("transfers")}>
+          <button type="button" className="finish-line-toast-open" onClick={() => openTransfer(transfers.completionNotice!.groupId)}>
             <span>{transfers.completionNotice.kind === "verified" ? <CheckCircle size={19} weight="fill" /> : <WarningCircle size={19} weight="fill" />}</span>
             <span><small>{transfers.completionNotice.kind === "verified" ? "Download verified" : "Completed with issues"}</small><strong>{transfers.completionNotice.title}</strong><p>{transfers.completionNotice.message}</p></span>
           </button>
           <button type="button" className="finish-line-toast-dismiss" aria-label="Dismiss download notification" onClick={transfers.clearCompletionNotice}><X size={14} /></button>
+        </aside>
+      ) : null}
+
+      {transfers.activityNotice ? (
+        <aside className={`finish-line-toast transfer-activity-toast is-${transfers.activityNotice.kind}`} role="status" aria-live="polite">
+          <button type="button" className="finish-line-toast-open" onClick={() => openTransfer(transfers.activityNotice!.groupId)}>
+            <span>{transfers.activityNotice.kind === "failed" ? <WarningCircle size={19} weight="fill" /> : transfers.activityNotice.kind === "started" ? <Radio size={19} weight="fill" /> : <DownloadSimple size={19} weight="bold" />}</span>
+            <span><small>{transfers.activityNotice.kind === "failed" ? "Signal needs attention" : transfers.activityNotice.kind === "started" ? "Download started" : "Release queued"}</small><strong>{transfers.activityNotice.title}</strong><p>{transfers.activityNotice.message}</p></span>
+          </button>
+          <button type="button" className="finish-line-toast-dismiss" aria-label="Dismiss transfer update" onClick={transfers.clearActivityNotice}><X size={14} /></button>
         </aside>
       ) : null}
 
@@ -810,7 +836,7 @@ function App() {
           inspection={reviewInspection}
           loading={reviewLoading}
           error={reviewError}
-          queued={queuedWantedAlbumIds.has(reviewAlbum.albumId)}
+          queued={wantedDownloadStateByAlbumId.has(reviewAlbum.albumId)}
           onConfirm={queueReviewedSmartMatch}
           onRetry={() => void inspectSmartMatch(reviewAlbum)}
           onCompare={() => {

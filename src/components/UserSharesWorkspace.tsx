@@ -27,8 +27,10 @@ import type {
   ShareDirectorySummary,
   ShareFolderSnapshot,
   ShareSearchSnapshot,
+  Transfer,
   UserSharesOverview,
 } from "../types";
+import { albumDownloadLabel, albumDownloadStateForFolder } from "../utils/albumDownloadState";
 import { CountryFlag } from "./CountryFlag";
 
 type ShareTreeNode = {
@@ -146,7 +148,9 @@ type UserSharesWorkspaceProps = {
   onRefresh: () => void;
   onOpenFolder: (directory: string) => void;
   onSearch: (query: string, extension: string | null) => void;
-  onDownload: (title: string, remoteFolder: string, files: FolderFile[]) => void;
+  transfers: Transfer[];
+  onDownload: (title: string, remoteFolder: string, files: FolderFile[]) => Promise<void>;
+  onOpenTransfer: (groupId: string) => void;
 };
 
 const formatBytes = (bytes: number) => {
@@ -203,7 +207,9 @@ export function UserSharesWorkspace({
   onRefresh,
   onOpenFolder,
   onSearch,
+  transfers,
   onDownload,
+  onOpenTransfer,
 }: UserSharesWorkspaceProps) {
   const [query, setQuery] = useState("");
   const [extension, setExtension] = useState("all");
@@ -211,6 +217,7 @@ export function UserSharesWorkspace({
   const [selection, setSelection] = useState<Map<string, ShareFile>>(new Map());
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
+  const [preparing, setPreparing] = useState(false);
 
   const shareTree = useMemo(
     () => buildShareTree(overview?.directories ?? []),
@@ -248,6 +255,34 @@ export function UserSharesWorkspace({
   const currentAllSelected =
     currentPublicFiles.length > 0 &&
     currentPublicFiles.every((file) => selection.has(file.remoteFilename));
+  const downloadState = useMemo(
+    () => folder ? albumDownloadStateForFolder(username, folder.directory, transfers) : undefined,
+    [folder, transfers, username],
+  );
+  const downloadLabel = downloadState
+    ? albumDownloadLabel(downloadState)
+    : preparing
+      ? "Preparing…"
+      : "Download selection";
+
+  const downloadSelection = async () => {
+    if (downloadState) {
+      onOpenTransfer(downloadState.groupId);
+      return;
+    }
+    setPreparing(true);
+    try {
+      await onDownload(
+        selectedFiles.length === currentPublicFiles.length && folder
+          ? titleFromPath(folder.directory)
+          : `${username} selection`,
+        folder?.directory ?? `${username} shares`,
+        selectedFiles,
+      );
+    } finally {
+      setPreparing(false);
+    }
+  };
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -493,17 +528,12 @@ export function UserSharesWorkspace({
           </section>
           <button
             type="button"
-            className="shares-download"
-            disabled={!selectedFiles.length}
-            onClick={() => onDownload(
-              selectedFiles.length === currentPublicFiles.length && folder
-                ? titleFromPath(folder.directory)
-                : `${username} selection`,
-              folder?.directory ?? `${username} shares`,
-              selectedFiles,
-            )}
+            className={`shares-download${downloadState ? ` is-${downloadState.status}` : ""}`}
+            disabled={(!selectedFiles.length && !downloadState) || preparing}
+            onClick={() => void downloadSelection()}
+            title={downloadState ? `${downloadLabel}. Open this release in Transfers.` : undefined}
           >
-            <DownloadSimple size={18} weight="bold" /> Download selection
+            {preparing ? <SpinnerGap className="is-spinning" size={18} /> : <DownloadSimple size={18} weight="bold" />} {downloadLabel}
           </button>
           <small className="share-cache-note">Share lists stay in memory for this session only.</small>
         </aside>

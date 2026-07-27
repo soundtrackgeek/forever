@@ -30,19 +30,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.32",
-  version: "0.0.33",
-  body: `## What’s new in Forever 0.0.33
+  currentVersion: "0.0.33",
+  version: "0.0.34",
+  body: `## What’s new in Forever 0.0.34
 
 ### Added
 
-- Queue Lights gives Missing Shelf downloads distinct live icons for Preparing, Downloading, Queued, Paused, Downloaded, and Needs attention states.
-- Download best now shows the actual queue position when another release is already active.
+- Signal Breadcrumbs carry live Downloading progress, numbered queue position, Paused, Downloaded, and Needs attention states into Album Search, Missing Shelf, Wanted, and Browse Shares.
+- Queue, start, failure, and completion moments now surface as lightweight clickable notifications.
 
 ### Changed
 
-- The recommended source button and its matching source-row button stay synchronized with the real Transfers queue.
-- Missing Shelf no longer returns to an unchanged yellow download icon after successfully queueing an album.`,
+- Clicking any live transfer state opens Transfers, clears hiding filters, expands the exact release, and brings it into focus.
+- The bottom transfer shelf release title now opens that same exact release instead of only opening the general queue.`,
   date: "2026-07-27",
 };
 

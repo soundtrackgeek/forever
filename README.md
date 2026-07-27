@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.33` adds Queue Lights: Missing Shelf
-> download controls now show their live Preparing, Downloading, Queued, Paused,
-> Downloaded, or Needs attention state.
+> **Status:** pre-alpha. Version `0.0.34` adds Signal Breadcrumbs: Album Search,
+> Missing Shelf, Wanted, and Browse Shares now keep live, clickable transfer
+> progress without pulling you away from discovery.
 
-If `0.0.16` is installed, download and run the latest `0.0.33` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.34` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -58,6 +58,10 @@ configuration and transfers.
 - Direct **Download best**, per-source download, rescan, and **Watch for better**
   actions inside Missing Shelf, with live transfer-state icons and queue position
   feedback after an album is handed off
+- Shared **Signal Breadcrumbs** across Album Search, Missing Shelf, Wanted, and
+  Browse Shares show numbered queue position, live percentage, pause,
+  completion, and failure from the persisted transfer snapshot; selecting one
+  opens and highlights the exact release in Transfers
 - Batched **Owned** and **Don't own** markers across MusicBrainz discographies
   and Soulseek album-source reports, matched from the Archive's normalized
   artist, album, release-year, and track-count metadata
@@ -128,6 +132,9 @@ configuration and transfers.
   Completed, and Needs attention filters, transfer search, aggregate and
   per-file progress, whole-album ETA, release-level controls, Clear history,
   and in-app plus native completion notifications
+- Clickable queue/start/failure/completion notifications and transfer-shelf
+  release titles provide a direct route to the expanded release without
+  interrupting discovery when a download is first queued
 - A persistent **Signal Order** for queued albums with drag-and-drop,
   keyboard-friendly Move up/Move down controls, **Download next**, exact
   duplicate-source protection, and a queue-wide release/file/size/ETA summary,

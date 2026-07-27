@@ -22,6 +22,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import type { ArchiveStatus, WantedAlbum, WantedSnapshot } from "../types";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
+import { albumDownloadLabel, type AlbumDownloadState } from "../utils/albumDownloadState";
 
 type ArchiveWorkspaceProps = {
   status: ArchiveStatus | null;
@@ -39,7 +40,8 @@ type ArchiveWorkspaceProps = {
   onOpenWanted: (album: WantedAlbum) => void;
   onReviewBest: (album: WantedAlbum) => void;
   onEditPreferences: (album: WantedAlbum) => void;
-  queuedAlbumIds: ReadonlySet<string>;
+  downloadStateByAlbumId: ReadonlyMap<string, AlbumDownloadState>;
+  onOpenTransfer: (groupId: string) => void;
   onDismissWantedError: () => void;
   missingShelf: ReactNode;
   onOpenMissing: () => void;
@@ -89,6 +91,14 @@ function WantedArtwork({ album }: { album: WantedAlbum }) {
   );
 }
 
+function WantedDownloadIcon({ state }: { state: AlbumDownloadState }) {
+  if (state.status === "downloading") return <CircleNotch className="search-spinner" size={16} />;
+  if (state.status === "paused") return <Pause size={16} weight="fill" />;
+  if (state.status === "failed") return <WarningCircle size={16} weight="fill" />;
+  if (state.status === "downloaded") return <CheckCircle size={16} weight="fill" />;
+  return <DownloadSimple size={16} weight="bold" />;
+}
+
 export function ArchiveWorkspace({
   status,
   loading,
@@ -105,7 +115,8 @@ export function ArchiveWorkspace({
   onOpenWanted,
   onReviewBest,
   onEditPreferences,
-  queuedAlbumIds,
+  downloadStateByAlbumId,
+  onOpenTransfer,
   onDismissWantedError,
   missingShelf,
   onOpenMissing,
@@ -257,7 +268,8 @@ export function ArchiveWorkspace({
             ) : visibleWanted.map((album) => {
               const checking = wanted.activeAlbumId === album.albumId;
               const available = album.matchingSourceCount > 0 && Boolean(album.bestSource);
-              const queued = queuedAlbumIds.has(album.albumId);
+              const downloadState = downloadStateByAlbumId.get(album.albumId);
+              const downloadLabel = downloadState ? albumDownloadLabel(downloadState) : "Download best";
               return (
                 <article className={`wanted-row ${album.fulfilled ? "is-fulfilled" : available ? "is-available" : "is-waiting"} ${album.paused ? "is-paused" : ""}`} key={album.albumId}>
                   <WantedArtwork album={album} />
@@ -284,7 +296,7 @@ export function ArchiveWorkspace({
                     {!album.fulfilled && album.newSourceCount > 0 ? <b>+{album.newSourceCount} new match{album.newSourceCount === 1 ? "" : "es"}</b> : null}
                   </span>
                   <span className="wanted-actions">
-                    {available && !album.fulfilled ? <button type="button" className={`wanted-download-best ${queued ? "is-queued" : ""}`} disabled={!online || queued} onClick={() => onReviewBest(album)} title={online ? "Review and queue Forever's recommended source" : "Reconnect before downloading"}>{queued ? <CheckCircle size={16} weight="fill" /> : <DownloadSimple size={16} weight="bold" />} {queued ? "Queued" : "Download best"}</button> : null}
+                    {available && !album.fulfilled ? <button type="button" className={`wanted-download-best${downloadState ? ` is-${downloadState.status}` : ""}`} disabled={!online && !downloadState} onClick={() => downloadState ? onOpenTransfer(downloadState.groupId) : onReviewBest(album)} title={downloadState ? `${downloadLabel}. Open this album in Transfers.` : online ? "Review and queue Forever's recommended source" : "Reconnect before downloading"}>{downloadState ? <WantedDownloadIcon state={downloadState} /> : <DownloadSimple size={16} weight="bold" />} {downloadLabel}</button> : null}
                     {!album.fulfilled && album.sourceCount > 0 ? <button type="button" className="wanted-open" disabled={!online} onClick={() => onOpenWanted(album)} title={online ? "Run a fresh search and compare album sources" : "Reconnect before comparing sources"}><Eye size={16} /> Compare</button> : null}
                     {!album.fulfilled ? <button type="button" aria-label={`Edit ${album.title} Smart Match profile`} onClick={() => onEditPreferences(album)} title="Edit Smart Match profile"><SlidersHorizontal size={15} /></button> : null}
                     {!album.fulfilled ? <button type="button" aria-label={`Check ${album.title} now`} disabled={!online || checking || Boolean(wanted.activeAlbumId) || album.paused} onClick={() => void onCheckWanted(album.albumId).catch(() => undefined)} title={!online ? "Reconnect before checking" : "Check this album now"}><ArrowsClockwise size={15} /></button> : null}

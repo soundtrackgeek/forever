@@ -28,6 +28,7 @@ type TransferShelfProps = {
   onCancelRelease: (id: string) => void;
   onRevealRelease: (id: string) => void;
   onViewAll: () => void;
+  onOpenTransfer: (groupId: string) => void;
   onDismissError: () => void;
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
@@ -75,6 +76,7 @@ export function TransferShelf({
   onCancelRelease,
   onRevealRelease,
   onViewAll,
+  onOpenTransfer,
   onDismissError,
   personByUsername,
   onOpenPerson,
@@ -158,7 +160,7 @@ export function TransferShelf({
             return (
               <article className={`transfer-row is-${group.status}`} key={group.id}>
                 <span className="transfer-name">
-                  <strong>{group.title}</strong>
+                  <button type="button" className="transfer-release-link" onClick={() => onOpenTransfer(group.id)} title="Open this release in Transfers"><strong>{group.title}</strong></button>
                   <small>
                     <button
                       type="button"
