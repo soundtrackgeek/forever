@@ -831,16 +831,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.40 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.41 is ready." }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Transfers rechecks every completed release when the workspace opens, so missing or moved files cannot keep a stale Verified badge.",
+        "Windows now places a small gold update badge over Forever’s taskbar icon as soon as a new release is found.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Finish Line shows when its structural file check last ran.",
+        "The taskbar badge remains visible when the update toast is dismissed, then clears when downloading begins or Forever is current.",
       ),
     ).toBeInTheDocument();
   });

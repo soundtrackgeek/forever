@@ -51,7 +51,15 @@ export function AppSidebar({
       ? "Checking for updates"
       : updateStatus === "current"
         ? "Forever is up to date"
-        : "Check for updates";
+        : updateStatus === "available"
+          ? "Update available"
+          : updateStatus === "downloading"
+            ? "Downloading update"
+            : updateStatus === "ready"
+              ? "Update ready"
+              : updateStatus === "error"
+                ? "Update check failed"
+                : "Check for updates";
   const connectionLabel =
     connectionState === "online"
       ? "Online"

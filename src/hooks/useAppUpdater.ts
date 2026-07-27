@@ -2,6 +2,10 @@ import { isTauri } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  applyUpdateTaskbarBadge,
+  type TaskbarBadgeImage,
+} from "../utils/updateTaskbarBadge";
 
 export type UpdateStatus =
   | "idle"
@@ -30,19 +34,17 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.39",
-  version: "0.0.40",
-  body: `## What’s new in Forever 0.0.40
+  currentVersion: "0.0.40",
+  version: "0.0.41",
+  body: `## What’s new in Forever 0.0.41
 
-### Fixed
+### Added
 
-- Transfers rechecks every completed release when the workspace opens, so missing or moved files cannot keep a stale Verified badge.
-- Reveal verifies a completed release immediately before opening its folder.
+- Windows now places a small gold update badge over Forever’s taskbar icon as soon as a new release is found.
 
 ### Changed
 
-- Finish Line shows when its structural file check last ran.
-- When Music Library owns an album and all downloaded audio has left Forever, remaining lyrics, artwork, and metadata are treated as a safely Filed away release rather than partial loss.`,
+- The taskbar badge remains visible when the update toast is dismissed, then clears when downloading begins or Forever is current.`,
   date: "2026-07-27",
 };
 
@@ -83,6 +85,39 @@ export function useAppUpdater() {
   const checkInFlightRef = useRef(false);
   const installInProgressRef = useRef(false);
 
+  useEffect(() => {
+    if (!isTauri() || !window.navigator.userAgent.includes("Windows")) return;
+
+    let active = true;
+    let badgeImage: TaskbarBadgeImage | null = null;
+
+    void Promise.all([
+      import("@tauri-apps/api/image"),
+      import("@tauri-apps/api/window"),
+    ])
+      .then(async ([{ Image }, { getCurrentWindow }]) => {
+        const appWindow = getCurrentWindow();
+        const image = await applyUpdateTaskbarBadge(status === "available", {
+          createImage: (rgba, width, height) => Image.new(rgba, width, height),
+          setOverlayIcon: (icon) => appWindow.setOverlayIcon(icon),
+        });
+        if (!image) return;
+        if (!active) {
+          await image.close();
+          return;
+        }
+        badgeImage = image;
+      })
+      .catch(() => {
+        // A taskbar badge is a quiet enhancement and must never block updates.
+      });
+
+    return () => {
+      active = false;
+      if (badgeImage) void badgeImage.close();
+    };
+  }, [status]);
+
   const checkForUpdates = useCallback(async (manual = false) => {
     if (checkInFlightRef.current || installInProgressRef.current) return;
     checkInFlightRef.current = true;
@@ -91,19 +126,19 @@ export function useAppUpdater() {
     setIsToastDismissed(false);
 
     try {
-      if (!isTauri()) {
-        if (
-          import.meta.env.DEV &&
-          new URLSearchParams(window.location.search).get("update") ===
-            "available"
-        ) {
-          await wait(350);
-          setDetails(PREVIEW_UPDATE);
-          setStatus("available");
-          if (manual) setIsModalOpen(true);
-          return;
-        }
+      const previewAvailable =
+        import.meta.env.DEV &&
+        (new URLSearchParams(window.location.search).get("update") ===
+          "available" || import.meta.env.VITE_FORCE_UPDATE_AVAILABLE === "1");
+      if (previewAvailable) {
+        await wait(350);
+        setDetails(PREVIEW_UPDATE);
+        setStatus("available");
+        if (manual) setIsModalOpen(true);
+        return;
+      }
 
+      if (!isTauri()) {
         await wait(250);
         setStatus("current");
         if (manual) {

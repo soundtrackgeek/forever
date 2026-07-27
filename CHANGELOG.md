@@ -5,6 +5,24 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.41] - 2026-07-27
+
+### Added
+
+- Windows displays a compact gold update overlay on Forever's taskbar icon as
+  soon as an automatic or manual update check finds a new release.
+- The overlay is rendered from native RGBA image data, avoiding another bundled
+  decoder or external badge asset.
+
+### Changed
+
+- Dismissing the in-app update toast no longer removes the persistent taskbar
+  reminder. The badge clears when downloading starts or Forever is current.
+- The sidebar update control now announces available, downloading, ready, and
+  failed states instead of falling back to **Check for updates**.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.41`.
+
 ## [0.0.40] - 2026-07-27
 
 ### Changed

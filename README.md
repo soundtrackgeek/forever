@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.40` keeps Finish Line honest: completed
-> releases are rechecked when Transfers opens and before Reveal, verification
-> shows its age, and Archive-owned audio can be recognized as safely filed away.
+> **Status:** pre-alpha. Version `0.0.41` adds a native Windows taskbar overlay
+> when an update is waiting, so a new Forever release stays visible even after
+> its in-app toast has been dismissed.
 
-If `0.0.16` is installed, download and run the latest `0.0.40` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.41` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -193,6 +193,8 @@ configuration and transfers.
 - In-app update checks at startup and every five minutes by default, with a
   persistent cadence setting, toast, release modal, progress, verification,
   changelog-backed release highlights, and restart flow
+- Native Windows taskbar update badge that stays visible while a release is
+  available and clears when downloading begins or Forever is current
 - GitHub CI for linting, typechecking, frontend tests, Rust formatting, Clippy,
   and Rust tests
 - Automatic GitHub Releases containing NSIS `.exe` and WiX `.msi` installers

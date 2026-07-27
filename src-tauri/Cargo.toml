@@ -1,6 +1,6 @@
 [package]
 name = "forever"
-version = "0.0.40"
+version = "0.0.41"
 description = "A polished, modern desktop client for the Soulseek network."
 authors = ["soundtrackgeek"]
 edition = "2021"
