@@ -11,20 +11,23 @@ import {
   Pause,
   Play,
   SlidersHorizontal,
+  ShieldCheck,
+  Timer,
   UploadSimple,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { useMemo, useRef, useState, type MouseEvent } from "react";
-import type { PersonProfile, Transfer, Upload } from "../types";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import type { PersonProfile, ReleaseAlternativeSource, Transfer, Upload } from "../types";
 import {
   groupTransfers,
   summarizeTransferGroups,
   type TransferGroup,
 } from "../utils/transfers";
+import { releaseHealth } from "../utils/finishLine";
 import { CountryFlag } from "./CountryFlag";
 
-type Filter = "all" | "active" | "queued" | "completed" | "failed";
+type Filter = "all" | "active" | "queued" | "completed" | "attention";
 
 type QueueDropTarget = {
   id: string;
@@ -46,6 +49,9 @@ type TransfersWorkspaceProps = {
   onRevealRelease: (id: string) => void;
   onReorderRelease: (id: string, beforeTransferId: string | null) => void;
   onClearCompleted: () => void;
+  onVerifyRelease: (id: string) => void;
+  onRetryReleaseIssues: (id: string) => void;
+  onSwitchReleaseSource: (id: string, source: ReleaseAlternativeSource) => void;
   onDismissError: () => void;
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
@@ -73,6 +79,8 @@ const formatEta = (seconds: number | null) => {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 };
 
+const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-1)[0] ?? path;
+
 const transferStatus = (transfer: Transfer) => {
   switch (transfer.status) {
     case "requesting": return "Contacting";
@@ -80,6 +88,7 @@ const transferStatus = (transfer: Transfer) => {
     case "connecting": return "Connecting";
     case "downloading": return "Downloading";
     case "queued": return "Queued";
+    case "retrying": return `Auto retry ${transfer.retryCount ?? 1} of 3`;
     case "paused": return "Paused";
     case "completed": return "Completed";
     case "failed": return "Failed";
@@ -87,8 +96,11 @@ const transferStatus = (transfer: Transfer) => {
 };
 
 const isVisibleInFilter = (group: TransferGroup, filter: Filter) => {
+  const health = releaseHealth(group);
   if (filter === "all") return true;
-  if (filter === "active") return group.status === "active" || group.status === "paused";
+  if (filter === "active") return group.status === "active" || group.status === "paused" || health.state === "recovering";
+  if (filter === "attention") return health.state === "attention";
+  if (filter === "queued") return group.status === "queued" && health.state !== "recovering";
   return group.status === filter;
 };
 
@@ -107,6 +119,9 @@ export function TransfersWorkspace({
   onRevealRelease,
   onReorderRelease,
   onClearCompleted,
+  onVerifyRelease,
+  onRetryReleaseIssues,
+  onSwitchReleaseSource,
   onDismissError,
   personByUsername,
   onOpenPerson,
@@ -115,6 +130,11 @@ export function TransfersWorkspace({
   onDismissUploadError,
 }: TransfersWorkspaceProps) {
   const [direction, setDirection] = useState<"downloads" | "uploads">("downloads");
+  const [clock, setClock] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const groups = useMemo(() => groupTransfers(transfers), [transfers]);
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -126,7 +146,8 @@ export function TransfersWorkspace({
     ids: Set<string>;
   }>({ touched: false, ids: new Set() });
   const defaultOpenId =
-    groups.find((group) => group.status === "active")?.id ?? groups[0]?.id;
+    groups.find((group) => group.status === "active")?.id ??
+    groups.find((group) => releaseHealth(group).state === "attention")?.id ?? groups[0]?.id;
   const queueSummary = useMemo(() => summarizeTransferGroups(groups), [groups]);
   const queuedGroups = useMemo(
     () => groups.filter((group) => group.status === "queued" && group.releaseId),
@@ -139,10 +160,15 @@ export function TransfersWorkspace({
 
   const counts = {
     all: groups.length,
-    active: groups.filter((group) => group.status === "active" || group.status === "paused").length,
-    queued: groups.filter((group) => group.status === "queued").length,
+    active: groups.filter((group) => ["active", "paused"].includes(group.status) || releaseHealth(group).state === "recovering").length,
+    queued: groups.filter((group) => group.status === "queued" && releaseHealth(group).state !== "recovering").length,
     completed: groups.filter((group) => group.status === "completed").length,
-    failed: groups.filter((group) => group.status === "failed").length,
+    attention: groups.filter((group) => releaseHealth(group).state === "attention").length,
+  };
+  const finishLineSummary = {
+    verified: groups.filter((group) => releaseHealth(group).state === "verified").length,
+    recovering: groups.filter((group) => releaseHealth(group).state === "recovering").length,
+    attention: groups.filter((group) => releaseHealth(group).state === "attention").length,
   };
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleGroups = groups.filter(
@@ -304,9 +330,19 @@ export function TransfersWorkspace({
         </section>
       ) : null}
 
+      {direction === "downloads" ? (
+        <section className="finish-line-overview" aria-label="Finish Line release health">
+          <span className="finish-line-mark"><ShieldCheck size={20} weight="light" /></span>
+          <span><small>Finish Line</small><strong>Every expected file, accounted for.</strong></span>
+          <span className={finishLineSummary.recovering ? "is-recovering" : ""}><Timer size={15} /><small>Recovering</small><strong>{finishLineSummary.recovering}</strong></span>
+          <span className={finishLineSummary.attention ? "is-attention" : ""}><WarningCircle size={15} /><small>Needs attention</small><strong>{finishLineSummary.attention}</strong></span>
+          <span className="is-verified"><CheckCircle size={15} weight="fill" /><small>Verified history</small><strong>{finishLineSummary.verified}</strong></span>
+        </section>
+      ) : null}
+
       {direction === "downloads" ? <div className="transfer-filters">
         <div role="tablist" aria-label="Transfer filters">
-          {(["all", "active", "queued", "completed", "failed"] as const).map((value) => (
+          {(["all", "active", "queued", "completed", "attention"] as const).map((value) => (
             <button
               type="button"
               role="tab"
@@ -315,7 +351,7 @@ export function TransfersWorkspace({
               onClick={() => setFilter(value)}
               key={value}
             >
-              {value[0].toUpperCase() + value.slice(1)} <span>{counts[value]}</span>
+              {value === "attention" ? "Needs attention" : value[0].toUpperCase() + value.slice(1)} <span>{counts[value]}</span>
             </button>
           ))}
         </div>
@@ -325,7 +361,7 @@ export function TransfersWorkspace({
           disabled={counts.completed === 0}
           onClick={onClearCompleted}
         >
-          Clear completed
+          Clear history
         </button>
         <button type="button" className="transfer-view-options" aria-label="Transfer view options">
           <SlidersHorizontal size={16} />
@@ -335,23 +371,24 @@ export function TransfersWorkspace({
         <button type="button" className="clear-completed-button" disabled={!uploads.some((upload) => ["completed", "failed", "cancelled"].includes(upload.status))} onClick={onClearFinishedUploads}>Clear finished</button>
       </div>}
 
-      {error && direction === "downloads" && (
-        <div className="workspace-transfer-error" role="alert">
-          <WarningCircle size={15} weight="fill" />
-          <span>{error}</span>
-          <button type="button" aria-label="Dismiss transfer error" onClick={onDismissError}><X size={13} /></button>
-        </div>
-      )}
+      <div className="transfer-list-stage">
+        {error && direction === "downloads" && (
+          <div className="workspace-transfer-error" role="alert">
+            <WarningCircle size={15} weight="fill" />
+            <span>{error}</span>
+            <button type="button" aria-label="Dismiss transfer error" onClick={onDismissError}><X size={13} /></button>
+          </div>
+        )}
 
-      {uploadError && direction === "uploads" ? (
-        <div className="workspace-transfer-error" role="alert">
-          <WarningCircle size={15} weight="fill" />
-          <span>{uploadError}</span>
-          <button type="button" aria-label="Dismiss upload error" onClick={onDismissUploadError}><X size={13} /></button>
-        </div>
-      ) : null}
+        {uploadError && direction === "uploads" ? (
+          <div className="workspace-transfer-error" role="alert">
+            <WarningCircle size={15} weight="fill" />
+            <span>{uploadError}</span>
+            <button type="button" aria-label="Dismiss upload error" onClick={onDismissUploadError}><X size={13} /></button>
+          </div>
+        ) : null}
 
-      <div className="release-transfer-list" aria-live="polite">
+        <div className="release-transfer-list" aria-live="polite">
         {direction === "uploads" ? (
           uploads.length === 0 ? (
             <div className="transfers-empty-state">
@@ -397,10 +434,16 @@ export function TransfersWorkspace({
             : 0;
           const resumable = group.status === "paused" || group.status === "failed";
           const completed = group.status === "completed";
+          const health = releaseHealth(group);
+          const retryInSeconds = health.nextRetryAtMs === null || clock === 0
+            ? null
+            : Math.max(0, Math.ceil((health.nextRetryAtMs - clock) / 1_000));
+          const sourceNames = [...new Set(group.transfers.map((transfer) => transfer.username))];
+          const recoverableIssues = health.missingCount > 0 || health.failedCount > 0;
           const knownArt = group.title.toLocaleLowerCase().includes("night geometry");
           return (
             <article
-              className={`release-transfer-card is-${group.status}${draggedReleaseId === group.releaseId ? " is-reordering" : ""}${dropTarget?.id === group.id ? ` is-drop-${dropTarget.placement}` : ""}`}
+              className={`release-transfer-card is-${group.status} health-${health.state}${draggedReleaseId === group.releaseId ? " is-reordering" : ""}${dropTarget?.id === group.id ? ` is-drop-${dropTarget.placement}` : ""}`}
               data-queue-group-id={group.status === "queued" && group.releaseId ? group.id : undefined}
               key={group.id}
             >
@@ -414,16 +457,21 @@ export function TransfersWorkspace({
                   <strong>{group.title}</strong>
                   <small>
                     from{" "}
-                    <button
-                      type="button"
-                      className="transfer-user-link"
-                      onClick={() => onOpenPerson(group.username)}
-                    >
-                      <CountryFlag code={personByUsername(group.username)?.countryCode} />{group.username}
-                    </button>
+                    {sourceNames.length === 1 ? <button
+                        type="button"
+                        className="transfer-user-link"
+                        onClick={() => onOpenPerson(group.username)}
+                      >
+                        <CountryFlag code={personByUsername(group.username)?.countryCode} />{group.username}
+                      </button> : <strong className="transfer-multi-source">{sourceNames.length} sources</strong>}
                     <i aria-label="Online" />
                   </small>
                   <small>{group.transfers.length} {group.transfers.length === 1 ? "file" : "files"} · {formatBytes(group.sizeBytes)}</small>
+                  <span className={`release-health-inline is-${health.state}`}>
+                    {health.state === "verified" ? <ShieldCheck size={13} weight="fill" /> : health.state === "attention" ? <WarningCircle size={13} weight="fill" /> : health.state === "recovering" ? <ArrowClockwise size={13} /> : <CheckCircle size={13} />}
+                    <strong>{health.state === "verified" ? "Verified" : health.state === "attention" ? "Needs attention" : health.state === "recovering" ? `Auto recovery${retryInSeconds !== null ? ` in ${retryInSeconds}s` : ""}` : `${health.completedCount}/${group.transfers.length} complete`}</strong>
+                    <small>{health.verifiedCount} verified{health.missingCount ? ` · ${health.missingCount} missing` : ""}{health.mismatchCount ? ` · ${health.mismatchCount} size mismatch` : ""}</small>
+                  </span>
                   {group.status === "queued" && group.releaseId ? (
                     <span className="release-queue-order">
                       <b>Queue #{group.queuePosition}</b>
@@ -487,22 +535,24 @@ export function TransfersWorkspace({
                   <strong>{completed ? "Completed" : `${formatBytes(group.transferredBytes)} / ${formatBytes(group.sizeBytes)} (${Math.round(progress)}%)`}</strong>
                   <i><b style={{ width: `${progress}%` }} /></i>
                   <small>
-                    {group.status === "active" ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : group.status === "queued" ? `Queue #${group.queuePosition} · Waiting for slot…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : "Ready in your download folder"}
+                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 3${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : group.status === "queued" ? `Queue #${group.queuePosition} · Waiting for slot…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : "Ready in your download folder"}
                   </small>
                 </span>
                 <span className="release-transfer-actions">
                   <button
                     type="button"
-                    aria-label={completed ? `Reveal ${group.title}` : resumable ? `Resume ${group.title}` : `Pause ${group.title}`}
+                    aria-label={recoverableIssues ? `Retry issues in ${group.title}` : completed ? `Reveal ${group.title}` : resumable ? `Resume ${group.title}` : `Pause ${group.title}`}
                     onClick={() => {
-                      if (completed) invokeGroup(group, onRevealRelease, onReveal);
+                      if (recoverableIssues && group.releaseId) onRetryReleaseIssues(group.releaseId);
+                      else if (completed) invokeGroup(group, onRevealRelease, onReveal);
                       else if (resumable) invokeGroup(group, onResumeRelease, onResume);
                       else invokeGroup(group, onPauseRelease, onPause);
                     }}
                   >
-                    {completed ? <FolderOpen size={18} /> : resumable ? <Play size={16} weight="fill" /> : <Pause size={16} weight="fill" />}
-                    <small>{completed ? "Reveal" : resumable ? "Resume" : "Pause"}</small>
+                    {recoverableIssues ? <ArrowClockwise size={17} /> : completed ? <FolderOpen size={18} /> : resumable ? <Play size={16} weight="fill" /> : <Pause size={16} weight="fill" />}
+                    <small>{recoverableIssues ? "Retry issues" : completed ? "Reveal" : resumable ? "Resume" : "Pause"}</small>
                   </button>
+                  {completed && group.releaseId ? <button type="button" aria-label={`Verify ${group.title}`} onClick={() => onVerifyRelease(group.releaseId!)}><ShieldCheck size={17} /><small>Verify</small></button> : null}
                   <button
                     type="button"
                     aria-label={`${completed ? "Remove" : "Cancel"} ${group.title}`}
@@ -536,6 +586,15 @@ export function TransfersWorkspace({
 
               {open && (
                 <div className="release-file-table">
+                  <section className={`finish-line-detail is-${health.state}`}>
+                    <span className="finish-line-detail-icon">{health.state === "verified" ? <ShieldCheck size={19} weight="fill" /> : health.state === "attention" ? <WarningCircle size={19} weight="fill" /> : <Timer size={19} />}</span>
+                    <span><small>Release health</small><strong>{health.state === "verified" ? "All expected files verified" : health.state === "attention" ? "The release needs a quick check" : health.state === "recovering" ? "Forever is recovering this signal" : `${health.completedCount} of ${group.transfers.length} files complete`}</strong><p>{health.state === "verified" ? "Filename presence and expected byte size both match." : health.state === "attention" ? `${health.missingCount} missing · ${health.mismatchCount} size mismatch · ${health.failedCount} failed` : "Partial progress is preserved between every safe retry."}</p></span>
+                    <span className="finish-line-file-counts"><b>{health.verifiedCount}<small>Verified</small></b><b>{health.pendingCount}<small>Pending</small></b><b>{health.missingCount + health.mismatchCount + health.failedCount}<small>Issues</small></b></span>
+                    {health.alternatives.length > 0 && group.releaseId ? <details className="finish-line-alternatives"><summary><ArrowClockwise size={14} /> Alternative signals <small>{health.alternatives.length}</small></summary><div>{health.alternatives.map((source) => {
+                      const matchCount = group.transfers.filter((transfer) => source.files.some((file) => file.sizeBytes === transfer.sizeBytes && basename(file.remoteFilename).toLocaleLowerCase() === basename(transfer.remoteFilename).toLocaleLowerCase())).length;
+                      return <button type="button" key={`${source.username}:${source.remoteFolder}`} disabled={matchCount === 0} onClick={() => onSwitchReleaseSource(group.releaseId!, source)}><span><strong>{source.username}</strong><small title={source.remoteFolder}>{source.remoteFolder.replace(/[\\/]/g, " / ")}</small></span><b>{matchCount}/{group.transfers.length} exact</b><em>Try source</em></button>;
+                    })}</div></details> : null}
+                  </section>
                   <div className="release-file-header" aria-hidden="true">
                     <span>#</span><span>Filename</span><span>Size</span><span>Progress</span><span>Status</span><span />
                   </div>
@@ -543,25 +602,26 @@ export function TransfersWorkspace({
                     const fileProgress = transfer.sizeBytes
                       ? Math.min(100, (transfer.transferredBytes / transfer.sizeBytes) * 100)
                       : 0;
-                    const fileResumable = transfer.status === "paused" || transfer.status === "failed";
+                    const fileResumable = transfer.status === "paused" || transfer.status === "failed" || transfer.status === "retrying";
                     const fileCompleted = transfer.status === "completed";
+                    const fileIssue = transfer.verificationStatus === "missing" || transfer.verificationStatus === "sizeMismatch";
                     return (
                       <div className={`release-file-row is-${transfer.status}`} key={transfer.id}>
                         <span className="release-file-number">{transfer.fileIndex ?? index + 1}</span>
                         <span className="release-file-name"><strong>{transfer.title}</strong><small>{transfer.remoteFilename.split(".").slice(-1)[0]?.toUpperCase() ?? "FILE"}</small></span>
                         <span>{formatBytes(transfer.sizeBytes)}</span>
                         <span className="release-file-progress"><i><b style={{ width: `${fileProgress}%` }} /></i><small>{Math.round(fileProgress)}%</small></span>
-                        <span className="release-file-status" title={transfer.error ?? undefined}>
-                          {fileCompleted && <CheckCircle size={13} weight="fill" />}
-                          {transferStatus(transfer)}
+                        <span className={`release-file-status is-${transfer.verificationStatus ?? "pending"}`} title={transfer.verificationMessage ?? transfer.error ?? undefined}>
+                          {transfer.verificationStatus === "verified" ? <ShieldCheck size={13} weight="fill" /> : fileIssue ? <WarningCircle size={13} weight="fill" /> : fileCompleted ? <CheckCircle size={13} weight="fill" /> : null}
+                          {transfer.verificationStatus === "verified" ? "Verified" : transfer.verificationStatus === "missing" ? "Missing" : transfer.verificationStatus === "sizeMismatch" ? "Size mismatch" : transferStatus(transfer)}
                         </span>
                         <span className="release-file-actions">
                           <button
                             type="button"
-                            aria-label={fileCompleted ? `Reveal ${transfer.title}` : fileResumable ? `Resume ${transfer.title}` : `Pause ${transfer.title}`}
-                            onClick={() => fileCompleted ? onReveal(transfer.id) : fileResumable ? onResume(transfer.id) : onPause(transfer.id)}
+                            aria-label={fileIssue && group.releaseId ? `Retry issues in ${group.title}` : fileCompleted ? `Reveal ${transfer.title}` : fileResumable ? `Resume ${transfer.title}` : `Pause ${transfer.title}`}
+                            onClick={() => fileIssue && group.releaseId ? onRetryReleaseIssues(group.releaseId) : fileCompleted ? onReveal(transfer.id) : fileResumable ? onResume(transfer.id) : onPause(transfer.id)}
                           >
-                            {fileCompleted ? <FolderOpen size={14} /> : transfer.status === "failed" ? <ArrowClockwise size={14} /> : fileResumable ? <Play size={13} weight="fill" /> : <Pause size={13} weight="fill" />}
+                            {fileIssue ? <ArrowClockwise size={14} /> : fileCompleted ? <FolderOpen size={14} /> : ["failed", "retrying"].includes(transfer.status) ? <ArrowClockwise size={14} /> : fileResumable ? <Play size={13} weight="fill" /> : <Pause size={13} weight="fill" />}
                           </button>
                           <button type="button" aria-label={`${fileCompleted ? "Remove" : "Cancel"} ${transfer.title}`} onClick={() => onCancel(transfer.id)}><X size={13} /></button>
                         </span>
@@ -573,6 +633,7 @@ export function TransfersWorkspace({
             </article>
           );
         })}
+        </div>
       </div>
     </section>
   );

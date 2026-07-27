@@ -512,6 +512,31 @@ describe("Forever shell", () => {
     expect(within(workspace).queryByText("Spheric Dusk")).not.toBeInTheDocument();
   });
 
+  it("verifies completed releases, retries missing files, and switches exact alternative sources", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
+    expect(screen.getByLabelText("Finish Line release health")).toBeInTheDocument();
+    const workspace = screen.getByRole("heading", { name: "Transfers" }).closest("section") as HTMLElement;
+
+    fireEvent.click(screen.getByRole("tab", { name: "Completed 1" }));
+    const apex = within(workspace).getByText("Apex Horizon (Deluxe)").closest("article") as HTMLElement;
+    expect(within(apex).getByText("Needs attention")).toBeInTheDocument();
+    expect(within(apex).getByText(/1 missing/)).toBeInTheDocument();
+    fireEvent.click(within(apex).getByRole("button", { name: "Retry issues in Apex Horizon (Deluxe)" }));
+
+    fireEvent.click(screen.getByRole("tab", { name: /All/ }));
+    expect(within(workspace).getByText("Apex Horizon (Deluxe)")).toBeInTheDocument();
+
+    const spheric = within(workspace).getByText("Spheric Dusk").closest("article") as HTMLElement;
+    fireEvent.click(within(spheric).getByRole("button", { name: "Expand Spheric Dusk" }));
+    const alternatives = within(spheric).getByText("Alternative signals").closest("details") as HTMLElement;
+    fireEvent.click(within(alternatives).getByText("Alternative signals"));
+    expect(within(alternatives).getByText("2/2 exact")).toBeInTheDocument();
+    fireEvent.click(within(alternatives).getByRole("button", { name: /signalrelay/ }));
+    await waitFor(() => expect(within(spheric).getAllByText("signalrelay").length).toBeGreaterThan(0));
+  });
+
   it("shows outgoing uploads with live progress in Transfers", () => {
     render(<App />);
 
@@ -679,16 +704,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.29 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.30 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Shelf Radar scans up to 12 selected or visible missing albums without disturbing the main Search workspace.",
+        "Finish Line verifies every completed file by filename presence and expected byte size, then highlights missing or mismatched files without touching unsafe data.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Source drawers include track previews plus Download best and Watch for better actions directly from Missing Shelf.",
+        "Album downloads remember exact alternative sources, so a stalled release can switch listeners without downloading already verified files again.",
       ),
     ).toBeInTheDocument();
   });

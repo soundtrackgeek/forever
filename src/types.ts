@@ -279,6 +279,7 @@ export type Transfer = {
   etaSeconds: number | null;
   status:
     | "queued"
+    | "retrying"
     | "requesting"
     | "remotelyQueued"
     | "connecting"
@@ -289,8 +290,26 @@ export type Transfer = {
   queuePosition: number | null;
   localPath: string;
   error: string | null;
+  retryCount?: number;
+  retryAtMs?: number | null;
+  verificationStatus?: "pending" | "verified" | "missing" | "sizeMismatch";
+  verificationMessage?: string | null;
+  verifiedAtMs?: number | null;
+  alternativeSources?: ReleaseAlternativeSource[];
   createdAtMs: number;
   updatedAtMs: number;
+};
+
+export type ReleaseAlternativeFile = {
+  title: string;
+  remoteFilename: string;
+  sizeBytes: number;
+};
+
+export type ReleaseAlternativeSource = {
+  username: string;
+  remoteFolder: string;
+  files: ReleaseAlternativeFile[];
 };
 
 export type FolderFile = {

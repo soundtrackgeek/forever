@@ -3,16 +3,16 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.29` adds Shelf Radar: bounded live
-> Soulseek availability scans, grouped source previews, and direct download or
-> watch actions for albums identified by Missing Shelf.
+> **Status:** pre-alpha. Version `0.0.30` adds Finish Line: automatic bounded
+> transfer recovery, completed-file verification, exact alternative-source
+> switching, and a release-health workflow for anything needing attention.
 
-If `0.0.16` is installed, download and run the latest `0.0.29` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.30` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
 
-![Forever Shelf Radar interface](design/implementation/shelf-radar-0.0.29-overview.png)
+![Forever Finish Line transfer health](design/implementation/finish-line-0.0.30-desktop.png)
 
 ## Current foundation
 
@@ -105,10 +105,17 @@ configuration and transfers.
   and resume state across restarts
 - Persistent transfers with source-queue position, byte progress, speed, ETA,
   pause, resume, retry, cancel, completion, and Show in folder controls
+- Bounded automatic recovery for transient peer interruptions with visible
+  retry attempts and countdowns while preserving safe `.part` progress
+- **Finish Line** release health with expected-file verification, Missing and
+  Size mismatch states, a Needs attention filter, manual recheck/retry actions,
+  and persistent completion history that never deletes downloaded files
+- Exact alternative-source switching for album queues, preserving verified
+  files and accepting a replacement only when basename and byte size match
 - A full release-grouped Transfers workspace with All, Active, Queued,
-  Completed, and Failed filters, transfer search, aggregate and per-file
-  progress, whole-album ETA, release-level controls, Clear completed, and native
-  completion notifications
+  Completed, and Needs attention filters, transfer search, aggregate and
+  per-file progress, whole-album ETA, release-level controls, Clear history,
+  and in-app plus native completion notifications
 - A persistent **Signal Order** for queued albums with drag-and-drop,
   keyboard-friendly Move up/Move down controls, **Download next**, exact
   duplicate-source protection, and a queue-wide release/file/size/ETA summary,
@@ -247,6 +254,25 @@ Music Library; downloads and watches remain in Forever's own stores.
 
 ![Forever Shelf Radar source drawer](design/implementation/shelf-radar-0.0.29-desktop.png)
 
+Open **Transfers** to see Finish Line health for every queued or completed
+release. Transient peer disconnects retry after short bounded delays and show
+their next attempt in place; pausing or cancelling still takes precedence.
+When a release finishes, Forever checks that every expected local filename is
+present at the expected byte size and sends an in-app and Windows completion
+notification. Soulseek does not provide content hashes, so this is a structural
+completion check rather than cryptographic audio verification.
+
+Use **Verify** to recheck completed files after moving or editing them. Missing
+files can be safely requeued with **Retry issues**. A size mismatch is reported
+but is never overwritten automatically. Album queues created from grouped
+Search or Shelf Radar results retain compatible alternative listeners; expand
+the release, open **Alternative signals**, and choose **Try source** to switch
+only exact basename-and-size matches while already verified files remain
+complete. **Clear history** removes completed transfer records only—the files
+in the download folder remain untouched.
+
+![Forever completed release needing attention](design/implementation/finish-line-0.0.30-attention.png)
+
 Choose **Add to Wanted** on a missing MusicBrainz album, then open **Archive →
 Wanted** to follow it. Forever serializes background checks while connected and
 groups returned audio by listener and remote folder without disturbing the
@@ -291,7 +317,7 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.29` intentionally keeps one active download at a time, even when an
+Version `0.0.30` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
 three. Edition/pressing lookup, playback, rooms, and public
 chat remain outside this release.
@@ -371,8 +397,10 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.29 verifies the expected byte
-count but cannot cryptographically verify file contents.
+protocol does not provide chunk hashes, so v0.0.30 verifies the expected
+filename presence and byte count but cannot cryptographically verify file
+contents. Finish Line reports a size mismatch instead of replacing that local
+file automatically.
 
 ## Quality checks
 

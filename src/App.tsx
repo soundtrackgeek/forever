@@ -1,4 +1,4 @@
-import { DownloadSimple, MagnifyingGlass, Radio, Sliders } from "@phosphor-icons/react";
+import { CheckCircle, DownloadSimple, MagnifyingGlass, Radio, Sliders, WarningCircle, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { AppSidebar } from "./components/AppSidebar";
@@ -43,6 +43,7 @@ import type {
   SearchResult,
   WantedAlbum,
 } from "./types";
+import { groupAlbumSources } from "./utils/albumSources";
 
 const emptyAlbumCatalog: AlbumReleaseGroup[] = [];
 
@@ -210,18 +211,35 @@ function App() {
     void transfers.enqueue(result).catch(() => undefined);
   };
 
-  const queueAlbumSourceFor = async (context: AlbumSearchContext | null, source: AlbumSource) => {
+  const queueAlbumSourceFor = async (
+    context: AlbumSearchContext | null,
+    source: AlbumSource,
+    availableSources: AlbumSource[] = [],
+  ) => {
     const inspection = await folders.inspect(source.representative);
     await transfers.enqueueRelease({
       title: albumDownloadTitle(context, source.folderName),
       username: source.owner,
       remoteFolder: inspection.requestedFolder,
       files: inspection.files,
+      alternatives: availableSources
+        .filter((candidate) => candidate.id !== source.id)
+        .slice(0, 12)
+        .map((candidate) => ({
+          username: candidate.owner,
+          remoteFolder: candidate.folder,
+          files: candidate.files.flatMap((file) =>
+            file.filename && file.sizeBytes
+              ? [{ title: file.filename.split(/[\\/]/).pop() ?? file.title, remoteFilename: file.filename, sizeBytes: file.sizeBytes }]
+              : [],
+          ),
+        }))
+        .filter((candidate) => candidate.files.length > 0),
     });
   };
 
   const queueAlbumSource = async (source: AlbumSource) => {
-    await queueAlbumSourceFor(albumContext, source);
+    await queueAlbumSourceFor(albumContext, source, groupAlbumSources(search.results));
   };
 
   const inspectSmartMatch = async (album: WantedAlbum) => {
@@ -528,13 +546,13 @@ function App() {
                 onAddMany={wanted.addMany}
                 onScan={radar.start}
                 onStopScan={radar.stop}
-                onQueueSource={(album, source) => queueAlbumSourceFor({
+                onQueueSource={(album, source, sources) => queueAlbumSourceFor({
                   albumId: album.id,
                   artist: missingShelf.selectedArtist?.canonicalName ?? missingShelf.selectedArtist?.name ?? "Unknown artist",
                   title: album.title,
                   coverArtUrl: album.coverArtUrl,
                   firstReleaseDate: album.firstReleaseDate,
-                }, source)}
+                }, source, sources)}
                 onDismissError={() => {
                   missingShelf.clearError();
                   radar.clearError();
@@ -663,6 +681,9 @@ function App() {
             onRevealRelease={(id) => void transfers.revealRelease(id).catch(() => undefined)}
             onReorderRelease={(id, beforeTransferId) => void transfers.reorderRelease(id, beforeTransferId).catch(() => undefined)}
             onClearCompleted={() => void transfers.clearCompleted().catch(() => undefined)}
+            onVerifyRelease={(id) => void transfers.verifyRelease(id).catch(() => undefined)}
+            onRetryReleaseIssues={(id) => void transfers.retryReleaseIssues(id).catch(() => undefined)}
+            onSwitchReleaseSource={(id, source) => void transfers.switchReleaseSource(id, source).catch(() => undefined)}
             onDismissError={transfers.clearError}
             personByUsername={people.personByUsername}
             onOpenPerson={openPerson}
@@ -730,6 +751,16 @@ function App() {
         onOpenPerson={openPerson}
         onToggle={() => setTransferShelfExpanded((expanded) => !expanded)}
       />
+
+      {transfers.completionNotice ? (
+        <aside className={`finish-line-toast is-${transfers.completionNotice.kind}`} role="status" aria-live="polite">
+          <button type="button" className="finish-line-toast-open" onClick={() => navigate("transfers")}>
+            <span>{transfers.completionNotice.kind === "verified" ? <CheckCircle size={19} weight="fill" /> : <WarningCircle size={19} weight="fill" />}</span>
+            <span><small>{transfers.completionNotice.kind === "verified" ? "Download verified" : "Completed with issues"}</small><strong>{transfers.completionNotice.title}</strong><p>{transfers.completionNotice.message}</p></span>
+          </button>
+          <button type="button" className="finish-line-toast-dismiss" aria-label="Dismiss download notification" onClick={transfers.clearCompletionNotice}><X size={14} /></button>
+        </aside>
+      ) : null}
 
       <UpdateExperience {...updater} />
 

@@ -500,6 +500,38 @@ pub async fn transfer_clear_completed(
 }
 
 #[tauri::command]
+pub async fn transfer_verify_release(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .verify_release(&release_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_retry_release_issues(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .retry_release_issues(&release_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_switch_release_source(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+    username: String,
+    remote_folder: String,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .switch_release_source(&release_id, &username, &remote_folder)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn transfer_reveal_release_path(
     manager: State<'_, ConnectionManager>,
     release_id: String,

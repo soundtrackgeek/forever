@@ -30,20 +30,20 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.28",
-  version: "0.0.29",
-  body: `## What’s new in Forever 0.0.29
+  currentVersion: "0.0.29",
+  version: "0.0.30",
+  body: `## What’s new in Forever 0.0.30
 
 ### Added
 
-- Shelf Radar scans up to 12 selected or visible missing albums without disturbing the main Search workspace.
-- Live availability shows grouped folders, formats, track counts, album size, upload readiness, speed, and queue depth.
-- Source drawers include track previews plus Download best and Watch for better actions directly from Missing Shelf.
+- Finish Line verifies every completed file by filename presence and expected byte size, then highlights missing or mismatched files without touching unsafe data.
+- Interrupted peer transfers recover automatically with bounded retry countdowns while preserving safe partial progress.
+- Album downloads remember exact alternative sources, so a stalled release can switch listeners without downloading already verified files again.
 
 ### Changed
 
-- Radar searches run one album at a time with a courtesy delay, explicit progress and cancellation, and session-only results.
-- Music Library remains SQLite read-only and query-only; Shelf Radar writes only to Forever's own transfer and Wanted stores when you ask it to.`,
+- Transfers now includes release-health totals, a Needs attention filter, manual Verify and Retry issues actions, completion alerts, and persistent completed history.
+- Clear history removes only Forever's transfer records; completed files stay in the download folder, and Music Library remains strictly SQLite read-only and query-only.`,
   date: "2026-07-27",
 };
 

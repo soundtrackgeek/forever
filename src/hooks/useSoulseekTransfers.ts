@@ -9,6 +9,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   FolderFile,
+  ReleaseAlternativeSource,
   SearchResult,
   Transfer,
   TransferQueueSnapshot,
@@ -52,6 +53,8 @@ const previewTransfers: Transfer[] = [
       queuePosition: null,
       localPath: `C:\\Users\\Music\\Forever\\Night Geometry\\${title}`,
       error: null,
+      verificationStatus: completed ? "verified" : "pending",
+      verifiedAtMs: completed ? now : null,
       createdAtMs: now - 30_000 + index,
       updatedAtMs: now,
     };
@@ -75,6 +78,17 @@ const previewTransfers: Transfer[] = [
       queuePosition: null,
       localPath: `C:\\Users\\Music\\Forever\\Spheric Dusk\\${title}`,
       error: null,
+      verificationStatus: "pending",
+      alternativeSources: [
+        {
+          username: "signalrelay",
+          remoteFolder: "Music\\Carbon Echoes\\Spheric Dusk [FLAC]",
+          files: [
+            { title: "01 - Carbon Echoes.flac", remoteFilename: "Music\\Carbon Echoes\\Spheric Dusk [FLAC]\\01 - Carbon Echoes.flac", sizeBytes: 78_000_000 },
+            { title: "02 - Peripheral Light.flac", remoteFilename: "Music\\Carbon Echoes\\Spheric Dusk [FLAC]\\02 - Peripheral Light.flac", sizeBytes: 82_000_000 },
+          ],
+        },
+      ],
       createdAtMs: now - 12_000 + index,
       updatedAtMs: now,
     }),
@@ -97,6 +111,9 @@ const previewTransfers: Transfer[] = [
     queuePosition: null,
     localPath: "C:\\Users\\Music\\Forever\\Apex Horizon (Deluxe)\\01 - First Light.mp3",
     error: null,
+    verificationStatus: "missing",
+    verificationMessage: "The completed file is no longer present in the download folder.",
+    verifiedAtMs: now - 79_000,
     createdAtMs: now - 86_400_000,
     updatedAtMs: now - 80_000,
   },
@@ -157,6 +174,14 @@ export type EnqueueReleaseInput = {
   username: string;
   remoteFolder: string;
   files: FolderFile[];
+  alternatives?: ReleaseAlternativeSource[];
+};
+
+export type TransferCompletionNotice = {
+  groupId: string;
+  title: string;
+  kind: "verified" | "attention";
+  message: string;
 };
 
 export function useSoulseekTransfers() {
@@ -166,6 +191,7 @@ export function useSoulseekTransfers() {
   );
   const [ready, setReady] = useState(!native);
   const [error, setError] = useState<string | null>(null);
+  const [completionNotice, setCompletionNotice] = useState<TransferCompletionNotice | null>(null);
   const completionState = useRef<Map<string, string>>(new Map());
   const completionReady = useRef(false);
 
@@ -206,13 +232,26 @@ export function useSoulseekTransfers() {
           group.status === "completed" &&
           completionState.current.get(group.id) !== "completed"
         ) {
+          const issues = group.transfers.filter((transfer) =>
+            ["missing", "sizeMismatch"].includes(transfer.verificationStatus ?? "pending"),
+          ).length;
+          setCompletionNotice({
+            groupId: group.id,
+            title: group.title,
+            kind: issues ? "attention" : "verified",
+            message: issues
+              ? `${issues} ${issues === 1 ? "file needs" : "files need"} attention.`
+              : `${group.transfers.length} ${group.transfers.length === 1 ? "file" : "files"} verified in the download folder.`,
+          });
           void (async () => {
             let granted = await isPermissionGranted();
             if (!granted) granted = (await requestPermission()) === "granted";
             if (granted) {
               sendNotification({
-                title: "Release downloaded",
-                body: `${group.title} · ${group.transfers.length} ${group.transfers.length === 1 ? "file" : "files"}`,
+                title: issues ? "Download completed with issues" : "Release downloaded and verified",
+                body: issues
+                  ? `${group.title} · ${issues} ${issues === 1 ? "file needs" : "files need"} attention`
+                  : `${group.title} · ${group.transfers.length} ${group.transfers.length === 1 ? "file" : "files"} verified`,
               });
             }
           })();
@@ -258,7 +297,12 @@ export function useSoulseekTransfers() {
               updatedAtMs: Date.now(),
             };
           }
-          if (!hasActive && transfer.status === "queued") {
+          if (
+            !hasActive &&
+            (transfer.status === "queued" ||
+              (transfer.status === "retrying" &&
+                (transfer.retryAtMs ?? 0) <= Date.now()))
+          ) {
             hasActive = true;
             return {
               ...transfer,
@@ -369,6 +413,7 @@ export function useSoulseekTransfers() {
                   remoteFilename: file.remoteFilename,
                   sizeBytes: file.sizeBytes,
                 })),
+                alternatives: release.alternatives ?? [],
               },
             },
           );
@@ -416,6 +461,8 @@ export function useSoulseekTransfers() {
             queuePosition: null,
             localPath: `C:\\Users\\Music\\Forever\\${folderName}\\${file.filename}`,
             error: null,
+            verificationStatus: "pending",
+            alternativeSources: release.alternatives ?? [],
             createdAtMs: created + index,
             updatedAtMs: created,
           };
@@ -694,6 +741,113 @@ export function useSoulseekTransfers() {
     [native],
   );
 
+  const verifyRelease = useCallback(async (releaseId: string) => {
+    setError(null);
+    if (native) {
+      try {
+        const next = await invoke<TransferQueueSnapshot>("transfer_verify_release", { releaseId });
+        setSnapshot(next);
+        return;
+      } catch (cause) {
+        setError(errorMessage(cause));
+        throw cause;
+      }
+    }
+    setSnapshot((current) => withCount(current.transfers.map((transfer) =>
+      transfer.releaseId === releaseId && transfer.status === "completed"
+        ? { ...transfer, verifiedAtMs: Date.now() }
+        : transfer,
+    )));
+  }, [native]);
+
+  const retryReleaseIssues = useCallback(async (releaseId: string) => {
+    setError(null);
+    if (native) {
+      try {
+        const next = await invoke<TransferQueueSnapshot>("transfer_retry_release_issues", { releaseId });
+        setSnapshot(next);
+        return;
+      } catch (cause) {
+        setError(errorMessage(cause));
+        throw cause;
+      }
+    }
+    setSnapshot((current) => withCount(current.transfers.map((transfer) => {
+      const recoverable = transfer.releaseId === releaseId && (
+        transfer.status === "failed" || transfer.verificationStatus === "missing"
+      );
+      return recoverable ? {
+        ...transfer,
+        status: "queued" as const,
+        transferredBytes: transfer.verificationStatus === "missing" ? 0 : transfer.transferredBytes,
+        verificationStatus: "pending" as const,
+        verificationMessage: null,
+        verifiedAtMs: null,
+        error: null,
+        retryCount: 0,
+        retryAtMs: null,
+      } : transfer;
+    })));
+  }, [native]);
+
+  const switchReleaseSource = useCallback(async (
+    releaseId: string,
+    source: ReleaseAlternativeSource,
+  ) => {
+    setError(null);
+    if (native) {
+      try {
+        const next = await invoke<TransferQueueSnapshot>("transfer_switch_release_source", {
+          releaseId,
+          username: source.username,
+          remoteFolder: source.remoteFolder,
+        });
+        setSnapshot(next);
+        return;
+      } catch (cause) {
+        setError(errorMessage(cause));
+        throw cause;
+      }
+    }
+    setSnapshot((current) => {
+      const releaseTransfers = current.transfers.filter((transfer) => transfer.releaseId === releaseId);
+      const first = releaseTransfers[0];
+      if (!first) return current;
+      const previous: ReleaseAlternativeSource = {
+        username: first.username,
+        remoteFolder: remoteFolder(first.remoteFilename),
+        files: releaseTransfers.map((transfer) => ({
+          title: transfer.title,
+          remoteFilename: transfer.remoteFilename,
+          sizeBytes: transfer.sizeBytes,
+        })),
+      };
+      return withCount(current.transfers.map((transfer) => {
+        if (transfer.releaseId !== releaseId) return transfer;
+        const alternatives = (transfer.alternativeSources ?? [])
+          .filter((candidate) => !(candidate.username.toLocaleLowerCase() === source.username.toLocaleLowerCase() && normalizedFolder(candidate.remoteFolder) === normalizedFolder(source.remoteFolder)));
+        if (!alternatives.some((candidate) => candidate.username.toLocaleLowerCase() === previous.username.toLocaleLowerCase() && normalizedFolder(candidate.remoteFolder) === normalizedFolder(previous.remoteFolder))) alternatives.push(previous);
+        if (transfer.status === "completed" && transfer.verificationStatus !== "missing") return { ...transfer, alternativeSources: alternatives };
+        const match = source.files.find((file) => file.sizeBytes === transfer.sizeBytes && basename(file.remoteFilename).toLocaleLowerCase() === basename(transfer.remoteFilename).toLocaleLowerCase());
+        if (!match) return { ...transfer, alternativeSources: alternatives };
+        return {
+          ...transfer,
+          username: source.username,
+          remoteFilename: match.remoteFilename,
+          title: match.title,
+          status: "queued" as const,
+          error: null,
+          retryCount: 0,
+          retryAtMs: null,
+          verificationStatus: "pending" as const,
+          verificationMessage: null,
+          verifiedAtMs: null,
+          alternativeSources: alternatives,
+        };
+      }));
+    });
+  }, [native]);
+
   return useMemo(
     () => ({
       ready,
@@ -711,6 +865,11 @@ export function useSoulseekTransfers() {
       reorderRelease,
       clearCompleted,
       revealRelease,
+      verifyRelease,
+      retryReleaseIssues,
+      switchReleaseSource,
+      completionNotice,
+      clearCompletionNotice: () => setCompletionNotice(null),
       clearError: () => setError(null),
     }),
     [
@@ -728,6 +887,10 @@ export function useSoulseekTransfers() {
       resumeRelease,
       reveal,
       revealRelease,
+      verifyRelease,
+      retryReleaseIssues,
+      switchReleaseSource,
+      completionNotice,
       snapshot,
     ],
   );

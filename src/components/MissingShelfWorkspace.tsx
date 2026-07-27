@@ -60,7 +60,11 @@ type MissingShelfWorkspaceProps = {
   ) => Promise<unknown>;
   onScan: (artist: string, albums: AlbumReleaseGroup[]) => Promise<unknown>;
   onStopScan: () => Promise<unknown>;
-  onQueueSource: (album: AlbumReleaseGroup, source: AlbumSource) => Promise<void>;
+  onQueueSource: (
+    album: AlbumReleaseGroup,
+    source: AlbumSource,
+    availableSources: AlbumSource[],
+  ) => Promise<void>;
   onDismissError: () => void;
 };
 
@@ -224,10 +228,14 @@ export function MissingShelfWorkspace({
     void onScan(selectedArtist.canonicalName ?? selectedArtist.name, nextAlbums.slice(0, 12)).catch(() => undefined);
   };
 
-  const queueSource = async (album: AlbumReleaseGroup, source: AlbumSource) => {
+  const queueSource = async (
+    album: AlbumReleaseGroup,
+    source: AlbumSource,
+    availableSources: AlbumSource[],
+  ) => {
     setPreparingSourceId(source.id);
     try {
-      await onQueueSource(album, source);
+      await onQueueSource(album, source, availableSources);
     } finally {
       setPreparingSourceId(null);
     }
@@ -387,7 +395,7 @@ export function MissingShelfWorkspace({
                       {shelfState === "missing" ? <button type="button" className={`shelf-radar-status ${radarClass}`} disabled={!online || radarScanning} onClick={() => sources.length ? setOpenRadarAlbumId(radarOpen ? null : album.id) : scan([album])} title={sources.length ? "Show or hide available album sources" : online ? "Scan this album" : "Reconnect before scanning"}>{radarScan?.state === "scanning" ? <CircleNotch className="search-spinner" size={14} /> : sources.length ? <Eye size={14} /> : <Broadcast size={14} />}<span><strong>{radarLabel}</strong><small>{sources.length ? `${radarScan?.peerCount ?? 0} people replied` : radarScan?.state === "completed" ? "Click to rescan" : "Click to listen"}</small></span></button> : <span className="shelf-radar-unavailable">{shelfState === "wanted" ? "Watch active" : "In library"}</span>}
                       <strong className={`missing-release-state is-${shelfState}`}>{shelfState === "owned" ? <CheckCircle size={14} weight="fill" /> : shelfState === "wanted" ? <Plus size={13} weight="bold" /> : <span aria-hidden="true" />}{shelfState === "owned" ? "Own" : shelfState === "wanted" ? "Wanted" : "Missing"}</strong>
                     </article>
-                    {radarOpen ? <RadarSourceDrawer album={album} sources={sources} watched={wantedIds.has(album.id.toLowerCase())} preparingSourceId={preparingSourceId} onDownload={(source) => void queueSource(album, source).catch(() => undefined)} onWatch={() => void onAddMany(selectedArtist.canonicalName ?? selectedArtist.name, [album], preferences).catch(() => undefined)} onRescan={() => scan([album])} /> : null}
+                    {radarOpen ? <RadarSourceDrawer album={album} sources={sources} watched={wantedIds.has(album.id.toLowerCase())} preparingSourceId={preparingSourceId} onDownload={(source) => void queueSource(album, source, sources).catch(() => undefined)} onWatch={() => void onAddMany(selectedArtist.canonicalName ?? selectedArtist.name, [album], preferences).catch(() => undefined)} onRescan={() => scan([album])} /> : null}
                   </div>
                 );
               })}

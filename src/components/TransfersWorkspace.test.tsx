@@ -62,6 +62,9 @@ describe("TransfersWorkspace signal order", () => {
         onRevealRelease={vi.fn()}
         onReorderRelease={onReorderRelease}
         onClearCompleted={vi.fn()}
+        onVerifyRelease={vi.fn()}
+        onRetryReleaseIssues={vi.fn()}
+        onSwitchReleaseSource={vi.fn()}
         onDismissError={vi.fn()}
         personByUsername={() => null}
         onOpenPerson={vi.fn()}

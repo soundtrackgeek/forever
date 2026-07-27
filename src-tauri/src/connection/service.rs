@@ -1069,6 +1069,36 @@ impl ConnectionManager {
         Ok(self.transfers.clear_completed()?)
     }
 
+    pub fn verify_release(
+        &self,
+        release_id: &str,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        Ok(self.transfers.verify_release(release_id)?)
+    }
+
+    pub fn retry_release_issues(
+        &self,
+        release_id: &str,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        let snapshot = self.transfers.retry_release_issues(release_id)?;
+        self.schedule_downloads();
+        Ok(snapshot)
+    }
+
+    pub fn switch_release_source(
+        &self,
+        release_id: &str,
+        username: &str,
+        remote_folder: &str,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        self.people.remember(username)?;
+        let snapshot = self
+            .transfers
+            .switch_release_source(release_id, username, remote_folder)?;
+        self.schedule_downloads();
+        Ok(snapshot)
+    }
+
     pub fn reveal_release_path(&self, release_id: &str) -> Result<String, ConnectionServiceError> {
         Ok(self.transfers.reveal_release_path(release_id)?)
     }
@@ -1708,13 +1738,18 @@ impl ConnectionManager {
         let mut search_tick = tokio::time::interval(Duration::from_millis(250));
         let mut wanted_tick = tokio::time::interval(Duration::from_secs(5));
         let mut radar_tick = tokio::time::interval(Duration::from_millis(500));
+        let mut download_retry_tick = tokio::time::interval(Duration::from_secs(1));
         let peer_limit = Arc::new(Semaphore::new(MAX_CONCURRENT_PEERS));
         keepalive.tick().await;
         search_tick.tick().await;
         wanted_tick.tick().await;
         radar_tick.tick().await;
+        download_retry_tick.tick().await;
         loop {
             tokio::select! {
+                _ = download_retry_tick.tick() => {
+                    let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
+                }
                 _ = keepalive.tick() => {
                     write_raw_frame(&mut server_writer, &server_ping_frame()).await.map_err(|error| {
                         ConnectionFailure::retryable(
@@ -1906,7 +1941,7 @@ impl ConnectionManager {
                         }
                     } else if frame.code == CANT_CONNECT_TO_PEER_CODE {
                         if let Ok(token) = parse_cant_connect_token(&frame) {
-                            if self.transfers.fail_connection(
+                            if self.transfers.retry_connection(
                                 token,
                                 "The source could not establish a peer connection.".to_owned(),
                             ) {
@@ -2537,7 +2572,7 @@ async fn handle_direct_peer(
                 if let Err(error) =
                     queue_download_on_peer(&mut stream, ticket.clone(), services.clone()).await
                 {
-                    if services.transfers.fail_id(
+                    if services.transfers.retry_id(
                         &ticket.id,
                         format!("The source connection ended before the file was queued: {error}"),
                     ) {
@@ -2910,7 +2945,7 @@ fn spawn_outbound_download_peer(
         )
         .await
         {
-            if transfers.fail_id(
+            if transfers.retry_id(
                 &claimed.id,
                 format!("The source connection ended before the file was queued: {error}"),
             ) {
@@ -3375,7 +3410,7 @@ async fn handle_peer_messages(
             }
             UPLOAD_FAILED_CODE => {
                 let filename = parse_filename(&frame, UPLOAD_FAILED_CODE)?;
-                if services.transfers.fail_for_filename(
+                if services.transfers.retry_for_filename(
                     username,
                     &filename,
                     "The source stopped the upload before the file completed.".to_owned(),
@@ -3409,7 +3444,7 @@ fn spawn_transfer_request_timeout(
 ) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(TRANSFER_REQUEST_TIMEOUT).await;
-        if transfers.fail_connection(
+        if transfers.retry_connection(
             ticket.connection_token,
             "The source did not answer the peer connection request.".to_owned(),
         ) {
@@ -3457,7 +3492,11 @@ fn spawn_file_download(
     tauri::async_runtime::spawn(async move {
         let outcome = receive_file(stream, &plan, task_transfers.clone(), cancellation).await;
         if let Err(message) = outcome {
-            task_transfers.fail_id(&task_id, message);
+            if retryable_download_error(&message) {
+                task_transfers.retry_id(&task_id, message);
+            } else {
+                task_transfers.fail_id(&task_id, message);
+            }
         }
         task_transfers.unregister_task(&task_id);
         let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
@@ -3634,6 +3673,13 @@ fn peer_timeout_error() -> super::protocol::ProtocolError {
         std::io::ErrorKind::TimedOut,
         "Soulseek peer timed out",
     ))
+}
+
+fn retryable_download_error(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    normalized.contains("source connection was interrupted")
+        || normalized.contains("source closed the connection")
+        || normalized.contains("timed out")
 }
 
 fn server_label(profile: &ConnectionProfile) -> String {

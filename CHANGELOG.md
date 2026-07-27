@@ -5,6 +5,43 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.30] - 2026-07-27
+
+### Added
+
+- **Finish Line** release health in Transfers, with Recovering, Needs attention,
+  and Verified history totals plus per-release expected-file accounting.
+- Bounded automatic retries for transient peer connection, request, and stream
+  interruptions after 5, 15, and 45 seconds while preserving safe partial data.
+- Completed-file verification using expected filename presence and byte size,
+  with explicit Verified, Missing, and Size mismatch states.
+- Manual **Verify** and **Retry issues** actions, a Needs attention filter, and
+  in-app plus Windows completion notifications that open the relevant release.
+- Exact alternative-source persistence for grouped Search and Shelf Radar album
+  queues, including per-source match counts and an explicit **Try source** action.
+- Rust and frontend regression coverage for verification, bounded retries,
+  alternative matching, recovery actions, and the Finish Line health model.
+
+### Changed
+
+- Album queue requests retain up to 12 compatible responding folders so a
+  release can change listeners without restarting already verified files.
+- Completed history remains persisted across restarts; **Clear history** removes
+  transfer records only and never deletes files from the download folder.
+- Application, updater preview, package, Cargo, Tauri, and MusicBrainz metadata
+  now identify version `0.0.30` and describe Finish Line accurately.
+- Music Library remains opened strictly read-only and query-only; recovery and
+  verification operate only on Forever's download and transfer stores.
+
+### Fixed
+
+- A completed file whose size no longer matches is never automatically retried,
+  overwritten, or switched to another source.
+- The new Finish Line summary no longer places the transfer filters underneath
+  the release list, restoring reliable pointer access at every supported size.
+- Transfers remains free of horizontal overflow at both the standard 1280×720
+  preview and Forever's 1024×680 minimum window size.
+
 ## [0.0.29] - 2026-07-27
 
 ### Added

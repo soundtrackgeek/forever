@@ -1,0 +1,64 @@
+import { describe, expect, it } from "vitest";
+import type { Transfer } from "../types";
+import { releaseHealth } from "./finishLine";
+import { groupTransfers } from "./transfers";
+
+const transfer = (
+  id: string,
+  status: Transfer["status"],
+  overrides: Partial<Transfer> = {},
+): Transfer => ({
+  id,
+  releaseId: "finish-line-release",
+  releaseTitle: "Finish Line",
+  releaseFolder: "C:\\Downloads\\Finish Line",
+  fileIndex: Number(id),
+  fileCount: 3,
+  title: `${id}.flac`,
+  username: "first-source",
+  remoteFilename: `Music\\Finish Line\\${id}.flac`,
+  sizeBytes: 100,
+  transferredBytes: status === "completed" ? 100 : 20,
+  speedBytesPerSecond: 0,
+  etaSeconds: null,
+  status,
+  queuePosition: null,
+  localPath: `C:\\Downloads\\Finish Line\\${id}.flac`,
+  error: null,
+  createdAtMs: Number(id),
+  updatedAtMs: Number(id),
+  ...overrides,
+});
+
+describe("Finish Line release health", () => {
+  it("distinguishes verified, missing, and recovering files", () => {
+    const group = groupTransfers([
+      transfer("1", "completed", { verificationStatus: "verified" }),
+      transfer("2", "completed", { verificationStatus: "missing" }),
+      transfer("3", "retrying", { retryCount: 2, retryAtMs: 30_000 }),
+    ])[0];
+
+    expect(releaseHealth(group)).toMatchObject({
+      state: "attention",
+      completedCount: 2,
+      verifiedCount: 1,
+      missingCount: 1,
+      recoveringCount: 1,
+      nextRetryAtMs: 30_000,
+    });
+  });
+
+  it("deduplicates persisted alternative sources across release files", () => {
+    const alternative = {
+      username: "backup-source",
+      remoteFolder: "Music\\Finish Line [FLAC]",
+      files: [{ title: "1.flac", remoteFilename: "Music\\Finish Line [FLAC]\\1.flac", sizeBytes: 100 }],
+    };
+    const group = groupTransfers([
+      transfer("1", "completed", { verificationStatus: "verified", alternativeSources: [alternative] }),
+      transfer("2", "queued", { alternativeSources: [alternative] }),
+    ])[0];
+
+    expect(releaseHealth(group).alternatives).toEqual([alternative]);
+  });
+});
