@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.42` adds **Safe Passage** so active
-> downloads are flushed, persisted, and resumed safely across app updates and
-> Windows exit requests.
+> **Status:** pre-alpha. Version `0.0.43` is the release-pipeline hotfix for
+> **Safe Passage**, keeping active downloads flushed, persisted, and resumable
+> across app updates and Windows exit requests.
 
-If `0.0.16` is installed, download and run the latest `0.0.42` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.43` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.

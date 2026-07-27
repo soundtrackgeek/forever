@@ -5,6 +5,19 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.43] - 2026-07-27
+
+### Changed
+
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.43`.
+
+### Fixed
+
+- Frontend integration tests now have an explicit Windows CI timeout,
+  preventing a healthy release from failing when the GitHub runner needs
+  slightly more than Vitest's five-second default for a complete app flow.
+
 ## [0.0.42] - 2026-07-27
 
 ### Added

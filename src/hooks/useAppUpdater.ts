@@ -35,18 +35,17 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.41",
-  version: "0.0.42",
-  body: `## What’s new in Forever 0.0.42
+  currentVersion: "0.0.42",
+  version: "0.0.43",
+  body: `## What’s new in Forever 0.0.43
 
-### Added
+### Fixed
 
-- Safe Passage coordinates active downloads with app updates and Windows exit requests.
-- Updates can pause immediately or wait for current files to finish without starting another queued file.
+- Release validation now gives frontend integration flows enough time on slower Windows runners.
 
 ### Changed
 
-- Partial files are flushed to disk before Forever restarts, then resume automatically after launch.`,
+- Safe Passage remains unchanged: active downloads are still flushed, persisted, and resumed safely.`,
   date: "2026-07-27",
 };
 

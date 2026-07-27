@@ -831,17 +831,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.42 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.43 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Safe Passage coordinates active downloads with app updates and Windows exit requests.",
+        "Release validation now gives frontend integration flows enough time on slower Windows runners.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Partial files are flushed to disk before Forever restarts, then resume automatically after launch.",
+        "Safe Passage remains unchanged: active downloads are still flushed, persisted, and resumed safely.",
       ),
     ).toBeInTheDocument();
     expect(
