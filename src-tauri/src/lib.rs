@@ -70,6 +70,8 @@ pub fn run() {
             connection::transfer_cancel_release,
             connection::transfer_reorder_release,
             connection::transfer_clear_completed,
+            connection::transfer_set_release_filed,
+            connection::transfer_clear_release_history,
             connection::transfer_verify_release,
             connection::transfers_verify_completed,
             connection::transfer_retry_release_issues,

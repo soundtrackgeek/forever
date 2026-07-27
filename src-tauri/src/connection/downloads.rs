@@ -149,6 +149,8 @@ pub struct TransferSnapshot {
     #[serde(default)]
     pub verified_at_ms: Option<u64>,
     #[serde(default)]
+    pub filed_at_ms: Option<u64>,
+    #[serde(default)]
     pub alternative_sources: Vec<ReleaseAlternativeSource>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
@@ -420,6 +422,7 @@ impl TransferHub {
             verification_status: VerificationStatus::Pending,
             verification_message: None,
             verified_at_ms: None,
+            filed_at_ms: None,
             alternative_sources: Vec::new(),
             created_at_ms: now,
             updated_at_ms: now,
@@ -492,6 +495,7 @@ impl TransferHub {
                 verification_status: VerificationStatus::Pending,
                 verification_message: None,
                 verified_at_ms: None,
+                filed_at_ms: None,
                 alternative_sources: alternatives.clone(),
                 created_at_ms: now.saturating_add(index as u64),
                 updated_at_ms: now,
@@ -953,6 +957,37 @@ impl TransferHub {
                 })
             });
         })?;
+        Ok(self.snapshot())
+    }
+
+    pub fn set_release_filed(
+        &self,
+        release_id: &str,
+        filed: bool,
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        {
+            let mut transfers = self
+                .transfers
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            set_release_filed_state(&mut transfers, release_id, filed, timestamp_ms())?;
+        }
+        self.persist_and_publish()?;
+        Ok(self.snapshot())
+    }
+
+    pub fn clear_release_history(
+        &self,
+        release_ids: &[String],
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        {
+            let mut transfers = self
+                .transfers
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            remove_completed_release_history(&mut transfers, release_ids)?;
+        }
+        self.persist_and_publish()?;
         Ok(self.snapshot())
     }
 
@@ -1455,6 +1490,70 @@ fn prepare_transfers_for_restart(
             transfer.updated_at_ms = now;
         }
     }
+}
+
+fn set_release_filed_state(
+    transfers: &mut [TransferSnapshot],
+    release_id: &str,
+    filed: bool,
+    now: u64,
+) -> Result<(), TransferError> {
+    let release = transfers
+        .iter()
+        .filter(|transfer| transfer.release_id.as_deref() == Some(release_id))
+        .collect::<Vec<_>>();
+    if release.is_empty() {
+        return Err(TransferError::ReleaseNotFound);
+    }
+    if release
+        .iter()
+        .any(|transfer| transfer.status != TransferStatus::Completed)
+    {
+        return Err(TransferError::ReleaseNotCompleted);
+    }
+
+    for transfer in transfers
+        .iter_mut()
+        .filter(|transfer| transfer.release_id.as_deref() == Some(release_id))
+    {
+        transfer.filed_at_ms = filed.then_some(now);
+    }
+    Ok(())
+}
+
+fn remove_completed_release_history(
+    transfers: &mut Vec<TransferSnapshot>,
+    release_ids: &[String],
+) -> Result<(), TransferError> {
+    if release_ids.is_empty() || release_ids.len() > 300 {
+        return Err(TransferError::InvalidReleaseSelection);
+    }
+    let requested = release_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    for release_id in &requested {
+        let release = transfers
+            .iter()
+            .filter(|transfer| transfer.release_id.as_deref() == Some(*release_id))
+            .collect::<Vec<_>>();
+        if release.is_empty() {
+            return Err(TransferError::ReleaseNotFound);
+        }
+        if release
+            .iter()
+            .any(|transfer| transfer.status != TransferStatus::Completed)
+        {
+            return Err(TransferError::ReleaseNotCompleted);
+        }
+    }
+    transfers.retain(|transfer| {
+        !transfer
+            .release_id
+            .as_deref()
+            .is_some_and(|release_id| requested.contains(release_id))
+    });
+    Ok(())
 }
 
 fn reconcile_transfer_after_restart(transfer: &mut TransferSnapshot) {
@@ -1966,6 +2065,10 @@ pub enum TransferError {
     NotFound,
     #[error("That release is no longer in the queue.")]
     ReleaseNotFound,
+    #[error("Only completed releases can be filed or removed from Arrival Desk.")]
+    ReleaseNotCompleted,
+    #[error("Choose between 1 and 300 completed releases to remove from Arrival Desk.")]
+    InvalidReleaseSelection,
     #[error("That release has no missing or failed files that can be retried safely.")]
     NoRecoverableIssues,
     #[error("That alternative source is no longer available for this release.")]
@@ -2036,6 +2139,7 @@ mod tests {
             verification_status: VerificationStatus::Pending,
             verification_message: None,
             verified_at_ms: None,
+            filed_at_ms: None,
             alternative_sources: Vec::new(),
             created_at_ms: u64::from(file_index),
             updated_at_ms: u64::from(file_index),
@@ -2084,6 +2188,7 @@ mod tests {
             verification_status: VerificationStatus::Pending,
             verification_message: None,
             verified_at_ms: None,
+            filed_at_ms: None,
             alternative_sources: Vec::new(),
             created_at_ms: 0,
             updated_at_ms: 0,
@@ -2126,6 +2231,7 @@ mod tests {
             verification_status: VerificationStatus::Pending,
             verification_message: None,
             verified_at_ms: None,
+            filed_at_ms: None,
             alternative_sources: Vec::new(),
             created_at_ms: 1,
             updated_at_ms: 2,
@@ -2555,6 +2661,73 @@ mod tests {
         assert_eq!(store.relay_suggestion_minutes, 10);
         assert!(RELAY_SUGGESTION_MINUTES.contains(&0));
         assert!(RELAY_SUGGESTION_MINUTES.contains(&30));
+    }
+
+    #[test]
+    fn completed_releases_can_be_marked_filed_and_reopened() {
+        let mut transfers = vec![
+            release_transfer(
+                "one",
+                "release-arrival",
+                "listener",
+                "Album\\01.flac",
+                TransferStatus::Completed,
+                1,
+            ),
+            release_transfer(
+                "two",
+                "release-arrival",
+                "listener",
+                "Album\\02.flac",
+                TransferStatus::Completed,
+                2,
+            ),
+        ];
+
+        set_release_filed_state(&mut transfers, "release-arrival", true, 42).unwrap();
+        assert!(transfers
+            .iter()
+            .all(|transfer| transfer.filed_at_ms == Some(42)));
+        assert_eq!(transfers[0].updated_at_ms, 1);
+        assert_eq!(transfers[1].updated_at_ms, 2);
+
+        set_release_filed_state(&mut transfers, "release-arrival", false, 43).unwrap();
+        assert!(transfers
+            .iter()
+            .all(|transfer| transfer.filed_at_ms.is_none()));
+
+        transfers[0].status = TransferStatus::Queued;
+        assert!(matches!(
+            set_release_filed_state(&mut transfers, "release-arrival", true, 44),
+            Err(TransferError::ReleaseNotCompleted)
+        ));
+    }
+
+    #[test]
+    fn arrival_history_removes_only_selected_completed_releases() {
+        let mut transfers = vec![
+            release_transfer(
+                "filed",
+                "release-filed",
+                "listener",
+                "Filed\\01.flac",
+                TransferStatus::Completed,
+                1,
+            ),
+            release_transfer(
+                "kept",
+                "release-kept",
+                "listener",
+                "Kept\\01.flac",
+                TransferStatus::Completed,
+                1,
+            ),
+        ];
+
+        remove_completed_release_history(&mut transfers, &["release-filed".to_owned()]).unwrap();
+
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].release_id.as_deref(), Some("release-kept"));
     }
 
     #[test]

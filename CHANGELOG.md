@@ -5,6 +5,37 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.44] - 2026-07-27
+
+### Added
+
+- **Arrival Desk** inside Archive turns completed album downloads into a
+  filterable journey with **Ready to file**, **Filed away**, **Moved**, and
+  **Needs attention** states.
+- Completed releases can be confirmed as filed, reopened, revealed, verified,
+  removed individually from transfer history, or cleared in a filed-history
+  batch without deleting downloaded files.
+- Home's Archive Pulse now reports albums ready to file and links directly to
+  the Arrival Desk.
+- Native regression coverage protects persisted filing state and selective
+  completed-history removal; frontend coverage protects derivation and the
+  complete Arrival Desk interaction.
+
+### Changed
+
+- Completed releases are reconciled with Music Library as soon as transfer
+  state changes and every five minutes while Forever remains open.
+- Transfers marked filed by the listener share Finish Line's existing
+  **Moved** semantics instead of later appearing as missing.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.44`.
+
+### Fixed
+
+- Moving a successfully downloaded album into a separate music collection no
+  longer leaves permanent false-positive attention state once it is confirmed
+  at the Arrival Desk.
+
 ## [0.0.43] - 2026-07-27
 
 ### Changed

@@ -13,6 +13,7 @@ export type ReleaseHealthState =
 export type ReleaseHealth = {
   state: ReleaseHealthState;
   filedByArchive: boolean;
+  manuallyFiled: boolean;
   completedCount: number;
   verifiedCount: number;
   pendingCount: number;
@@ -87,9 +88,13 @@ export function releaseHealth(
     && mismatchCount === 0
     && failedCount === 0,
   );
+  const manuallyFiled = Boolean(
+    group.status === "completed"
+    && group.transfers.some((transfer) => Boolean(transfer.filedAtMs)),
+  );
 
   let state: ReleaseHealthState = "waiting";
-  if (fullyMoved || filedByArchive) state = "moved";
+  if (fullyMoved || filedByArchive || manuallyFiled) state = "moved";
   else if (missingCount || mismatchCount || failedCount) state = "attention";
   else if (recovering.length) state = "recovering";
   else if (group.status === "active") state = "downloading";
@@ -101,6 +106,7 @@ export function releaseHealth(
   return {
     state,
     filedByArchive,
+    manuallyFiled,
     completedCount,
     verifiedCount,
     pendingCount,

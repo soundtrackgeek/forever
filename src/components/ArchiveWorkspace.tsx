@@ -21,8 +21,11 @@ import {
 import { type ReactNode, useMemo, useState } from "react";
 import type { ArchiveStatus, WantedAlbum, WantedSnapshot } from "../types";
 import { formatAlbumBytes } from "../utils/albumSources";
+import { buildArrivals } from "../utils/arrivals";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
 import { albumDownloadLabel, type AlbumDownloadState } from "../utils/albumDownloadState";
+import type { TransferGroup } from "../utils/transfers";
+import { ArrivalDesk } from "./ArrivalDesk";
 
 type ArchiveWorkspaceProps = {
   initialTab?: ArchiveTab;
@@ -44,11 +47,17 @@ type ArchiveWorkspaceProps = {
   downloadStateByAlbumId: ReadonlyMap<string, AlbumDownloadState>;
   onOpenTransfer: (groupId: string) => void;
   onDismissWantedError: () => void;
+  transferGroups: TransferGroup[];
+  archiveOwnedReleaseIds: ReadonlySet<string>;
+  onRevealRelease: (releaseId: string) => Promise<unknown>;
+  onVerifyRelease: (releaseId: string) => Promise<unknown>;
+  onSetReleaseFiled: (releaseId: string, filed: boolean) => Promise<unknown>;
+  onClearReleaseHistory: (releaseIds: string[]) => Promise<unknown>;
   missingShelf: ReactNode;
   onOpenMissing: () => void;
 };
 
-type ArchiveTab = "library" | "missing" | "wanted";
+type ArchiveTab = "library" | "arrivals" | "missing" | "wanted";
 type WantedFilter = "all" | "matches" | "waiting" | "fulfilled";
 
 const count = (value: number | null | undefined) =>
@@ -120,6 +129,12 @@ export function ArchiveWorkspace({
   downloadStateByAlbumId,
   onOpenTransfer,
   onDismissWantedError,
+  transferGroups,
+  archiveOwnedReleaseIds,
+  onRevealRelease,
+  onVerifyRelease,
+  onSetReleaseFiled,
+  onClearReleaseHistory,
   missingShelf,
   onOpenMissing,
 }: ArchiveWorkspaceProps) {
@@ -129,6 +144,10 @@ export function ArchiveWorkspace({
   const availableCount = wanted.albums.filter((album) => !album.fulfilled && album.matchingSourceCount > 0).length;
   const waitingCount = wanted.albums.filter((album) => !album.fulfilled && album.matchingSourceCount === 0).length;
   const fulfilledCount = wanted.albums.filter((album) => album.fulfilled).length;
+  const arrivalCount = useMemo(
+    () => buildArrivals(transferGroups, archiveOwnedReleaseIds).length,
+    [archiveOwnedReleaseIds, transferGroups],
+  );
   const visibleWanted = useMemo(
     () => wanted.albums.filter((album) => {
       if (filter === "matches") return !album.fulfilled && album.matchingSourceCount > 0;
@@ -181,6 +200,9 @@ export function ArchiveWorkspace({
         <button type="button" role="tab" aria-selected={tab === "library"} className={tab === "library" ? "is-active" : ""} onClick={() => setTab("library")}>
           <Database size={15} /> Library source
         </button>
+        <button type="button" role="tab" aria-selected={tab === "arrivals"} className={tab === "arrivals" ? "is-active" : ""} onClick={() => setTab("arrivals")}>
+          <Archive size={15} /> Arrivals <small>{arrivalCount}</small>
+        </button>
         <button type="button" role="tab" aria-selected={tab === "missing"} className={tab === "missing" ? "is-active" : ""} onClick={() => { setTab("missing"); onOpenMissing(); }}>
           <Record size={15} /> Missing shelf
         </button>
@@ -230,6 +252,18 @@ export function ArchiveWorkspace({
             </article>
           </div>
         </>
+      ) : tab === "arrivals" ? (
+        <ArrivalDesk
+          groups={transferGroups}
+          archiveOwnedReleaseIds={archiveOwnedReleaseIds}
+          refreshing={loading}
+          onRefreshArchive={onRefresh}
+          onRevealRelease={onRevealRelease}
+          onVerifyRelease={onVerifyRelease}
+          onSetReleaseFiled={onSetReleaseFiled}
+          onClearReleaseHistory={onClearReleaseHistory}
+          onOpenTransfer={onOpenTransfer}
+        />
       ) : tab === "missing" ? (
         missingShelf
       ) : (

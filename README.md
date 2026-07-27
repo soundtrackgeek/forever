@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.43` is the release-pipeline hotfix for
-> **Safe Passage**, keeping active downloads flushed, persisted, and resumable
-> across app updates and Windows exit requests.
+> **Status:** pre-alpha. Version `0.0.44` introduces **Arrival Desk**, a calm
+> post-download workflow for reconciling completed albums with the real,
+> read-only Music Library collection.
 
-If `0.0.16` is installed, download and run the latest `0.0.43` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.44` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -58,6 +58,13 @@ configuration and transfers.
   `music-library.sqlite3` database with SQLite read-only and query-only
   enforcement, reports its latest import and inventory totals, and never adds
   Forever downloads to the external collection
+- **Arrival Desk** inside Archive separates completed album downloads into
+  **Ready to file**, **Filed away**, **Moved**, and **Needs attention** lanes,
+  with manual filing confirmation, undo, reveal, verification, per-release
+  history removal, and a bulk clear for filed history that never deletes files
+- Completed downloads are reconciled with the read-only Music Library when
+  their state changes and every five minutes while Forever is open, so albums
+  move to **Filed away** after the external collection recognizes them
 - A selective **Missing Shelf** that searches artists already present in Music
   Library, prefers its verified MusicBrainz artist links and cached official
   release groups, compares only the artist you open, and shows studio-album
@@ -274,6 +281,16 @@ up a newer Music Library import. Forever opens this database using SQLite's
 read-only flag and query-only mode; it has no Archive write command. Soulseek
 downloads continue to use the folder configured under Connection settings and
 are never imported into Archive.
+
+Open **Archive → Arrivals** after downloading an album. Forever shows verified
+downloads as **Ready to file**, recognizes albums already present in Music
+Library as **Filed away**, and distinguishes a complete move from a genuine
+partial-file issue. Use **Mark as filed** when you have moved an album into a
+different collection that Music Library does not track; the confirmation is
+stored only in Forever and can be undone. **Clear filed history** and the row
+trash controls remove completed transfer records only—they never delete music
+or write to Music Library. Use **Reconcile now** for an immediate read-only
+check; otherwise Forever rechecks automatically every five minutes.
 
 Open **Archive → Missing shelf** to browse or search artists found in Music
 Library. Forever initially shows a bounded list and does not scan every artist's

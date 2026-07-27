@@ -127,7 +127,7 @@ function App() {
   const [activeView, setActiveView] = useState("home");
   const [transferShelfExpanded, setTransferShelfExpanded] = useState(false);
   const [transferFocus, setTransferFocus] = useState<{ groupId: string; requestId: number } | null>(null);
-  const [archiveFocus, setArchiveFocus] = useState<{ tab: "missing" | "wanted"; requestId: number } | null>(null);
+  const [archiveFocus, setArchiveFocus] = useState<{ tab: "arrivals" | "missing" | "wanted"; requestId: number } | null>(null);
   const [roomFocus, setRoomFocus] = useState<{ roomName: string | null; requestId: number } | null>(null);
   const dial = useDialMemory();
   const searchMode = dial.active.mode;
@@ -522,7 +522,7 @@ function App() {
     setActiveView("transfers");
   };
 
-  const openArchive = (tab: "missing" | "wanted") => {
+  const openArchive = (tab: "arrivals" | "missing" | "wanted") => {
     setArchiveFocus({ tab, requestId: Date.now() });
     setActiveView("archive");
     if (tab === "missing") void missingShelf.activate().catch(() => undefined);
@@ -820,6 +820,12 @@ function App() {
               firstReleaseDate: album.firstReleaseDate,
             })}
             onDismissWantedError={wanted.clearError}
+            transferGroups={transferGroups}
+            archiveOwnedReleaseIds={archiveOwnedReleaseIds}
+            onRevealRelease={transfers.revealRelease}
+            onVerifyRelease={transfers.verifyRelease}
+            onSetReleaseFiled={transfers.setReleaseFiled}
+            onClearReleaseHistory={transfers.clearReleaseHistory}
             onOpenMissing={() => void missingShelf.activate().catch(() => undefined)}
             missingShelf={(
               <MissingShelfWorkspace

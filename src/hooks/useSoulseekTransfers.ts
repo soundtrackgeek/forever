@@ -93,6 +93,32 @@ const previewTransfers: Transfer[] = [
       updatedAtMs: now,
     }),
   ),
+  ...["01 - Night Window.mp3", "02 - Last Transmission.mp3"].map(
+    (title, index): Transfer => ({
+      id: `preview-arrival-${index + 1}`,
+      releaseId: "preview-after-midnight",
+      releaseTitle: "Signal Choir - After Midnight (2026)",
+      releaseFolder: "C:\\Users\\Music\\Forever\\Signal Choir - After Midnight (2026)",
+      fileIndex: index + 1,
+      fileCount: 2,
+      title,
+      username: "midnightrelay",
+      remoteFilename: `Music\\Signal Choir\\After Midnight\\${title}`,
+      sizeBytes: 10_800_000 + index * 900_000,
+      transferredBytes: 10_800_000 + index * 900_000,
+      speedBytesPerSecond: 0,
+      etaSeconds: 0,
+      status: "completed",
+      queuePosition: null,
+      localPath: `C:\\Users\\Music\\Forever\\Signal Choir - After Midnight (2026)\\${title}`,
+      error: null,
+      verificationStatus: "verified",
+      verifiedAtMs: now - 3_600_000,
+      filedAtMs: null,
+      createdAtMs: now - 3_700_000 + index,
+      updatedAtMs: now - 3_600_000,
+    }),
+  ),
   {
     id: "preview-apex-horizon",
     releaseId: "preview-apex-horizon-release",
@@ -824,6 +850,59 @@ export function useSoulseekTransfers() {
     });
   }, [native]);
 
+  const setReleaseFiled = useCallback(async (releaseId: string, filed: boolean) => {
+    setError(null);
+    try {
+      if (native) {
+        const next = await invoke<TransferQueueSnapshot>("transfer_set_release_filed", {
+          releaseId,
+          filed,
+        });
+        setSnapshot(next);
+        return next;
+      }
+      let nextSnapshot = emptySnapshot;
+      setSnapshot((current) => {
+        const timestamp = Date.now();
+        nextSnapshot = withCount(current.transfers.map((transfer) =>
+          transfer.releaseId === releaseId && transfer.status === "completed"
+            ? { ...transfer, filedAtMs: filed ? timestamp : null }
+            : transfer,
+        ), current);
+        return nextSnapshot;
+      });
+      return nextSnapshot;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native]);
+
+  const clearReleaseHistory = useCallback(async (releaseIds: string[]) => {
+    setError(null);
+    try {
+      if (native) {
+        const next = await invoke<TransferQueueSnapshot>("transfer_clear_release_history", {
+          releaseIds,
+        });
+        setSnapshot(next);
+        return next;
+      }
+      let nextSnapshot = emptySnapshot;
+      const requested = new Set(releaseIds);
+      setSnapshot((current) => {
+        nextSnapshot = withCount(current.transfers.filter(
+          (transfer) => !transfer.releaseId || !requested.has(transfer.releaseId),
+        ), current);
+        return nextSnapshot;
+      });
+      return nextSnapshot;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native]);
+
   const revealRelease = useCallback(
     async (releaseId: string) => {
       if (!native) return;
@@ -1092,6 +1171,8 @@ export function useSoulseekTransfers() {
       cancelRelease,
       reorderRelease,
       clearCompleted,
+      setReleaseFiled,
+      clearReleaseHistory,
       revealRelease,
       verifyRelease,
       verifyCompleted,
@@ -1112,6 +1193,8 @@ export function useSoulseekTransfers() {
       cancel,
       cancelRelease,
       clearCompleted,
+      setReleaseFiled,
+      clearReleaseHistory,
       clearCompletionNotice,
       clearActivityNotice,
       clearError,

@@ -314,6 +314,37 @@ describe("Forever shell", () => {
     expect(screen.getByText("1,101,878")).toBeInTheDocument();
   });
 
+  it("reconciles completed downloads at the Arrival Desk without writing to Music Library", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Arrival Desk" }));
+
+    expect(screen.getByRole("tab", { name: "Arrivals 2" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      screen.getByRole("heading", { name: "Downloads, on their way home." }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Music Library · read-only")).toBeInTheDocument();
+
+    const afterMidnight = screen.getByText("After Midnight").closest("article") as HTMLElement;
+    expect(within(afterMidnight).getByText("Ready to file")).toBeInTheDocument();
+    fireEvent.click(within(afterMidnight).getByRole("button", { name: "Mark as filed" }));
+
+    await waitFor(() => {
+      expect(within(afterMidnight).getByText("Filed away")).toBeInTheDocument();
+      expect(within(afterMidnight).getByText("Confirmed by you")).toBeInTheDocument();
+    });
+    expect(within(afterMidnight).getByText(/completed 1h ago/)).toBeInTheDocument();
+    expect(within(afterMidnight).getByRole("button", { name: "Undo filed" })).toBeEnabled();
+
+    const arrivalList = document.querySelector(".arrival-list") as HTMLElement;
+    const apex = within(arrivalList).getByText("Apex Horizon (Deluxe)").closest("article") as HTMLElement;
+    expect(within(apex).getByText("Matched in Music Library")).toBeInTheDocument();
+    expect(within(apex).queryByRole("button", { name: "Undo filed" })).not.toBeInTheDocument();
+  });
+
   it("finds collection gaps and adds a batch to Wanted with one Smart Match profile", async () => {
     render(<App />);
 
@@ -609,7 +640,7 @@ describe("Forever shell", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText(/Album ETA 1m 24s/).length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Completed 1" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Completed 2" }));
     expect(within(workspace).getByText("Apex Horizon (Deluxe)")).toBeInTheDocument();
     expect(within(workspace).queryByText("Spheric Dusk")).not.toBeInTheDocument();
   });
@@ -621,7 +652,7 @@ describe("Forever shell", () => {
     expect(screen.getByLabelText("Finish Line release health")).toBeInTheDocument();
     const workspace = screen.getByRole("heading", { name: "Transfers" }).closest("section") as HTMLElement;
 
-    fireEvent.click(screen.getByRole("tab", { name: "Completed 1" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Completed 2" }));
     const apex = within(workspace).getByText("Apex Horizon (Deluxe)").closest("article") as HTMLElement;
     await waitFor(() => expect(within(apex).getByText("Filed away")).toBeInTheDocument());
     expect(within(apex).getByText(/1 file moved from downloads · Archive owns album/)).toBeInTheDocument();
@@ -807,7 +838,7 @@ describe("Forever shell", () => {
     expect(downloadLanes).toHaveValue("3");
     fireEvent.change(downloadLanes, { target: { value: "5" } });
     expect(downloadLanes).toHaveValue("5");
-    expect(screen.getByText("1/5 lanes · 3 releases")).toBeInTheDocument();
+    expect(screen.getByText("1/5 lanes · 4 releases")).toBeInTheDocument();
     const relayDelay = screen.getByRole("combobox", {
       name: "Signal Relay suggestion delay",
     });
@@ -831,17 +862,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.43 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.44 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Release validation now gives frontend integration flows enough time on slower Windows runners.",
+        "Arrival Desk turns completed album downloads into a calm, filterable filing workflow.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Safe Passage remains unchanged: active downloads are still flushed, persisted, and resumed safely.",
+        "Forever reconciles completed downloads with Music Library immediately and every five minutes while keeping that database strictly read-only.",
       ),
     ).toBeInTheDocument();
     expect(

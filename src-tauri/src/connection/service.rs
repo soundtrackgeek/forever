@@ -1198,6 +1198,21 @@ impl ConnectionManager {
         Ok(self.transfers.clear_completed()?)
     }
 
+    pub fn set_release_filed(
+        &self,
+        release_id: &str,
+        filed: bool,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        Ok(self.transfers.set_release_filed(release_id, filed)?)
+    }
+
+    pub fn clear_release_history(
+        &self,
+        release_ids: &[String],
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        Ok(self.transfers.clear_release_history(release_ids)?)
+    }
+
     pub fn verify_release(
         &self,
         release_id: &str,

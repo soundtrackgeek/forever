@@ -24,9 +24,10 @@ import type {
   WantedSnapshot,
 } from "../types";
 import { releaseHealth } from "../utils/finishLine";
+import { buildArrivals } from "../utils/arrivals";
 import { groupTransfers, type TransferGroup } from "../utils/transfers";
 
-type ArchiveDestination = "missing" | "wanted";
+type ArchiveDestination = "arrivals" | "missing" | "wanted";
 
 type ListeningPostWorkspaceProps = {
   connection: ConnectionSnapshot;
@@ -99,8 +100,10 @@ const activityForGroup = (
       title: group.title,
       detail: health.filedByArchive
         ? `${health.missingCount} ${health.missingCount === 1 ? "file" : "files"} left downloads · ${health.verifiedCount} remain`
-        : `${group.transfers.length} ${group.transfers.length === 1 ? "file" : "files"} filed away`,
-      label: health.filedByArchive ? "Filed in Music Library" : "Moved to library",
+        : health.manuallyFiled
+          ? `${group.transfers.length} ${group.transfers.length === 1 ? "file" : "files"} confirmed filed`
+          : `${group.transfers.length} ${group.transfers.length === 1 ? "file" : "files"} left downloads`,
+      label: health.filedByArchive ? "Filed in Music Library" : health.manuallyFiled ? "Filed away" : "Moved outside Forever",
       tone: "moved",
       atMs: group.updatedAtMs,
       onOpen: () => onOpenTransfer(group.id),
@@ -190,6 +193,8 @@ export function ListeningPostWorkspace({
   onSearchAlbums,
 }: ListeningPostWorkspaceProps) {
   const groups = groupTransfers(transfers);
+  const arrivals = buildArrivals(groups, archiveOwnedReleaseIds);
+  const readyArrivals = arrivals.filter((arrival) => arrival.state === "ready").length;
   const active = groups.find((group) => group.status === "active") ?? null;
   const queued = groups.filter((group) => group.status === "queued").slice(0, 2);
   const activeProgress = active?.sizeBytes
@@ -319,8 +324,10 @@ export function ListeningPostWorkspace({
             <div><dt>Owned</dt><dd>{compactNumber(archiveStatus?.albumCount ?? null)}</dd><small>albums in Music Library</small></div>
             <div><dt>Wanted</dt><dd>{unfulfilledWanted}</dd><small>signals still listening</small></div>
             <div><dt>Missing</dt><dd>{compactNumber(missingCount)}</dd><small>{missingShelfName ? `${missingShelfName} studio shelf` : "choose a shelf to compare"}</small></div>
+            <div><dt>Arrivals</dt><dd>{readyArrivals}</dd><small>ready to file</small></div>
           </dl>
           <div className="listening-post-archive-actions">
+            <button type="button" onClick={() => onOpenArchive("arrivals")}><FolderOpen size={16} /> Open Arrival Desk</button>
             <button type="button" onClick={() => onOpenArchive("missing")}><Archive size={16} /> Open Missing Shelf</button>
             <button type="button" onClick={onSearchAlbums}><MagnifyingGlass size={16} /> Search albums</button>
           </div>

@@ -614,6 +614,27 @@ pub async fn transfer_clear_completed(
 }
 
 #[tauri::command]
+pub async fn transfer_set_release_filed(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+    filed: bool,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .set_release_filed(&release_id, filed)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_clear_release_history(
+    manager: State<'_, ConnectionManager>,
+    release_ids: Vec<String>,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .clear_release_history(&release_ids)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn transfer_verify_release(
     manager: State<'_, ConnectionManager>,
     release_id: String,

@@ -342,6 +342,7 @@ export type Transfer = {
   verificationStatus?: "pending" | "verified" | "missing" | "sizeMismatch";
   verificationMessage?: string | null;
   verifiedAtMs?: number | null;
+  filedAtMs?: number | null;
   alternativeSources?: ReleaseAlternativeSource[];
   createdAtMs: number;
   updatedAtMs: number;

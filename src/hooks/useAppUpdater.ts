@@ -35,17 +35,18 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.42",
-  version: "0.0.43",
-  body: `## What’s new in Forever 0.0.43
+  currentVersion: "0.0.43",
+  version: "0.0.44",
+  body: `## What’s new in Forever 0.0.44
 
-### Fixed
+### Added
 
-- Release validation now gives frontend integration flows enough time on slower Windows runners.
+- **Arrival Desk** turns completed album downloads into a calm, filterable filing workflow.
+- Albums can be confirmed as filed, reopened, revealed, verified, or removed from transfer history without deleting their files.
 
 ### Changed
 
-- Safe Passage remains unchanged: active downloads are still flushed, persisted, and resumed safely.`,
+- Forever reconciles completed downloads with Music Library immediately and every five minutes while keeping that database strictly read-only.`,
   date: "2026-07-27",
 };
 

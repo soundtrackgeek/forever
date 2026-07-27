@@ -93,10 +93,7 @@ export function useArchiveInventory(
   );
   const transferQueryKey = useMemo(
     () => transferGroups
-      .filter((group) =>
-        group.status === "completed"
-        && group.transfers.some((transfer) => transfer.verificationStatus === "missing"),
-      )
+      .filter((group) => group.status === "completed")
       .map(transferArchiveQuery)
       .filter((query): query is NonNullable<ReturnType<typeof transferArchiveQuery>> => Boolean(query))
       .slice(0, 300)
@@ -154,6 +151,14 @@ export function useArchiveInventory(
       current = false;
     };
   }, [readStatus]);
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => setRevision((current) => current + 1),
+      5 * 60_000,
+    );
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let current = true;
