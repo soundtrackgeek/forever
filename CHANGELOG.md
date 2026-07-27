@@ -5,6 +5,20 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.45] - 2026-07-27
+
+### Changed
+
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify hotfix version `0.0.45`.
+
+### Fixed
+
+- The Wanted cadence integration flow now waits for React to commit its
+  asynchronous preference update before asserting the selected value,
+  preventing slower Windows release runners from intermittently reading the
+  previous 30-minute cadence after selecting 15 minutes.
+
 ## [0.0.44] - 2026-07-27
 
 ### Added

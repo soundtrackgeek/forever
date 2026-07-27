@@ -439,8 +439,8 @@ describe("Forever shell", () => {
 
     const rhythm = screen.getByRole("combobox", { name: "Check rhythm" });
     fireEvent.change(rhythm, { target: { value: "15" } });
-    expect(rhythm).toHaveValue("15");
-    expect(screen.getByText(/Checks run every 15 minutes/)).toBeInTheDocument();
+    await waitFor(() => expect(rhythm).toHaveValue("15"));
+    expect(await screen.findByText(/Checks run every 15 minutes/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: /Waiting/ }));
     const sonicHoliday = screen.getByText("A Sonic Holiday").closest("article") as HTMLElement;
@@ -862,17 +862,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.44 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.45 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Arrival Desk turns completed album downloads into a calm, filterable filing workflow.",
+        "Wanted cadence integration coverage now waits for React’s committed state, preventing slower Windows release runners from reading the previous value.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Forever reconciles completed downloads with Music Library immediately and every five minutes while keeping that database strictly read-only.",
+        "Arrival Desk and all 0.0.44 application behavior remain unchanged.",
       ),
     ).toBeInTheDocument();
     expect(

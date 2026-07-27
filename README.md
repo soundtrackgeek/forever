@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.44` introduces **Arrival Desk**, a calm
-> post-download workflow for reconciling completed albums with the real,
-> read-only Music Library collection.
+> **Status:** pre-alpha. Version `0.0.45` is the release-pipeline hotfix for
+> **Arrival Desk**, retaining the 0.0.44 post-download workflow while making
+> its Windows release validation deterministic.
 
-If `0.0.16` is installed, download and run the latest `0.0.44` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.45` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.

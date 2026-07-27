@@ -35,18 +35,17 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.43",
-  version: "0.0.44",
-  body: `## What’s new in Forever 0.0.44
+  currentVersion: "0.0.44",
+  version: "0.0.45",
+  body: `## What’s new in Forever 0.0.45
 
-### Added
+### Fixed
 
-- **Arrival Desk** turns completed album downloads into a calm, filterable filing workflow.
-- Albums can be confirmed as filed, reopened, revealed, verified, or removed from transfer history without deleting their files.
+- Wanted cadence integration coverage now waits for React’s committed state, preventing slower Windows release runners from reading the previous value.
 
 ### Changed
 
-- Forever reconciles completed downloads with Music Library immediately and every five minutes while keeping that database strictly read-only.`,
+- Arrival Desk and all 0.0.44 application behavior remain unchanged.`,
   date: "2026-07-27",
 };
 
