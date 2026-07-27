@@ -581,6 +581,14 @@ impl ConnectionManager {
         Ok(self.wanted.add(request)?)
     }
 
+    pub fn add_many_wanted(
+        &self,
+        requests: Vec<WantedAlbumRequest>,
+        preferences: WantedPreferences,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.add_many(requests, preferences)?)
+    }
+
     pub fn remove_wanted(&self, album_id: &str) -> Result<WantedSnapshot, ConnectionServiceError> {
         Ok(self.wanted.remove(album_id)?)
     }

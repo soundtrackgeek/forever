@@ -1,3 +1,4 @@
+use crate::musicbrainz::{AlbumCatalog, AlbumReleaseGroup};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -10,6 +11,7 @@ use tauri::{AppHandle, Manager};
 const MUSIC_LIBRARY_APP_DIRECTORY: &str = "com.local.musiclibrary";
 const MUSIC_LIBRARY_DATABASE: &str = "music-library.sqlite3";
 const MAX_ALBUM_QUERIES: usize = 300;
+const MAX_ARTIST_RESULTS: usize = 120;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +70,34 @@ pub struct ArchiveMatchResponse {
     pub matches: Vec<ArchiveAlbumMatch>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveArtistSummary {
+    pub name: String,
+    pub owned_album_count: u64,
+    pub first_year: Option<i32>,
+    pub last_year: Option<i32>,
+    pub artist_id: Option<String>,
+    pub canonical_name: Option<String>,
+    pub cached_release_count: u64,
+    pub catalog_fetched_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveArtistsResponse {
+    pub source: ArchiveStatus,
+    pub artists: Vec<ArchiveArtistSummary>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveCachedCatalog {
+    pub catalog: AlbumCatalog,
+    pub fetched_at: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 struct LocalAlbum {
     id: String,
@@ -75,6 +105,18 @@ struct LocalAlbum {
     artist: String,
     year: Option<i32>,
     track_count: u32,
+}
+
+#[derive(Clone, Debug)]
+struct ArtistLink {
+    artist_id: String,
+    canonical_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct CachedCatalogSummary {
+    release_count: u64,
+    fetched_at: Option<String>,
 }
 
 fn default_database_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -214,6 +256,272 @@ fn normalize_title(value: &str) -> String {
         }
     }
     normalized.trim().to_owned()
+}
+
+fn table_exists(connection: &Connection, table: &str) -> Result<bool, String> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            [table],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("Could not inspect the Music Library schema: {error}"))
+}
+
+fn query_artist_links(connection: &Connection) -> Result<HashMap<String, ArtistLink>, String> {
+    if !table_exists(connection, "musicbrainz_artist_links")? {
+        return Ok(HashMap::new());
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT display_artist, mbid, canonical_name
+             FROM musicbrainz_artist_links
+             WHERE ignored = 0
+               AND verification_state = 'verified'
+               AND NULLIF(TRIM(mbid), '') IS NOT NULL",
+        )
+        .map_err(|error| format!("Could not prepare MusicBrainz artist links: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                ArtistLink {
+                    artist_id: row.get(1)?,
+                    canonical_name: row.get(2)?,
+                },
+            ))
+        })
+        .map_err(|error| format!("Could not query MusicBrainz artist links: {error}"))?;
+    let mut links = HashMap::new();
+    for row in rows {
+        let (display, link) =
+            row.map_err(|error| format!("Could not read a MusicBrainz artist link: {error}"))?;
+        links.insert(normalize_title(&display), link);
+    }
+    Ok(links)
+}
+
+fn query_cached_catalog_summaries(
+    connection: &Connection,
+) -> Result<HashMap<String, CachedCatalogSummary>, String> {
+    if !table_exists(connection, "musicbrainz_artist_release_groups")? {
+        return Ok(HashMap::new());
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT artist_mbid, COUNT(*), MAX(fetched_at)
+             FROM musicbrainz_artist_release_groups
+             WHERE status = 'Official'
+             GROUP BY artist_mbid",
+        )
+        .map_err(|error| format!("Could not prepare cached MusicBrainz catalogs: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                CachedCatalogSummary {
+                    release_count: row.get(1)?,
+                    fetched_at: row.get(2)?,
+                },
+            ))
+        })
+        .map_err(|error| format!("Could not query cached MusicBrainz catalogs: {error}"))?;
+    rows.collect::<rusqlite::Result<HashMap<_, _>>>()
+        .map_err(|error| format!("Could not read cached MusicBrainz catalogs: {error}"))
+}
+
+fn artists_for_path(path: &Path, query: &str) -> ArchiveArtistsResponse {
+    let connection = match open_read_only(path) {
+        Ok(connection) => connection,
+        Err(error) => {
+            return ArchiveArtistsResponse {
+                source: disconnected_status(path, error),
+                artists: Vec::new(),
+                truncated: false,
+            };
+        }
+    };
+    let source = match status_from_connection(path, &connection) {
+        Ok(status) => status,
+        Err(error) => {
+            return ArchiveArtistsResponse {
+                source: disconnected_status(path, error),
+                artists: Vec::new(),
+                truncated: false,
+            };
+        }
+    };
+    let links = match query_artist_links(&connection) {
+        Ok(links) => links,
+        Err(error) => {
+            return ArchiveArtistsResponse {
+                source: disconnected_status(path, error),
+                artists: Vec::new(),
+                truncated: false,
+            };
+        }
+    };
+    let cached = match query_cached_catalog_summaries(&connection) {
+        Ok(cached) => cached,
+        Err(error) => {
+            return ArchiveArtistsResponse {
+                source: disconnected_status(path, error),
+                artists: Vec::new(),
+                truncated: false,
+            };
+        }
+    };
+    let mut statement = match connection.prepare(
+        "SELECT album_artist_display,
+                COUNT(*),
+                MIN(COALESCE(release_year, year)),
+                MAX(COALESCE(release_year, year))
+         FROM albums
+         WHERE NULLIF(TRIM(album_artist_display), '') IS NOT NULL
+           AND (?1 = '' OR LOWER(album_artist_display) LIKE '%' || LOWER(?1) || '%')
+         GROUP BY album_artist_display COLLATE NOCASE
+         ORDER BY COUNT(*) DESC, LOWER(album_artist_display)
+         LIMIT ?2",
+    ) {
+        Ok(statement) => statement,
+        Err(error) => {
+            return ArchiveArtistsResponse {
+                source: disconnected_status(
+                    path,
+                    format!("Could not prepare the Archive artist shelf: {error}"),
+                ),
+                artists: Vec::new(),
+                truncated: false,
+            };
+        }
+    };
+    let rows = match statement.query_map(
+        rusqlite::params![query, (MAX_ARTIST_RESULTS + 1) as u64],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, Option<i32>>(2)?,
+                row.get::<_, Option<i32>>(3)?,
+            ))
+        },
+    ) {
+        Ok(rows) => rows,
+        Err(error) => {
+            return ArchiveArtistsResponse {
+                source: disconnected_status(
+                    path,
+                    format!("Could not query the Archive artist shelf: {error}"),
+                ),
+                artists: Vec::new(),
+                truncated: false,
+            };
+        }
+    };
+    let mut artists = Vec::new();
+    for row in rows {
+        let (name, owned_album_count, first_year, last_year) = match row {
+            Ok(row) => row,
+            Err(error) => {
+                return ArchiveArtistsResponse {
+                    source: disconnected_status(
+                        path,
+                        format!("Could not read an Archive artist: {error}"),
+                    ),
+                    artists: Vec::new(),
+                    truncated: false,
+                };
+            }
+        };
+        let link = links.get(&normalize_title(&name));
+        let catalog = link
+            .and_then(|link| cached.get(&link.artist_id))
+            .cloned()
+            .unwrap_or_default();
+        artists.push(ArchiveArtistSummary {
+            name,
+            owned_album_count,
+            first_year,
+            last_year,
+            artist_id: link.map(|link| link.artist_id.clone()),
+            canonical_name: link.and_then(|link| link.canonical_name.clone()),
+            cached_release_count: catalog.release_count,
+            catalog_fetched_at: catalog.fetched_at,
+        });
+    }
+    let truncated = artists.len() > MAX_ARTIST_RESULTS;
+    artists.truncate(MAX_ARTIST_RESULTS);
+    ArchiveArtistsResponse {
+        source,
+        artists,
+        truncated,
+    }
+}
+
+fn split_secondary_types(value: &str) -> Vec<String> {
+    value
+        .split(" + ")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn cached_catalog_for_path(path: &Path, artist_id: &str) -> Result<ArchiveCachedCatalog, String> {
+    let connection = open_read_only(path)?;
+    if !table_exists(&connection, "musicbrainz_artist_release_groups")? {
+        return Err("Music Library has not cached any MusicBrainz catalogs yet.".to_owned());
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT release_mbid, title, year, type, secondary_types, fetched_at
+             FROM musicbrainz_artist_release_groups
+             WHERE artist_mbid = ?1 AND status = 'Official'
+             ORDER BY COALESCE(year, 9999), LOWER(title)",
+        )
+        .map_err(|error| format!("Could not prepare the cached album catalog: {error}"))?;
+    let rows = statement
+        .query_map([artist_id], |row| {
+            let id = row.get::<_, String>(0)?;
+            let year = row.get::<_, Option<i32>>(2)?;
+            Ok((
+                AlbumReleaseGroup {
+                    cover_art_url: format!(
+                        "https://coverartarchive.org/release-group/{id}/front-250"
+                    ),
+                    id,
+                    title: row.get(1)?,
+                    first_release_date: year.map(|year| year.to_string()).unwrap_or_default(),
+                    primary_type: row.get(3)?,
+                    secondary_types: split_secondary_types(
+                        &row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                    ),
+                },
+                row.get::<_, Option<String>>(5)?,
+            ))
+        })
+        .map_err(|error| format!("Could not query the cached album catalog: {error}"))?;
+    let mut albums = Vec::new();
+    let mut fetched_at = None;
+    for row in rows {
+        let (album, fetched) =
+            row.map_err(|error| format!("Could not read the cached album catalog: {error}"))?;
+        if fetched > fetched_at {
+            fetched_at = fetched;
+        }
+        albums.push(album);
+    }
+    if albums.is_empty() {
+        return Err("Music Library has no cached releases for this artist.".to_owned());
+    }
+    Ok(ArchiveCachedCatalog {
+        catalog: AlbumCatalog {
+            artist_id: artist_id.to_owned(),
+            albums,
+            truncated: false,
+        },
+        fetched_at,
+    })
 }
 
 fn year_from_date(value: &str) -> Option<i32> {
@@ -449,6 +757,42 @@ pub async fn archive_match_wanted(
         .map_err(|error| format!("The Wanted ownership task stopped unexpectedly: {error}"))
 }
 
+#[tauri::command]
+pub async fn archive_artists(
+    app: AppHandle,
+    query: String,
+) -> Result<ArchiveArtistsResponse, String> {
+    let query = query.trim().to_owned();
+    if query.chars().count() > 180 || query.chars().any(char::is_control) {
+        return Err("Keep the Archive artist search under 180 visible characters.".to_owned());
+    }
+    let path = default_database_path(&app)?;
+    tokio::task::spawn_blocking(move || artists_for_path(&path, &query))
+        .await
+        .map_err(|error| format!("The Archive artist task stopped unexpectedly: {error}"))
+}
+
+#[tauri::command]
+pub async fn archive_cached_catalog(
+    app: AppHandle,
+    artist_id: String,
+) -> Result<ArchiveCachedCatalog, String> {
+    let artist_id = artist_id.trim().to_owned();
+    if artist_id.len() != 36
+        || artist_id
+            .chars()
+            .any(|character| !(character.is_ascii_hexdigit() || character == '-'))
+    {
+        return Err(
+            "Choose a valid MusicBrainz artist before opening the Missing Shelf.".to_owned(),
+        );
+    }
+    let path = default_database_path(&app)?;
+    tokio::task::spawn_blocking(move || cached_catalog_for_path(&path, &artist_id))
+        .await
+        .map_err(|error| format!("The cached catalog task stopped unexpectedly: {error}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,11 +819,41 @@ mod tests {
                     total_tracks INTEGER NOT NULL
                  );
                  CREATE INDEX idx_albums_artist ON albums(album_artist_display);
+                 CREATE TABLE musicbrainz_artist_links (
+                    local_artist_key TEXT PRIMARY KEY,
+                    display_artist TEXT NOT NULL,
+                    mbid TEXT,
+                    canonical_name TEXT,
+                    match_method TEXT NOT NULL DEFAULT 'unverified',
+                    confidence REAL,
+                    verification_state TEXT NOT NULL DEFAULT 'unverified',
+                    ignored INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE TABLE musicbrainz_artist_release_groups (
+                    artist_mbid TEXT NOT NULL,
+                    release_mbid TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    year INTEGER,
+                    type TEXT,
+                    secondary_types TEXT NOT NULL DEFAULT '',
+                    track_count INTEGER,
+                    status TEXT NOT NULL DEFAULT 'Official',
+                    source TEXT NOT NULL DEFAULT 'musicbrainz-live',
+                    fetched_at TEXT NOT NULL,
+                    PRIMARY KEY (artist_mbid, release_mbid)
+                 );
                  INSERT INTO import_runs VALUES (1, 'completed', 3, 32, '2026-07-26T12:00:00Z');
                  INSERT INTO albums VALUES
                     ('hysteria-local', 'Hysteria', 'Def Leppard', 1987, 1987, 12),
                     ('pyromania-local', 'Pyromania', 'Def Leppard', 1983, 1983, 10),
-                    ('high-dry-local', 'High ''n'' Dry', 'Def Leppard', 1981, 1981, 10);",
+                    ('high-dry-local', 'High ''n'' Dry', 'Def Leppard', 1981, 1981, 10);
+                 INSERT INTO musicbrainz_artist_links VALUES
+                    ('def leppard', 'Def Leppard', '7249b899-8db8-43e7-9e6e-22f1e736024e', 'Def Leppard', 'musicbrainz', 1.0, 'verified', 0, '2026-07-26', '2026-07-26');
+                 INSERT INTO musicbrainz_artist_release_groups VALUES
+                    ('7249b899-8db8-43e7-9e6e-22f1e736024e', '12fa3845-7c62-36e5-a8da-8be137155a72', 'Hysteria', 1987, 'Album', '', 12, 'Official', 'musicbrainz-live', '2026-07-26T12:00:00Z'),
+                    ('7249b899-8db8-43e7-9e6e-22f1e736024e', 'live-fixture', 'Live: In the Round', 1988, 'Album', 'Live', 14, 'Official', 'musicbrainz-live', '2026-07-26T12:00:00Z');",
             )
             .expect("seed archive fixture");
         drop(connection);
@@ -575,5 +949,38 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM albums", [], |row| row.get(0))
             .expect("count untouched albums");
         assert_eq!(remaining, 3);
+    }
+
+    #[test]
+    fn lists_archive_artists_with_cached_catalog_metadata() {
+        let file = fixture();
+        let response = artists_for_path(file.path(), "leppard");
+        assert!(response.source.connected);
+        assert_eq!(response.artists.len(), 1);
+        assert_eq!(response.artists[0].name, "Def Leppard");
+        assert_eq!(response.artists[0].owned_album_count, 3);
+        assert_eq!(response.artists[0].cached_release_count, 2);
+        assert_eq!(
+            response.artists[0].artist_id.as_deref(),
+            Some("7249b899-8db8-43e7-9e6e-22f1e736024e")
+        );
+    }
+
+    #[test]
+    fn reads_cached_catalogs_without_writing_to_music_library() {
+        let file = fixture();
+        let catalog = cached_catalog_for_path(file.path(), "7249b899-8db8-43e7-9e6e-22f1e736024e")
+            .expect("read cached catalog");
+        assert_eq!(catalog.catalog.albums.len(), 2);
+        assert_eq!(catalog.catalog.albums[1].secondary_types, vec!["Live"]);
+        let connection = Connection::open(file.path()).expect("reopen archive fixture");
+        let cached: u32 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM musicbrainz_artist_release_groups",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count untouched cache");
+        assert_eq!(cached, 2);
     }
 }

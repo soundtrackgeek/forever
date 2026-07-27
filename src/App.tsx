@@ -8,6 +8,7 @@ import { BrowseSharesHome } from "./components/BrowseSharesHome";
 import { ConnectionOnboarding } from "./components/ConnectionOnboarding";
 import { ConnectionSettings } from "./components/ConnectionSettings";
 import { MessagesWorkspace } from "./components/MessagesWorkspace";
+import { MissingShelfWorkspace } from "./components/MissingShelfWorkspace";
 import { ReleaseInspector } from "./components/ReleaseInspector";
 import { PeopleWorkspace } from "./components/PeopleWorkspace";
 import { SearchWorkspace, type AlbumResultView } from "./components/SearchWorkspace";
@@ -30,6 +31,7 @@ import { useSoulseekSearch } from "./hooks/useSoulseekSearch";
 import { useSoulseekShares } from "./hooks/useSoulseekShares";
 import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
 import { useLocalSharing } from "./hooks/useLocalSharing";
+import { useMissingShelf } from "./hooks/useMissingShelf";
 import { usePrivateMessages } from "./hooks/usePrivateMessages";
 import { useWantedAlbums } from "./hooks/useWantedAlbums";
 import type {
@@ -122,6 +124,7 @@ function App() {
   const albums = useAlbumDiscovery();
   const archiveAlbums = albums.catalog?.albums ?? emptyAlbumCatalog;
   const wanted = useWantedAlbums();
+  const missingShelf = useMissingShelf();
   const archive = useArchiveInventory(
     albums.selectedArtist?.name ?? null,
     archiveAlbums,
@@ -474,7 +477,10 @@ function App() {
             wantedReady={wanted.ready}
             wantedError={wanted.error}
             online={connection.snapshot.state === "online"}
-            onRefresh={archive.refresh}
+            onRefresh={async () => {
+              missingShelf.clearCache();
+              return await archive.refresh();
+            }}
             onSetWantedInterval={wanted.setIntervalMinutes}
             onCheckWanted={wanted.check}
             onSetWantedPaused={wanted.setPaused}
@@ -490,6 +496,31 @@ function App() {
               firstReleaseDate: album.firstReleaseDate,
             })}
             onDismissWantedError={wanted.clearError}
+            onOpenMissing={() => void missingShelf.activate().catch(() => undefined)}
+            missingShelf={(
+              <MissingShelfWorkspace
+                query={missingShelf.query}
+                artists={missingShelf.artists}
+                artistsTruncated={missingShelf.artistsTruncated}
+                selectedArtist={missingShelf.selectedArtist}
+                identityOptions={missingShelf.identityOptions}
+                catalog={missingShelf.catalog}
+                catalogSource={missingShelf.catalogSource}
+                catalogFetchedAt={missingShelf.catalogFetchedAt}
+                loading={missingShelf.loading}
+                error={missingShelf.error ?? wanted.error}
+                matchByAlbumId={missingShelf.matchByAlbumId}
+                wantedAlbums={wanted.snapshot.albums}
+                onSearchArtists={missingShelf.loadArtists}
+                onSelectArtist={missingShelf.loadCatalog}
+                onSelectIdentity={missingShelf.selectIdentity}
+                onAddMany={wanted.addMany}
+                onDismissError={() => {
+                  missingShelf.clearError();
+                  wanted.clearError();
+                }}
+              />
+            )}
           />
         ) : activeView === "messages" ? (
           <MessagesWorkspace

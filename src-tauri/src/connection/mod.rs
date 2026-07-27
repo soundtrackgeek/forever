@@ -66,6 +66,17 @@ pub async fn wanted_add(
 }
 
 #[tauri::command]
+pub async fn wanted_add_many(
+    manager: State<'_, ConnectionManager>,
+    requests: Vec<wanted::WantedAlbumRequest>,
+    preferences: wanted::WantedPreferences,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .add_many_wanted(requests, preferences)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn wanted_remove(
     manager: State<'_, ConnectionManager>,
     album_id: String,

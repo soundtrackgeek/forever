@@ -30,18 +30,20 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.26",
-  version: "0.0.27",
-  body: `## What’s new in Forever 0.0.27
+  currentVersion: "0.0.27",
+  version: "0.0.28",
+  body: `## What’s new in Forever 0.0.28
+
+### Added
+
+- Missing Shelf compares one selected Music Library artist with their official MusicBrainz catalog.
+- Owned, Wanted, and Missing states, completion totals, release-type and era filters, and bulk selection.
+- One shared Smart Match profile can add up to 100 missing releases to Wanted without duplicate watches.
 
 ### Changed
 
-- The GitHub repository now matches the app name: Forever.
-- Forever now checks the canonical soundtrackgeek/forever release feed for signed updates.
-
-### Fixed
-
-- Release validation now rejects an updater endpoint or repository URL that drifts from the canonical location.`,
+- Verified artist links and cached release groups are read directly from Music Library; live MusicBrainz lookup happens only when a selected shelf needs it.
+- Music Library remains SQLite read-only and query-only throughout every comparison.`,
   date: "2026-07-27",
 };
 

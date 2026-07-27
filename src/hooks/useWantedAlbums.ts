@@ -299,6 +299,54 @@ export function useWantedAlbums() {
     });
   }, [invokeOrPreview]);
 
+  const addMany = useCallback(async (
+    artist: string,
+    albums: AlbumReleaseGroup[],
+    preferences: WantedPreferences,
+  ) => {
+    const requests = albums.map((album) => requestFor(artist, album));
+    return await invokeOrPreview("wanted_add_many", { requests, preferences }, (current) => {
+      const byId = new Map(current.albums.map((album) => [album.albumId.toLowerCase(), album]));
+      for (const request of requests) {
+        const existing = byId.get(request.albumId.toLowerCase());
+        if (existing) {
+          byId.set(request.albumId.toLowerCase(), {
+            ...existing,
+            ...request,
+            paused: false,
+            preferences,
+          });
+        } else {
+          byId.set(request.albumId.toLowerCase(), {
+            ...request,
+            paused: false,
+            fulfilled: false,
+            fulfilledAtMs: null,
+            ownedTrackCount: null,
+            preferences,
+            addedAtMs: Date.now(),
+            lastCheckedAtMs: null,
+            sourceCount: 0,
+            matchingSourceCount: 0,
+            readySourceCount: 0,
+            completeSourceCount: 0,
+            newSourceCount: 0,
+            bestFormat: null,
+            bestTrackCount: null,
+            bestSizeBytes: null,
+            bestSpeedBytesPerSecond: null,
+            bestSource: null,
+            error: null,
+          });
+        }
+      }
+      const changedIds = new Set(requests.map((request) => request.albumId.toLowerCase()));
+      const changed = [...byId.values()].filter((album) => changedIds.has(album.albumId.toLowerCase()));
+      const unchanged = current.albums.filter((album) => !changedIds.has(album.albumId.toLowerCase()));
+      return { ...current, albums: [...changed, ...unchanged], updatedAtMs: Date.now() };
+    });
+  }, [invokeOrPreview]);
+
   const remove = useCallback(async (albumId: string) =>
     await invokeOrPreview("wanted_remove", { albumId }, (current) => ({
       ...current,
@@ -415,6 +463,7 @@ export function useWantedAlbums() {
     alert,
     byAlbumId,
     add,
+    addMany,
     remove,
     setPaused,
     setIntervalMinutes,
@@ -423,5 +472,5 @@ export function useWantedAlbums() {
     check,
     dismissAlert: () => setAlert(null),
     clearError: () => setError(null),
-  }), [add, alert, byAlbumId, check, error, ready, remove, setIntervalMinutes, setPaused, setPreferences, snapshot, syncFulfilled]);
+  }), [add, addMany, alert, byAlbumId, check, error, ready, remove, setIntervalMinutes, setPaused, setPreferences, snapshot, syncFulfilled]);
 }

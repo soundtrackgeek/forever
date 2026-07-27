@@ -16,6 +16,7 @@ const DEFAULT_INTERVAL_MINUTES: u32 = 30;
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
 const SEARCH_COOLDOWN: Duration = Duration::from_secs(5);
 const MAX_WANTED_ALBUMS: usize = 500;
+const MAX_BULK_WANTED_ALBUMS: usize = 100;
 const AUDIO_EXTENSIONS: &[&str] = &[
     "aac", "aiff", "alac", "ape", "flac", "m4a", "mp3", "ogg", "opus", "wav", "wma", "wv",
 ];
@@ -267,6 +268,34 @@ impl WantedHub {
                 source_fingerprints: Vec::new(),
             });
         }
+        drop(store);
+        self.persist()?;
+        self.publish();
+        Ok(self.snapshot())
+    }
+
+    pub fn add_many(
+        &self,
+        requests: Vec<WantedAlbumRequest>,
+        preferences: WantedPreferences,
+    ) -> Result<WantedSnapshot, WantedError> {
+        if requests.is_empty() || requests.len() > MAX_BULK_WANTED_ALBUMS {
+            return Err(WantedError::InvalidBulkCount);
+        }
+        validate_preferences(&preferences)?;
+        let mut seen = HashSet::new();
+        let requests = requests
+            .into_iter()
+            .map(validate_request)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|request| seen.insert(request.album_id.to_lowercase()))
+            .collect::<Vec<_>>();
+        let mut store = self
+            .store
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        merge_bulk_requests(&mut store, requests, &preferences, timestamp_ms())?;
         drop(store);
         self.persist()?;
         self.publish();
@@ -886,6 +915,68 @@ fn validate_preferences(preferences: &WantedPreferences) -> Result<(), WantedErr
     Ok(())
 }
 
+fn merge_bulk_requests(
+    store: &mut WantedStore,
+    requests: Vec<WantedAlbumRequest>,
+    preferences: &WantedPreferences,
+    added_at_ms: u64,
+) -> Result<(), WantedError> {
+    let new_count = requests
+        .iter()
+        .filter(|request| {
+            !store
+                .albums
+                .iter()
+                .any(|album| album.album_id.eq_ignore_ascii_case(&request.album_id))
+        })
+        .count();
+    if store.albums.len().saturating_add(new_count) > MAX_WANTED_ALBUMS {
+        return Err(WantedError::TooManyAlbums);
+    }
+    for request in requests {
+        if let Some(album) = store
+            .albums
+            .iter_mut()
+            .find(|album| album.album_id.eq_ignore_ascii_case(&request.album_id))
+        {
+            album.artist = request.artist;
+            album.title = request.title;
+            album.first_release_date = request.first_release_date;
+            album.cover_art_url = request.cover_art_url;
+            album.paused = false;
+            album.preferences = preferences.clone();
+        } else {
+            store.albums.push(WantedAlbum {
+                album_id: request.album_id,
+                artist: request.artist,
+                title: request.title,
+                first_release_date: request.first_release_date,
+                cover_art_url: request.cover_art_url,
+                paused: false,
+                fulfilled: false,
+                fulfilled_at_ms: None,
+                owned_track_count: None,
+                preferences: preferences.clone(),
+                added_at_ms,
+                last_checked_at_ms: None,
+                source_count: 0,
+                matching_source_count: 0,
+                ready_source_count: 0,
+                complete_source_count: 0,
+                new_source_count: 0,
+                best_format: None,
+                best_track_count: None,
+                best_size_bytes: None,
+                best_speed_bytes_per_second: None,
+                best_source: None,
+                error: None,
+                source_fingerprints: Vec::new(),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn valid_album_id(value: &str) -> Result<&str, WantedError> {
     let value = value.trim();
     if value.is_empty()
@@ -949,6 +1040,8 @@ pub enum WantedError {
     InvalidPreferences,
     #[error("Forever supports up to {MAX_WANTED_ALBUMS} wanted albums.")]
     TooManyAlbums,
+    #[error("Choose between 1 and {MAX_BULK_WANTED_ALBUMS} missing albums at a time.")]
+    InvalidBulkCount,
     #[error("The Wanted data was created by an unsupported Forever version.")]
     UnsupportedStore,
     #[error("Could not read or save Wanted data: {0}")]
@@ -1120,6 +1213,31 @@ mod tests {
     fn only_supported_intervals_are_accepted_by_the_contract() {
         assert!(matches!(15, 0 | 15 | 30 | 60));
         assert!(!matches!(5, 0 | 15 | 30 | 60));
+    }
+
+    #[test]
+    fn bulk_adds_share_one_profile_and_existing_watches_are_not_duplicated() {
+        let mut store = WantedStore::default();
+        let profile = WantedPreferences {
+            format_preference: WantedFormatPreference::LosslessOnly,
+            minimum_bitrate_kbps: Some(320),
+            minimum_track_count: Some(10),
+        };
+        let first = validate_request(request("album-1")).expect("valid first album");
+        merge_bulk_requests(&mut store, vec![first], &WantedPreferences::default(), 1)
+            .expect("seed watch");
+        store.albums[0].paused = true;
+        let existing = validate_request(request("ALBUM-1")).expect("valid duplicate album");
+        let second = validate_request(request("album-2")).expect("valid second album");
+        merge_bulk_requests(&mut store, vec![existing, second], &profile, 2)
+            .expect("merge bulk watches");
+
+        assert_eq!(store.albums.len(), 2);
+        assert!(store
+            .albums
+            .iter()
+            .all(|album| album.preferences == profile));
+        assert!(store.albums.iter().all(|album| !album.paused));
     }
 
     #[test]

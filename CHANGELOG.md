@@ -5,6 +5,47 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.28] - 2026-07-27
+
+### Added
+
+- **Missing Shelf** inside Archive, with searchable artists from Music Library,
+  a selected-artist catalog comparison, and clear **Own**, **Wanted**, and
+  **Missing** states for official MusicBrainz release groups.
+- Studio-album completion totals plus Owned, Wanted, and Missing counters,
+  release-type filters for Studio, Live, Compilation, and EP catalogs, and a
+  generated decade filter.
+- Multi-select for visible collection gaps and an atomic bulk handoff of up to
+  100 albums to Wanted using one shared Smart Match format, bitrate, and track
+  count profile.
+- Session-only MusicBrainz identity selection for local artist names that have
+  not yet been linked by Music Library.
+- Rust and frontend regression coverage for read-only artist discovery, cached
+  catalog parsing, ownership comparison, filters, batch Wanted handoff, and
+  duplicate-watch prevention.
+
+### Changed
+
+- Missing Shelf reads verified artist links and cached official release groups
+  directly from Music Library before considering a live MusicBrainz lookup.
+- Catalog work is strictly selective: Forever lists a bounded 120 artists and
+  compares only the shelf the user opens instead of scanning every artist in
+  the collection automatically.
+- Completed artist comparisons are cached for the current app session and
+  cleared explicitly by **Refresh Archive**.
+- Bulk additions validate and deduplicate every release before persisting the
+  Forever-owned `wanted.json` store once; the external Archive database remains
+  opened with SQLite read-only and query-only enforcement.
+- Application and updater preview metadata now identify version `0.0.28` and
+  describe the Music Library → Missing → Wanted workflow.
+
+### Fixed
+
+- The bulk Smart Match bar remains visible while scrolling a long discography,
+  including at Forever's 1024×680 minimum window size.
+- Missing Shelf adapts its artist rail, completion summary, catalog metadata,
+  and batch controls without horizontal overflow at compact desktop widths.
+
 ## [0.0.27] - 2026-07-27
 
 ### Changed

@@ -19,10 +19,13 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             archive::archive_status,
+            archive::archive_artists,
+            archive::archive_cached_catalog,
             archive::archive_match_albums,
             archive::archive_match_wanted,
             connection::wanted_snapshot,
             connection::wanted_add,
+            connection::wanted_add_many,
             connection::wanted_remove,
             connection::wanted_set_paused,
             connection::wanted_set_interval,

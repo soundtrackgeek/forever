@@ -223,6 +223,33 @@ describe("Forever shell", () => {
     expect(screen.getByText("1,101,878")).toBeInTheDocument();
   });
 
+  it("finds collection gaps and adds a batch to Wanted with one Smart Match profile", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Missing shelf" }));
+
+    expect(screen.getByRole("heading", { name: "Def Leppard" })).toBeInTheDocument();
+    expect(screen.getByText("3/10")).toBeInTheDocument();
+    expect(screen.getByText(/Music Library cache/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Adrenalize" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select Slang" }));
+    expect(screen.getByText("2 missing selected")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Bulk format preference" }), {
+      target: { value: "losslessOnly" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add 2 to Wanted" }));
+    expect(await screen.findByText("2 added to Wanted")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Live" }));
+    expect(screen.getByText("Viva! Hysteria")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Wanted 6" }));
+    expect(screen.getByText("Adrenalize")).toBeInTheDocument();
+    expect(screen.getByText("Slang")).toBeInTheDocument();
+  });
+
   it("watches missing albums and opens newly available sources without changing Archive", async () => {
     render(<App />);
 
@@ -620,16 +647,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.27 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.28 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "The GitHub repository now matches the app name: Forever.",
+        "Missing Shelf compares one selected Music Library artist with their official MusicBrainz catalog.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Forever now checks the canonical soundtrackgeek/forever release feed for signed updates.",
+        "One shared Smart Match profile can add up to 100 missing releases to Wanted without duplicate watches.",
       ),
     ).toBeInTheDocument();
   });

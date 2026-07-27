@@ -370,6 +370,28 @@ export type ArchiveMatchResponse = {
   matches: ArchiveAlbumMatch[];
 };
 
+export type ArchiveArtistSummary = {
+  name: string;
+  ownedAlbumCount: number;
+  firstYear: number | null;
+  lastYear: number | null;
+  artistId: string | null;
+  canonicalName: string | null;
+  cachedReleaseCount: number;
+  catalogFetchedAt: string | null;
+};
+
+export type ArchiveArtistsResponse = {
+  source: ArchiveStatus;
+  artists: ArchiveArtistSummary[];
+  truncated: boolean;
+};
+
+export type ArchiveCachedCatalog = {
+  catalog: AlbumCatalog;
+  fetchedAt: string | null;
+};
+
 export type TransferQueueSnapshot = {
   transfers: Transfer[];
   activeCount: number;

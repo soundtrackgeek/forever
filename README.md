@@ -3,16 +3,16 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.27` moves the project to its canonical
-> `soundtrackgeek/forever` repository and points signed in-app updates at the
-> matching release feed.
+> **Status:** pre-alpha. Version `0.0.28` adds Missing Shelf: a selective,
+> read-only comparison between artists in Music Library and their official
+> MusicBrainz catalogs, with a direct handoff from collection gaps to Wanted.
 
-If `0.0.16` is installed, download and run the latest `0.0.27` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.28` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
 
-![Forever Smart Matches interface](design/implementation/smart-matches-0.0.26-minimum.png)
+![Forever Missing Shelf interface](design/implementation/missing-shelf-0.0.28-desktop.png)
 
 ## Current foundation
 
@@ -40,6 +40,13 @@ configuration and transfers.
   `music-library.sqlite3` database with SQLite read-only and query-only
   enforcement, reports its latest import and inventory totals, and never adds
   Forever downloads to the external collection
+- A selective **Missing Shelf** that searches artists already present in Music
+  Library, prefers its verified MusicBrainz artist links and cached official
+  release groups, compares only the artist you open, and shows studio-album
+  completion plus **Own**, **Wanted**, and **Missing** states
+- Studio, Live, Compilation, EP, and decade filters, selection of visible
+  collection gaps, and an atomic bulk handoff of up to 100 missing releases to
+  Wanted using one shared Smart Match profile without duplicate watches
 - Batched **Owned** and **Don't own** markers across MusicBrainz discographies
   and Soulseek album-source reports, matched from the Archive's normalized
   artist, album, release-year, and track-count metadata
@@ -198,6 +205,23 @@ read-only flag and query-only mode; it has no Archive write command. Soulseek
 downloads continue to use the folder configured under Connection settings and
 are never imported into Archive.
 
+Open **Archive → Missing shelf** to browse or search artists found in Music
+Library. Forever initially shows a bounded list and does not scan every artist's
+catalog in the background. Selecting one artist first uses Music Library's
+verified MusicBrainz link and cached official release groups when available;
+only that selected shelf can trigger a live MusicBrainz fallback. If the local
+artist is not linked, choose the correct MusicBrainz identity for the current
+session—Forever does not write that choice back to Music Library. Completed
+artist comparisons are reused for the current app session and cleared by
+**Refresh Archive**.
+
+The shelf reports studio-album completion and labels each release **Own**,
+**Wanted**, or **Missing**. Filter the catalog by Studio, Live, Compilation, EP,
+or decade, select one or more visible gaps, choose a shared Smart Match format,
+bitrate, and optional track minimum, then use **Add to Wanted**. The bulk action
+deduplicates existing watches and writes once to Forever's separate
+`wanted.json`; the Music Library database remains untouched.
+
 Choose **Add to Wanted** on a missing MusicBrainz album, then open **Archive →
 Wanted** to follow it. Forever serializes background checks while connected and
 groups returned audio by listener and remote folder without disturbing the
@@ -242,7 +266,7 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.27` intentionally keeps one active download at a time, even when an
+Version `0.0.28` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
 three. Edition/pressing lookup, playback, rooms, and public
 chat remain outside this release.
@@ -288,11 +312,14 @@ are not written to the external Archive database.
 
 Archive reads the external Music Library database at
 `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`. Forever uses the
-`import_runs` and `albums` tables for source status and ownership matching. The
-connection is opened with `SQLITE_OPEN_READ_ONLY`, a two-second busy timeout,
-and `PRAGMA query_only = ON`; Forever never migrates, creates, updates, or
-deletes anything in this database. Album and track totals come from the latest
-completed import record rather than a scan of the 1.8 GB source.
+`import_runs` and `albums` tables for source status and ownership matching. For
+Missing Shelf it also reads verified rows from `musicbrainz_artist_links` and
+cached official rows from `musicbrainz_artist_release_groups`; absent tables or
+links fall back safely without schema changes. The connection is opened with
+`SQLITE_OPEN_READ_ONLY`, a two-second busy timeout, and `PRAGMA query_only = ON`;
+Forever never migrates, creates, updates, or deletes anything in this database.
+Album and track totals come from the latest completed import record rather than
+a scan of the 1.8 GB source.
 
 The legacy Soulseek protocol itself does not provide transport encryption.
 Credential protection described above applies to local storage, not the
@@ -319,7 +346,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.27 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.28 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

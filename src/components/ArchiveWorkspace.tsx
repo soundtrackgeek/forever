@@ -18,7 +18,7 @@ import {
   Trash,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import type { ArchiveStatus, WantedAlbum, WantedSnapshot } from "../types";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
@@ -41,9 +41,11 @@ type ArchiveWorkspaceProps = {
   onEditPreferences: (album: WantedAlbum) => void;
   queuedAlbumIds: ReadonlySet<string>;
   onDismissWantedError: () => void;
+  missingShelf: ReactNode;
+  onOpenMissing: () => void;
 };
 
-type ArchiveTab = "library" | "wanted";
+type ArchiveTab = "library" | "missing" | "wanted";
 type WantedFilter = "all" | "matches" | "waiting" | "fulfilled";
 
 const count = (value: number | null | undefined) =>
@@ -105,6 +107,8 @@ export function ArchiveWorkspace({
   onEditPreferences,
   queuedAlbumIds,
   onDismissWantedError,
+  missingShelf,
+  onOpenMissing,
 }: ArchiveWorkspaceProps) {
   const [tab, setTab] = useState<ArchiveTab>("library");
   const [filter, setFilter] = useState<WantedFilter>("all");
@@ -142,7 +146,7 @@ export function ArchiveWorkspace({
             <ArrowsClockwise className={loading ? "is-spinning" : ""} size={16} />
             {loading ? "Checking…" : "Refresh Archive"}
           </button>
-        ) : (
+        ) : tab === "wanted" ? (
           <label className="wanted-interval">
             <span>Check rhythm</span>
             <select
@@ -155,12 +159,17 @@ export function ArchiveWorkspace({
               <option value={60}>Every hour</option>
             </select>
           </label>
+        ) : (
+          <span className="missing-readonly-note"><LockKey size={14} /> Selective · cached · read-only</span>
         )}
       </header>
 
       <div className="archive-tabs" role="tablist" aria-label="Archive views">
         <button type="button" role="tab" aria-selected={tab === "library"} className={tab === "library" ? "is-active" : ""} onClick={() => setTab("library")}>
           <Database size={15} /> Library source
+        </button>
+        <button type="button" role="tab" aria-selected={tab === "missing"} className={tab === "missing" ? "is-active" : ""} onClick={() => { setTab("missing"); onOpenMissing(); }}>
+          <Record size={15} /> Missing shelf
         </button>
         <button type="button" role="tab" aria-selected={tab === "wanted"} className={tab === "wanted" ? "is-active" : ""} onClick={() => setTab("wanted")}>
           <BellRinging size={15} /> Wanted <small>{wanted.albums.length}</small>
@@ -208,6 +217,8 @@ export function ArchiveWorkspace({
             </article>
           </div>
         </>
+      ) : tab === "missing" ? (
+        missingShelf
       ) : (
         <div className="wanted-workspace">
           <section className="wanted-summary" aria-label="Wanted status">
