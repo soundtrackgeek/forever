@@ -7,16 +7,47 @@ import { ROOM_NOTIFICATION_STORAGE_KEY } from "./hooks/useSoulseekRooms";
 import { MESSAGE_DRAFTS_STORAGE_KEY } from "./components/MessagesWorkspace";
 
 describe("Forever shell", () => {
-  it("renders the Midnight Radio search workspace", () => {
+  it("opens The Listening Post first and routes every live signal to its exact workspace", () => {
     render(<App />);
 
-    expect(
-      screen.getByRole("heading", { name: "Across the network" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "The Listening Post" })).toBeInTheDocument();
+    expect(screen.getByText("Everything worth hearing, waiting in one place.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("2 new Wanted matches")).toBeInTheDocument();
+    expect(screen.getByText("1 unread message")).toBeInTheDocument();
+    expect(screen.getByText("1 room mention")).toBeInTheDocument();
+    expect(screen.getByText("72,366")).toBeInTheDocument();
+    expect(screen.getByText("6")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Open transfer/ }));
+    expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument();
+    expect(document.querySelector(".release-transfer-card.is-focus-target")).toHaveTextContent("Night Geometry");
+
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: /2 new Wanted matches/ }));
+    expect(screen.getByRole("tab", { name: "Wanted 4" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: /1 room mention/ }));
+    expect(screen.getByRole("heading", { name: "Lossless Listening" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: /1 unread message/ }));
+    expect(screen.getByRole("region", { name: "Midnight Inbox" })).toBeInTheDocument();
+    expect(screen.getByText(/late-night radio session/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Missing Shelf" }));
+    expect(screen.getByRole("tab", { name: "Missing shelf" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("renders the Midnight Radio search workspace", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(screen.getByRole("heading", { name: "Across the network" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("night geometry")).toBeInTheDocument();
-    expect(
-      screen.getAllByRole("heading", { name: "Night Geometry" }),
-    ).toHaveLength(2);
+    expect(screen.getAllByRole("heading", { name: "Night Geometry" })).toHaveLength(2);
   });
 
   it("keeps the transfer shelf collapsed by default and toggles it on demand", () => {
@@ -90,6 +121,7 @@ describe("Forever shell", () => {
 
   it("streams a search and shows an empty state when no responses match", async () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     const search = screen.getByRole("textbox", { name: "Search the network" });
     fireEvent.change(search, { target: { value: "unfindable transmission" } });
@@ -110,6 +142,7 @@ describe("Forever shell", () => {
 
   it("filters preview results by real audio type counts", () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     fireEvent.click(screen.getByRole("button", { name: "All types" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Compressed audio 1" }));
@@ -122,6 +155,7 @@ describe("Forever shell", () => {
 
   it("discovers an artist's albums and groups Soulseek files into downloadable sources", async () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
     expect(
@@ -300,6 +334,7 @@ describe("Forever shell", () => {
 
   it("watches missing albums and opens newly available sources without changing Archive", async () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
     const adrenalize = screen
@@ -403,6 +438,7 @@ describe("Forever shell", () => {
 
   it("browses a folder, selects files, and queues a complete release", async () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     fireEvent.click(
       screen.getByRole("button", { name: "Expand transfer activity" }),
@@ -450,6 +486,7 @@ describe("Forever shell", () => {
 
   it("explores a user's complete shares and downloads a selection", async () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     fireEvent.click(
       screen.getAllByRole("button", {
@@ -481,6 +518,7 @@ describe("Forever shell", () => {
 
   it("searches folders and expands or collapses the share hierarchy", async () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     fireEvent.click(
       screen.getAllByRole("button", {
@@ -661,6 +699,7 @@ describe("Forever shell", () => {
 
   it("opens a user profile directly from a search result", () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     fireEvent.click(
       screen.getAllByRole("button", { name: "View audiophile92's profile" })[0],
@@ -733,16 +772,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.35 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.36 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Signal Breadcrumbs now pass the full release quality gate and remain ready for the Windows installer pipeline.",
+        "The Listening Post turns Home into a live command center for transfers, Wanted matches, messages, room mentions, recent activity, and Archive status.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Transfer focus is initialized when the workspace opens instead of synchronously rewriting workspace state from an effect.",
+        "Forever now opens on Home after startup while first-run onboarding still takes priority for unconfigured accounts.",
       ),
     ).toBeInTheDocument();
   });

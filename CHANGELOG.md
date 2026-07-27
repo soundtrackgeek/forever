@@ -5,6 +5,34 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.36] - 2026-07-27
+
+### Added
+
+- **The Listening Post** replaces the Home placeholder with a live command
+  center for the active release, next queued albums, Wanted matches, unread
+  private messages, room mentions, recent activity, and Archive status.
+- Now Receiving presents whole-release progress, transferred and total bytes,
+  source listener, speed, ETA, a restrained signal-line motif, and an exact
+  transfer action without duplicating the full Transfers workspace.
+- Incoming Signals, Recent Activity, and Archive Pulse provide real counts,
+  calm empty states, release-health-aware labels, and direct destinations for
+  Wanted, conversations, mentioned rooms, Missing Shelf, and album search.
+- Desktop and minimum-window visual references plus a frontend regression cover
+  Home-first startup and exact signal routing.
+
+### Changed
+
+- Forever now opens on Home after startup; first-run Soulseek onboarding still
+  takes priority when an account is not configured.
+- Archive and Rooms accept explicit initial destinations so Home can open the
+  Wanted or Missing tab and the exact room containing a mention.
+- The Listening Post composes existing persisted snapshots and the read-only
+  Music Library source without adding an external API or a second data store.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.36` and describe The Listening
+  Post accurately.
+
 ## [0.0.35] - 2026-07-27
 
 ### Changed

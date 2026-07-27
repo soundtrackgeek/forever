@@ -26,6 +26,7 @@ import type {
 import { CountryFlag } from "./CountryFlag";
 
 type RoomsWorkspaceProps = {
+  initialRoomName?: string | null;
   snapshot: RoomsSnapshot;
   ready: boolean;
   error: string | null;
@@ -193,6 +194,7 @@ function MemberInspector({
 }
 
 export function RoomsWorkspace({
+  initialRoomName = null,
   snapshot,
   ready,
   error,
@@ -214,7 +216,7 @@ export function RoomsWorkspace({
   const [roomFilter, setRoomFilter] = useState<RoomFilter>("joined");
   const [roomQuery, setRoomQuery] = useState("");
   const [memberQuery, setMemberQuery] = useState("");
-  const [selectedRoomName, setSelectedRoomName] = useState<string | null>(null);
+  const [selectedRoomName, setSelectedRoomName] = useState<string | null>(initialRoomName);
   const [selectedMemberName, setSelectedMemberName] = useState<string | null>(null);
   const [joinRoomName, setJoinRoomName] = useState("");
   const [showJoin, setShowJoin] = useState(false);

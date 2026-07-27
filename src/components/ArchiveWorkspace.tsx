@@ -25,6 +25,7 @@ import { wantedPreferencesLabel } from "../utils/smartMatches";
 import { albumDownloadLabel, type AlbumDownloadState } from "../utils/albumDownloadState";
 
 type ArchiveWorkspaceProps = {
+  initialTab?: ArchiveTab;
   status: ArchiveStatus | null;
   loading: boolean;
   error: string | null;
@@ -100,6 +101,7 @@ function WantedDownloadIcon({ state }: { state: AlbumDownloadState }) {
 }
 
 export function ArchiveWorkspace({
+  initialTab = "library",
   status,
   loading,
   error,
@@ -121,7 +123,7 @@ export function ArchiveWorkspace({
   missingShelf,
   onOpenMissing,
 }: ArchiveWorkspaceProps) {
-  const [tab, setTab] = useState<ArchiveTab>("library");
+  const [tab, setTab] = useState<ArchiveTab>(initialTab);
   const [filter, setFilter] = useState<WantedFilter>("all");
   const connected = Boolean(status?.connected);
   const availableCount = wanted.albums.filter((album) => !album.fulfilled && album.matchingSourceCount > 0).length;

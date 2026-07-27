@@ -3,14 +3,16 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.35` delivers Signal Breadcrumbs with
-> React 19-compliant focus and notification lifecycles that pass the complete
-> release quality gate.
+> **Status:** pre-alpha. Version `0.0.36` adds The Listening Post, a live Home
+> command center for transfers, Wanted matches, conversations, rooms, recent
+> activity, and the read-only Archive.
 
-If `0.0.16` is installed, download and run the latest `0.0.35` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.36` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
+
+![Forever The Listening Post Home](design/implementation/listening-post-0.0.36-desktop.png)
 
 ![Forever Finish Line transfer health](design/implementation/finish-line-0.0.30-desktop.png)
 
@@ -19,6 +21,10 @@ configuration and transfers.
 ## Current foundation
 
 - Faithful Midnight Radio desktop interface
+- **The Listening Post** Home command center opens after startup with live
+  active-transfer progress, queued releases, Wanted matches, unread messages,
+  room mentions, recent transfer and Archive activity, and collection status;
+  every signal links to its exact working destination
 - First-run Soulseek account setup with native download-folder selection and
   a clear explanation of automatic username registration
 - Live TCP login to the Soulseek server with explicit connecting,

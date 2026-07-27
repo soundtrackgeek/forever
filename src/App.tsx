@@ -7,6 +7,7 @@ import { ArchiveWorkspace } from "./components/ArchiveWorkspace";
 import { BrowseSharesHome } from "./components/BrowseSharesHome";
 import { ConnectionOnboarding } from "./components/ConnectionOnboarding";
 import { ConnectionSettings } from "./components/ConnectionSettings";
+import { ListeningPostWorkspace } from "./components/ListeningPostWorkspace";
 import { MessagesWorkspace } from "./components/MessagesWorkspace";
 import { MissingShelfWorkspace } from "./components/MissingShelfWorkspace";
 import { ReleaseInspector } from "./components/ReleaseInspector";
@@ -111,9 +112,11 @@ function PlaceholderView({
 }
 
 function App() {
-  const [activeView, setActiveView] = useState("search");
+  const [activeView, setActiveView] = useState("home");
   const [transferShelfExpanded, setTransferShelfExpanded] = useState(false);
   const [transferFocus, setTransferFocus] = useState<{ groupId: string; requestId: number } | null>(null);
+  const [archiveFocus, setArchiveFocus] = useState<{ tab: "missing" | "wanted"; requestId: number } | null>(null);
+  const [roomFocus, setRoomFocus] = useState<{ roomName: string | null; requestId: number } | null>(null);
   const [searchMode, setSearchMode] = useState<SearchMode>("files");
   const [albumContext, setAlbumContext] = useState<AlbumSearchContext | null>(null);
   const [albumResultView, setAlbumResultView] = useState<AlbumResultView>("files");
@@ -205,6 +208,20 @@ function App() {
     }
     return states;
   }, [transfers.snapshot.transfers, wanted.snapshot.albums]);
+
+  const missingStudioCount = useMemo(() => {
+    if (!missingShelf.catalog) return null;
+    const wantedIds = new Set(wanted.snapshot.albums.map((album) => album.albumId));
+    return missingShelf.catalog.albums.filter((album) => {
+      const secondary = album.secondaryTypes.map((value) => value.toLocaleLowerCase());
+      const studio = album.primaryType?.toLocaleLowerCase() !== "ep"
+        && !secondary.includes("live")
+        && !secondary.includes("compilation");
+      return studio
+        && missingShelf.matchByAlbumId.get(album.id)?.ownership !== "owned"
+        && !wantedIds.has(album.id);
+    }).length;
+  }, [missingShelf.catalog, missingShelf.matchByAlbumId, wanted.snapshot.albums]);
 
   const queueDownload = (result: SearchResult) => {
     void transfers.enqueue(result).catch(() => undefined);
@@ -325,6 +342,8 @@ function App() {
         messages.snapshot.conversations[0];
       if (next) setSelectedMessageUsername(next.username);
     }
+    if (view === "archive") setArchiveFocus(null);
+    if (view === "rooms") setRoomFocus(null);
     setActiveView(view);
   };
 
@@ -332,6 +351,17 @@ function App() {
     setTransferFocus({ groupId, requestId: Date.now() });
     setTransferShelfExpanded(false);
     setActiveView("transfers");
+  };
+
+  const openArchive = (tab: "missing" | "wanted") => {
+    setArchiveFocus({ tab, requestId: Date.now() });
+    setActiveView("archive");
+    if (tab === "missing") void missingShelf.activate().catch(() => undefined);
+  };
+
+  const openRoom = (roomName: string | null) => {
+    setRoomFocus({ roomName, requestId: Date.now() });
+    setActiveView("rooms");
   };
 
   useEffect(() => {
@@ -386,7 +416,27 @@ function App() {
           onCheckForUpdates={() => void updater.checkForUpdates(true)}
         />
 
-        {activeView === "search" && searchMode === "files" ? (
+        {activeView === "home" ? (
+          <ListeningPostWorkspace
+            connection={connection.snapshot}
+            searchNetwork={connection.searchNetwork}
+            transfers={transfers.snapshot.transfers}
+            wanted={wanted.snapshot}
+            messages={messages.snapshot}
+            rooms={rooms.snapshot}
+            archiveStatus={archive.status}
+            missingCount={missingStudioCount}
+            missingShelfName={missingShelf.selectedArtist?.canonicalName ?? missingShelf.selectedArtist?.name ?? null}
+            onOpenTransfer={openTransfer}
+            onOpenArchive={openArchive}
+            onOpenMessages={() => navigate("messages")}
+            onOpenRoom={openRoom}
+            onSearchAlbums={() => {
+              setSearchMode("albums");
+              setActiveView("search");
+            }}
+          />
+        ) : activeView === "search" && searchMode === "files" ? (
           <>
             <SearchWorkspace
               searchMode={searchMode}
@@ -508,6 +558,8 @@ function App() {
           />
         ) : activeView === "archive" ? (
           <ArchiveWorkspace
+            key={archiveFocus?.requestId ?? "archive"}
+            initialTab={archiveFocus?.tab ?? "library"}
             status={archive.status}
             loading={archive.loading}
             error={archive.error}
@@ -580,6 +632,8 @@ function App() {
           />
         ) : activeView === "rooms" ? (
           <RoomsWorkspace
+            key={roomFocus?.requestId ?? "rooms"}
+            initialRoomName={roomFocus?.roomName ?? null}
             snapshot={rooms.snapshot}
             ready={rooms.ready}
             error={rooms.error ?? people.error}

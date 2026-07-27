@@ -30,19 +30,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.34",
-  version: "0.0.35",
-  body: `## What’s new in Forever 0.0.35
+  currentVersion: "0.0.35",
+  version: "0.0.36",
+  body: `## What’s new in Forever 0.0.36
 
 ### Added
 
-- Signal Breadcrumbs now pass the full release quality gate and remain ready for the Windows installer pipeline.
-- Exact-release focus and activity notifications retain the same behavior with React 19-compliant lifecycle handling.
+- The Listening Post turns Home into a live command center for transfers, Wanted matches, messages, room mentions, recent activity, and Archive status.
+- Every signal opens its exact transfer, Archive tab, conversation, room, or album-search destination.
 
 ### Changed
 
-- Transfer focus is initialized when the workspace opens instead of synchronously rewriting workspace state from an effect.
-- Stable notification callbacks prevent the automatic-dismiss timer from being recreated by live progress snapshots.`,
+- Forever now opens on Home after startup while first-run onboarding still takes priority for unconfigured accounts.
+- The dashboard stays fully data-driven and remains readable at Forever’s 1024×680 minimum window size.`,
   date: "2026-07-27",
 };
 
