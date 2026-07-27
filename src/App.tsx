@@ -1,4 +1,5 @@
 import { CheckCircle, DownloadSimple, MagnifyingGlass, Radio, Sliders, WarningCircle, X } from "@phosphor-icons/react";
+import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { AppSidebar } from "./components/AppSidebar";
@@ -45,13 +46,17 @@ import type {
   AlbumSearchContext,
   AlbumSource,
   FolderInspection,
+  ReleaseAlternativeSource,
   SearchResult,
   WantedAlbum,
 } from "./types";
 import { groupAlbumSources } from "./utils/albumSources";
 import { albumDownloadStatesByTitle, type AlbumDownloadState } from "./utils/albumDownloadState";
+import { groupTransfers } from "./utils/transfers";
 
 const emptyAlbumCatalog: AlbumReleaseGroup[] = [];
+const relaySessionId = (releaseId: string) => `signal-relay:${releaseId}`;
+const appStartedAtMs = Date.now();
 
 const albumDownloadTitle = (
   context: AlbumSearchContext | null,
@@ -114,6 +119,7 @@ function PlaceholderView({
 }
 
 function App() {
+  const native = isTauri();
   const [activeView, setActiveView] = useState("home");
   const [transferShelfExpanded, setTransferShelfExpanded] = useState(false);
   const [transferFocus, setTransferFocus] = useState<{ groupId: string; requestId: number } | null>(null);
@@ -174,6 +180,10 @@ function App() {
   const [reviewInspection, setReviewInspection] = useState<FolderInspection | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [relayClock, setRelayClock] = useState(appStartedAtMs);
+  const [relayNotice, setRelayNotice] = useState<{ groupId: string; title: string; count: number } | null>(null);
+  const relaysStarted = useRef(new Set<string>());
+  const relaysNotified = useRef(new Set<string>());
   const lastFulfillmentSync = useRef("");
   const needsOnboarding = !connection.profile || !connection.hasPassword;
   const onboardingOpen =
@@ -185,6 +195,80 @@ function App() {
     search.results.find((result) => result.id === selectedResultId) ??
     search.results[0] ??
     null;
+
+  const transferGroups = useMemo(
+    () => groupTransfers(transfers.snapshot.transfers),
+    [transfers.snapshot.transfers],
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setRelayClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const minutes = transfers.snapshot.relaySuggestionMinutes;
+    if (!native || minutes === 0 || connection.snapshot.state !== "online") return;
+    const threshold = minutes * 60_000;
+    for (const group of transferGroups) {
+      if (!group.releaseId || group.status !== "active") continue;
+      const waitingSince = group.transfers
+        .filter((transfer) => ["requesting", "remotelyQueued", "connecting"].includes(transfer.status))
+        .map((transfer) => transfer.waitingSinceMs)
+        .filter((value): value is number => typeof value === "number")
+        .sort((left, right) => left - right)[0];
+      const sessionId = relaySessionId(group.releaseId);
+      if (!waitingSince || relayClock - waitingSince < threshold || search.records[sessionId] || relaysStarted.current.has(sessionId)) continue;
+      relaysStarted.current.add(sessionId);
+      void search.startSearch(sessionId, group.title).catch(() => relaysStarted.current.delete(sessionId));
+    }
+  }, [connection.snapshot.state, native, relayClock, search, transferGroups, transfers.snapshot.relaySuggestionMinutes]);
+
+  useEffect(() => {
+    for (const group of transferGroups) {
+      if (!group.releaseId) continue;
+      const sessionId = relaySessionId(group.releaseId);
+      const record = search.records[sessionId];
+      if (!record || record.snapshot.state !== "completed" || relaysNotified.current.has(sessionId)) continue;
+      const currentUsers = new Set(group.transfers.map((transfer) => transfer.username.toLocaleLowerCase()));
+      const currentFormats = new Set(group.transfers.map((transfer) => transfer.remoteFilename.split(".").pop()?.toUpperCase()).filter((format): format is string => Boolean(format)));
+      const count = groupAlbumSources(record.results).filter((source) =>
+        !currentUsers.has(source.owner.toLocaleLowerCase())
+        && source.formats.some((format) => currentFormats.has(format)),
+      ).length;
+      if (count > 0) {
+        relaysNotified.current.add(sessionId);
+        window.setTimeout(
+          () => setRelayNotice({ groupId: group.id, title: group.title, count }),
+          0,
+        );
+        break;
+      }
+    }
+  }, [search.records, transferGroups]);
+
+  const findRelaySources = (releaseId: string, title: string) => {
+    const sessionId = relaySessionId(releaseId);
+    relaysStarted.current.add(sessionId);
+    return search.startSearch(sessionId, title);
+  };
+
+  const relayReleaseSource = async (releaseId: string, source: AlbumSource) => {
+    const inspection = await folders.inspect(source.representative);
+    const alternative: ReleaseAlternativeSource = {
+      username: source.owner,
+      remoteFolder: inspection.requestedFolder,
+      files: inspection.files.map((file) => ({
+        title: file.filename,
+        remoteFilename: file.remoteFilename,
+        sizeBytes: file.sizeBytes,
+      })),
+    };
+    await transfers.relayReleaseSource(releaseId, alternative);
+    await search.closeSearch(relaySessionId(releaseId));
+    relaysStarted.current.delete(relaySessionId(releaseId));
+    relaysNotified.current.delete(relaySessionId(releaseId));
+  };
 
   const fulfillmentRequests = useMemo(() => wanted.snapshot.albums.flatMap((album) => {
     const match = archive.wantedMatchByAlbumId.get(album.albumId);
@@ -853,6 +937,9 @@ function App() {
             key={transferFocus?.requestId ?? "transfers"}
             transfers={transfers.snapshot.transfers}
             maxConcurrentDownloads={transfers.snapshot.maxConcurrentDownloads}
+            relaySuggestionMinutes={transfers.snapshot.relaySuggestionMinutes}
+            relayRecords={search.records}
+            online={connection.snapshot.state === "online"}
             uploads={sharing.uploads.uploads}
             uploadError={sharing.error}
             error={transfers.error}
@@ -869,6 +956,8 @@ function App() {
             onVerifyRelease={(id) => void transfers.verifyRelease(id).catch(() => undefined)}
             onRetryReleaseIssues={(id) => void transfers.retryReleaseIssues(id).catch(() => undefined)}
             onSwitchReleaseSource={(id, source) => void transfers.switchReleaseSource(id, source).catch(() => undefined)}
+            onFindAlternatives={(id, title) => void findRelaySources(id, title).catch(() => undefined)}
+            onRelayReleaseSource={relayReleaseSource}
             onDismissError={transfers.clearError}
             personByUsername={people.personByUsername}
             onOpenPerson={openPerson}
@@ -908,6 +997,8 @@ function App() {
             onSetUploadSlots={sharing.setUploadSlots}
             maxConcurrentDownloads={transfers.snapshot.maxConcurrentDownloads}
             onSetMaxConcurrentDownloads={transfers.setMaxConcurrentDownloads}
+            relaySuggestionMinutes={transfers.snapshot.relaySuggestionMinutes}
+            onSetRelaySuggestionMinutes={transfers.setRelaySuggestionMinutes}
             messageNotificationsEnabled={messages.notificationsEnabled}
             onMessageNotificationsChange={messages.setNotificationsEnabled}
             roomNotificationsEnabled={rooms.notificationsEnabled}
@@ -961,6 +1052,16 @@ function App() {
             <span><small>{transfers.activityNotice.kind === "failed" ? "Signal needs attention" : transfers.activityNotice.kind === "started" ? "Download started" : "Release queued"}</small><strong>{transfers.activityNotice.title}</strong><p>{transfers.activityNotice.message}</p></span>
           </button>
           <button type="button" className="finish-line-toast-dismiss" aria-label="Dismiss transfer update" onClick={transfers.clearActivityNotice}><X size={14} /></button>
+        </aside>
+      ) : null}
+
+      {relayNotice ? (
+        <aside className="finish-line-toast transfer-activity-toast is-relay" role="status" aria-live="polite">
+          <button type="button" className="finish-line-toast-open" onClick={() => { openTransfer(relayNotice.groupId); setRelayNotice(null); }}>
+            <span><Radio size={19} weight="fill" /></span>
+            <span><small>Signal Relay found a route</small><strong>{relayNotice.title}</strong><p>{relayNotice.count} compatible {relayNotice.count === 1 ? "source is" : "sources are"} ready to compare.</p></span>
+          </button>
+          <button type="button" className="finish-line-toast-dismiss" aria-label="Dismiss Signal Relay notification" onClick={() => setRelayNotice(null)}><X size={14} /></button>
         </aside>
       ) : null}
 

@@ -51,6 +51,8 @@ type ConnectionSettingsProps = {
   onSetUploadSlots: (slots: number) => Promise<unknown>;
   maxConcurrentDownloads: number;
   onSetMaxConcurrentDownloads: (maximum: number) => Promise<unknown>;
+  relaySuggestionMinutes: number;
+  onSetRelaySuggestionMinutes: (minutes: number) => Promise<unknown>;
   messageNotificationsEnabled: boolean;
   onMessageNotificationsChange: (enabled: boolean) => void;
   roomNotificationsEnabled: boolean;
@@ -119,6 +121,8 @@ export function ConnectionSettings({
   onSetUploadSlots,
   maxConcurrentDownloads,
   onSetMaxConcurrentDownloads,
+  relaySuggestionMinutes,
+  onSetRelaySuggestionMinutes,
   messageNotificationsEnabled,
   onMessageNotificationsChange,
   roomNotificationsEnabled,
@@ -388,12 +392,20 @@ export function ConnectionSettings({
               <p>Download one file per user while several different users send in parallel.</p>
             </div>
           </div>
-          <label className="download-lanes-field">
-            <span><strong>Simultaneous users</strong><small>Three is the default. Existing downloads finish naturally if you lower it.</small></span>
-            <select aria-label="Simultaneous download users" value={maxConcurrentDownloads} onChange={(event) => void onSetMaxConcurrentDownloads(Number(event.target.value))}>
-              {[1, 2, 3, 4, 5, 6].map((maximum) => <option value={maximum} key={maximum}>{maximum} {maximum === 1 ? "user" : "users"}</option>)}
-            </select>
-          </label>
+          <div className="download-lanes-controls">
+            <label className="download-lanes-field">
+              <span><strong>Simultaneous users</strong><small>Three is the default. Existing downloads finish naturally if you lower it.</small></span>
+              <select aria-label="Simultaneous download users" value={maxConcurrentDownloads} onChange={(event) => void onSetMaxConcurrentDownloads(Number(event.target.value))}>
+                {[1, 2, 3, 4, 5, 6].map((maximum) => <option value={maximum} key={maximum}>{maximum} {maximum === 1 ? "user" : "users"}</option>)}
+              </select>
+            </label>
+            <label className="download-lanes-field signal-relay-setting">
+              <span><strong>Suggest another source after</strong><small>Forever searches quietly; switching always remains your choice.</small></span>
+              <select aria-label="Signal Relay suggestion delay" value={relaySuggestionMinutes} onChange={(event) => void onSetRelaySuggestionMinutes(Number(event.target.value))}>
+                {[0, 5, 10, 20, 30, 60].map((minutes) => <option value={minutes} key={minutes}>{minutes === 0 ? "Off" : `${minutes} min`}</option>)}
+              </select>
+            </label>
+          </div>
         </section>
 
         <section className="settings-panel sharing-panel">
@@ -502,7 +514,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.38</h2>
+              <h2>Forever 0.0.39</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="update-interval-field">
                 <span>Automatic update checks</span>

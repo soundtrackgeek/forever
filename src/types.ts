@@ -338,6 +338,7 @@ export type Transfer = {
   error: string | null;
   retryCount?: number;
   retryAtMs?: number | null;
+  waitingSinceMs?: number | null;
   verificationStatus?: "pending" | "verified" | "missing" | "sizeMismatch";
   verificationMessage?: string | null;
   verifiedAtMs?: number | null;
@@ -498,6 +499,7 @@ export type TransferQueueSnapshot = {
   transfers: Transfer[];
   activeCount: number;
   maxConcurrentDownloads: number;
+  relaySuggestionMinutes: number;
 };
 
 export type SharedRoot = {

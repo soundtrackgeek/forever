@@ -37,6 +37,9 @@ describe("TransfersWorkspace signal order", () => {
     render(
       <TransfersWorkspace
         maxConcurrentDownloads={3}
+        relaySuggestionMinutes={10}
+        relayRecords={{}}
+        online
         transfers={[
           releaseTransfer("release-a", "Release A", "downloading", {
             sizeBytes: 5_000,
@@ -66,6 +69,8 @@ describe("TransfersWorkspace signal order", () => {
         onVerifyRelease={vi.fn()}
         onRetryReleaseIssues={vi.fn()}
         onSwitchReleaseSource={vi.fn()}
+        onFindAlternatives={vi.fn()}
+        onRelayReleaseSource={vi.fn().mockResolvedValue(undefined)}
         onDismissError={vi.fn()}
         personByUsername={() => null}
         onOpenPerson={vi.fn()}
@@ -132,5 +137,96 @@ describe("TransfersWorkspace signal order", () => {
       "release-c",
       "release-b-track",
     );
+  });
+
+  it("opens Signal Relay with ranked fresh sources for a stalled release", async () => {
+    const onFindAlternatives = vi.fn();
+    const onRelayReleaseSource = vi.fn().mockResolvedValue(undefined);
+    const stalled = releaseTransfer("relay-release", "Artist - Waiting Album (1994)", "remotelyQueued", {
+      queuePosition: 131,
+      waitingSinceMs: Date.now() - 12 * 60_000 - 1_000,
+      alternativeSources: [],
+    });
+    render(
+      <TransfersWorkspace
+        maxConcurrentDownloads={3}
+        relaySuggestionMinutes={10}
+        relayRecords={{
+          "signal-relay:relay-release": {
+            snapshot: {
+              state: "completed",
+              token: 91,
+              clientId: "signal-relay:relay-release",
+              query: "Artist Waiting Album",
+              resultCount: 1,
+              peerCount: 1,
+              message: "Found one source.",
+              startedAtMs: Date.now() - 1_000,
+              finishedAtMs: Date.now(),
+            },
+            results: [{
+              id: "relay-result",
+              title: "01 - Waiting Album.flac",
+              subtitle: "Music / Artist / Waiting Album",
+              owner: "faster-listener",
+              trust: 100,
+              format: "FLAC",
+              quality: "16 / 44.1",
+              size: "42 MB",
+              tracks: 1,
+              rating: 5,
+              ratingLabel: "Ready",
+              availability: [],
+              source: "live",
+              filename: "Music\\Artist\\Waiting Album\\01 - Waiting Album.flac",
+              folder: "Music\\Artist\\Waiting Album",
+              sizeBytes: 42_000_000,
+              slotFree: true,
+              averageSpeed: 8_000_000,
+              queueLength: 0,
+            }],
+            error: null,
+            unseenCount: 0,
+          },
+        }}
+        online
+        transfers={[stalled]}
+        uploads={[]}
+        uploadError={null}
+        error={null}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onCancel={vi.fn()}
+        onReveal={vi.fn()}
+        onPauseRelease={vi.fn()}
+        onResumeRelease={vi.fn()}
+        onCancelRelease={vi.fn()}
+        onRevealRelease={vi.fn()}
+        onReorderRelease={vi.fn()}
+        onClearCompleted={vi.fn()}
+        onVerifyRelease={vi.fn()}
+        onRetryReleaseIssues={vi.fn()}
+        onSwitchReleaseSource={vi.fn()}
+        onFindAlternatives={onFindAlternatives}
+        onRelayReleaseSource={onRelayReleaseSource}
+        onDismissError={vi.fn()}
+        personByUsername={() => null}
+        onOpenPerson={vi.fn()}
+        onCancelUpload={vi.fn()}
+        onClearFinishedUploads={vi.fn()}
+        onDismissUploadError={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Source queue #131 · waiting 12m/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /1 route ready/i }));
+    expect(screen.getByText("Choose the signal worth following.")).toBeInTheDocument();
+    expect(screen.getByText("faster-listener")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Switch source" }));
+    expect(onRelayReleaseSource).toHaveBeenCalledWith(
+      "relay-release",
+      expect.objectContaining({ owner: "faster-listener" }),
+    );
+    expect(onFindAlternatives).not.toHaveBeenCalled();
   });
 });

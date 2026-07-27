@@ -2,9 +2,11 @@ import {
   Archive,
   ArrowLineUp,
   ArrowClockwise,
+  Broadcast,
   CaretUp,
   CaretDown,
   CheckCircle,
+  CircleNotch,
   DownloadSimple,
   DotsSixVertical,
   FolderOpen,
@@ -19,13 +21,15 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import type { PersonProfile, ReleaseAlternativeSource, Transfer, Upload } from "../types";
+import type { AlbumSource, PersonProfile, ReleaseAlternativeSource, Transfer, Upload } from "../types";
+import type { SearchSessionRecord } from "../hooks/useSoulseekSearch";
 import {
   groupTransfers,
   summarizeTransferGroups,
   type TransferGroup,
 } from "../utils/transfers";
 import { releaseHealth } from "../utils/finishLine";
+import { groupAlbumSources } from "../utils/albumSources";
 import { CountryFlag } from "./CountryFlag";
 
 type Filter = "all" | "active" | "queued" | "completed" | "attention";
@@ -35,9 +39,14 @@ type QueueDropTarget = {
   placement: "before" | "after";
 };
 
+const transfersClockStartedAtMs = Date.now();
+
 type TransfersWorkspaceProps = {
   transfers: Transfer[];
   maxConcurrentDownloads: number;
+  relaySuggestionMinutes: number;
+  relayRecords: Record<string, SearchSessionRecord>;
+  online: boolean;
   uploads: Upload[];
   uploadError: string | null;
   error: string | null;
@@ -54,6 +63,8 @@ type TransfersWorkspaceProps = {
   onVerifyRelease: (id: string) => void;
   onRetryReleaseIssues: (id: string) => void;
   onSwitchReleaseSource: (id: string, source: ReleaseAlternativeSource) => void;
+  onFindAlternatives: (id: string, title: string) => void;
+  onRelayReleaseSource: (id: string, source: AlbumSource) => Promise<void>;
   onDismissError: () => void;
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
@@ -83,6 +94,27 @@ const formatEta = (seconds: number | null) => {
 };
 
 const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-1)[0] ?? path;
+const relaySessionId = (releaseId: string) => `signal-relay:${releaseId}`;
+const AUDIO_FORMATS = new Set(["AAC", "AIFF", "ALAC", "APE", "FLAC", "M4A", "MP3", "OGG", "OPUS", "WAV", "WMA", "WV"]);
+
+const formatWaitingTime = (milliseconds: number) => {
+  const minutes = Math.max(0, Math.floor(milliseconds / 60_000));
+  if (minutes < 1) return "less than a minute";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+};
+
+const relaySourceScore = (source: AlbumSource, group: TransferGroup) => {
+  const currentFormats = new Set(group.transfers.map((transfer) => transfer.remoteFilename.split(".").pop()?.toUpperCase()).filter(Boolean));
+  const sameFormat = source.formats.some((format) => currentFormats.has(format));
+  const audioCount = group.transfers.filter((transfer) => AUDIO_FORMATS.has(transfer.remoteFilename.split(".").pop()?.toUpperCase() ?? "")).length;
+  return (sameFormat ? 10_000 : 0)
+    + (source.tracks.length === audioCount ? 4_000 : 0)
+    + (source.slotFree ? 2_000 : 0)
+    + Math.min(1_000, Math.floor(source.averageSpeed / 100_000))
+    - source.queueLength * 20;
+};
 
 const transferStatus = (transfer: Transfer) => {
   switch (transfer.status) {
@@ -110,6 +142,9 @@ const isVisibleInFilter = (group: TransferGroup, filter: Filter) => {
 export function TransfersWorkspace({
   transfers,
   maxConcurrentDownloads,
+  relaySuggestionMinutes,
+  relayRecords,
+  online,
   uploads,
   uploadError,
   error,
@@ -126,6 +161,8 @@ export function TransfersWorkspace({
   onVerifyRelease,
   onRetryReleaseIssues,
   onSwitchReleaseSource,
+  onFindAlternatives,
+  onRelayReleaseSource,
   onDismissError,
   personByUsername,
   onOpenPerson,
@@ -135,7 +172,7 @@ export function TransfersWorkspace({
   focusTarget = null,
 }: TransfersWorkspaceProps) {
   const [direction, setDirection] = useState<"downloads" | "uploads">("downloads");
-  const [clock, setClock] = useState(0);
+  const [clock, setClock] = useState(transfersClockStartedAtMs);
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 1_000);
     return () => window.clearInterval(timer);
@@ -145,6 +182,8 @@ export function TransfersWorkspace({
   const [query, setQuery] = useState("");
   const [draggedReleaseId, setDraggedReleaseId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<QueueDropTarget | null>(null);
+  const [openRelayIds, setOpenRelayIds] = useState<Set<string>>(new Set());
+  const [switchingRelaySource, setSwitchingRelaySource] = useState<string | null>(null);
   const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(
     focusTarget?.groupId ?? null,
   );
@@ -469,6 +508,27 @@ export function TransfersWorkspace({
           const remoteQueuePosition = group.transfers.find(
             (transfer) => transfer.status === "remotelyQueued",
           )?.queuePosition ?? null;
+          const waitingTransfer = group.transfers.find((transfer) =>
+            ["requesting", "remotelyQueued", "connecting"].includes(transfer.status),
+          );
+          const waitingSince = waitingTransfer?.waitingSinceMs ?? null;
+          const waitingFor = waitingSince && clock
+            ? formatWaitingTime(clock - waitingSince)
+            : null;
+          const relayRecord = group.releaseId
+            ? relayRecords[relaySessionId(group.releaseId)]
+            : undefined;
+          const currentUsers = new Set(group.transfers.map((transfer) => transfer.username.toLocaleLowerCase()));
+          const relaySources = groupAlbumSources(relayRecord?.results ?? [])
+            .filter((source) => !currentUsers.has(source.owner.toLocaleLowerCase()))
+            .sort((left, right) => relaySourceScore(right, group) - relaySourceScore(left, group));
+          const relayOpen = group.releaseId ? openRelayIds.has(group.releaseId) : false;
+          const relaySearching = relayRecord?.snapshot.state === "searching";
+          const relayRouteCount = relaySources.length + health.alternatives.length;
+          const suggestionDue = relaySuggestionMinutes > 0
+            && waitingSince !== null
+            && clock - waitingSince >= relaySuggestionMinutes * 60_000;
+          const relayAvailable = Boolean(group.releaseId && (waitingTransfer || group.status === "failed"));
           const moved = health.state === "moved";
           const recoverableIssues = !moved && (health.missingCount > 0 || health.failedCount > 0);
           const knownArt = group.title.toLocaleLowerCase().includes("night geometry");
@@ -505,6 +565,26 @@ export function TransfersWorkspace({
                     <strong>{health.state === "verified" ? "Verified" : moved ? "Moved" : health.state === "attention" ? "Needs attention" : health.state === "recovering" ? `Auto recovery${retryInSeconds !== null ? ` in ${retryInSeconds}s` : ""}` : `${health.completedCount}/${group.transfers.length} complete`}</strong>
                     <small>{moved ? `${health.missingCount} ${health.missingCount === 1 ? "file" : "files"} moved from downloads` : `${health.verifiedCount} verified${health.missingCount ? ` · ${health.missingCount} missing` : ""}${health.mismatchCount ? ` · ${health.mismatchCount} size mismatch` : ""}`}</small>
                   </span>
+                  {relayAvailable ? <button
+                    type="button"
+                    className={`signal-relay-chip${relayRouteCount ? " has-routes" : suggestionDue ? " is-due" : ""}`}
+                    aria-expanded={relayOpen}
+                    onClick={() => {
+                      if (!group.releaseId) return;
+                      setOpenRelayIds((current) => {
+                        const next = new Set(current);
+                        if (next.has(group.releaseId!)) next.delete(group.releaseId!);
+                        else next.add(group.releaseId!);
+                        return next;
+                      });
+                      if (!relayOpen && !relaySearching && relayRouteCount === 0 && online) {
+                        onFindAlternatives(group.releaseId, group.title);
+                      }
+                    }}
+                  >
+                    {relaySearching ? <CircleNotch className="search-spinner" size={13} /> : <Broadcast size={13} />}
+                    <span>{relaySearching ? "Listening for another route" : relayRouteCount ? `${relayRouteCount} ${relayRouteCount === 1 ? "route" : "routes"} ready` : suggestionDue ? "Signal Relay suggests a rescue" : "Find another source"}</span>
+                  </button> : null}
                   {group.status === "queued" && group.releaseId ? (
                     <span className="release-queue-order">
                       <b>Local queue #{group.queuePosition}</b>
@@ -568,7 +648,7 @@ export function TransfersWorkspace({
                   <strong>{completed ? "Completed" : `${formatBytes(group.transferredBytes)} / ${formatBytes(group.sizeBytes)} (${Math.round(progress)}%)`}</strong>
                   <i><b style={{ width: `${progress}%` }} /></i>
                   <small>
-                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 3${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? group.speedBytesPerSecond > 0 ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : remoteQueuePosition ? `Source queue #${remoteQueuePosition} · using 1 of ${maxConcurrentDownloads} user lanes` : `Contacting source · using 1 of ${maxConcurrentDownloads} user lanes` : group.status === "queued" ? `Local queue #${group.queuePosition} · Waiting for a user lane…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : moved ? "Moved out of the download folder" : "Ready in your download folder"}
+                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 3${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? group.speedBytesPerSecond > 0 ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : remoteQueuePosition ? `Source queue #${remoteQueuePosition}${waitingFor ? ` · waiting ${waitingFor}` : ""} · using 1 of ${maxConcurrentDownloads} user lanes` : `${waitingTransfer?.status === "connecting" ? "Connecting to source" : "Contacting source"}${waitingFor ? ` · ${waitingFor}` : ""} · using 1 of ${maxConcurrentDownloads} user lanes` : group.status === "queued" ? `Local queue #${group.queuePosition} · Waiting for a user lane…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : moved ? "Moved out of the download folder" : "Ready in your download folder"}
                   </small>
                 </span>
                 <span className="release-transfer-actions">
@@ -624,11 +704,49 @@ export function TransfersWorkspace({
                     <span className="finish-line-detail-icon">{health.state === "verified" ? <ShieldCheck size={19} weight="fill" /> : moved ? <Archive size={19} weight="fill" /> : health.state === "attention" ? <WarningCircle size={19} weight="fill" /> : <Timer size={19} />}</span>
                     <span><small>Release health</small><strong>{health.state === "verified" ? "All expected files verified" : moved ? "Filed away after download" : health.state === "attention" ? "The release needs a quick check" : health.state === "recovering" ? "Forever is recovering this signal" : `${health.completedCount} of ${group.transfers.length} files complete`}</strong><p>{health.state === "verified" ? "Filename presence and expected byte size both match." : moved ? "The complete release left Forever's download folder together, so it is treated as moved instead of damaged." : health.state === "attention" ? `${health.missingCount} missing · ${health.mismatchCount} size mismatch · ${health.failedCount} failed` : "Partial progress is preserved between every safe retry."}</p></span>
                     <span className="finish-line-file-counts"><b>{health.verifiedCount}<small>Verified</small></b><b>{health.pendingCount}<small>Pending</small></b><b>{moved ? health.missingCount : health.missingCount + health.mismatchCount + health.failedCount}<small>{moved ? "Moved" : "Issues"}</small></b></span>
-                    {health.alternatives.length > 0 && group.releaseId ? <details className="finish-line-alternatives"><summary><ArrowClockwise size={14} /> Alternative signals <small>{health.alternatives.length}</small></summary><div>{health.alternatives.map((source) => {
+                    {health.alternatives.length > 0 && group.releaseId && !relayOpen ? <details className="finish-line-alternatives"><summary><ArrowClockwise size={14} /> Alternative signals <small>{health.alternatives.length}</small></summary><div>{health.alternatives.map((source) => {
                       const matchCount = group.transfers.filter((transfer) => source.files.some((file) => file.sizeBytes === transfer.sizeBytes && basename(file.remoteFilename).toLocaleLowerCase() === basename(transfer.remoteFilename).toLocaleLowerCase())).length;
                       return <button type="button" key={`${source.username}:${source.remoteFolder}`} disabled={matchCount === 0} onClick={() => onSwitchReleaseSource(group.releaseId!, source)}><span><strong>{source.username}</strong><small title={source.remoteFolder}>{source.remoteFolder.replace(/[\\/]/g, " / ")}</small></span><b>{matchCount}/{group.transfers.length} exact</b><em>Try source</em></button>;
                     })}</div></details> : null}
                   </section>
+                  {relayOpen && group.releaseId ? <section className="signal-relay-panel">
+                    <header>
+                      <span className="signal-relay-mark"><Broadcast size={18} weight="light" /></span>
+                      <span><small>Signal Relay</small><strong>{relaySearching ? "Listening for another route…" : relaySources.length || health.alternatives.length ? "Choose the signal worth following." : "No alternate route has answered yet."}</strong><p>Completed files stay in place. Partial data resumes only when the filename and byte size are an exact mirror.</p></span>
+                      <button type="button" disabled={!online || relaySearching} onClick={() => onFindAlternatives(group.releaseId!, group.title)}>{relaySearching ? <CircleNotch className="search-spinner" size={14} /> : <Broadcast size={14} />}{relayRecord ? "Rescan" : "Find sources"}</button>
+                    </header>
+                    {!online ? <p className="signal-relay-empty"><WarningCircle size={14} /> Reconnect before asking the network for another source.</p> : null}
+                    {relaySearching && relaySources.length === 0 ? <div className="signal-relay-listening"><i /><i /><i /><span>Comparing folders, formats, track counts, slots, and source queues…</span></div> : null}
+                    {health.alternatives.length > 0 || relaySources.length > 0 ? <div className="signal-relay-routes">
+                      {health.alternatives.map((source) => {
+                        const matchCount = group.transfers.filter((transfer) => source.files.some((file) => file.sizeBytes === transfer.sizeBytes && basename(file.remoteFilename).toLocaleLowerCase() === basename(transfer.remoteFilename).toLocaleLowerCase())).length;
+                        return <article className="signal-relay-route is-mirror" key={`known:${source.username}:${source.remoteFolder}`}>
+                          <span><CountryFlag code={personByUsername(source.username)?.countryCode} /><strong>{source.username}</strong><small>Known mirror</small></span>
+                          <span><strong>{matchCount}/{group.transfers.length}</strong><small>exact files</small></span>
+                          <span className="signal-relay-path" title={source.remoteFolder}>{source.remoteFolder.replace(/[\\/]/g, " / ")}</span>
+                          <button type="button" disabled={matchCount === 0} onClick={() => onSwitchReleaseSource(group.releaseId!, source)}>Use mirror</button>
+                        </article>;
+                      })}
+                      {relaySources.map((source) => {
+                        const currentFormats = new Set(group.transfers.map((transfer) => transfer.remoteFilename.split(".").pop()?.toUpperCase()).filter((format): format is string => Boolean(format)));
+                        const compatible = source.formats.some((format) => currentFormats.has(format));
+                        const sourceKey = `${group.releaseId}:${source.id}`;
+                        const switching = switchingRelaySource === sourceKey;
+                        return <article className={`signal-relay-route${compatible ? "" : " is-incompatible"}`} key={`fresh:${source.id}`}>
+                          <span><CountryFlag code={personByUsername(source.owner)?.countryCode} /><strong>{source.owner}</strong><small>{source.slotFree ? "Slot ready" : source.queueLength ? `${source.queueLength} queued` : "Slot status quiet"}</small></span>
+                          <span><strong>{source.tracks.length} tracks</strong><small>{source.formats.join(" / ") || "Other files"} · {formatBytes(source.totalSizeBytes)}</small></span>
+                          <span className="signal-relay-path" title={source.folder}>{source.folder.replace(/[\\/]/g, " / ")}</span>
+                          <span className="signal-relay-speed"><strong>{source.averageSpeed ? `${formatBytes(source.averageSpeed)}/s` : "Unknown"}</strong><small>reported speed</small></span>
+                          <button type="button" disabled={!compatible || switching} title={compatible ? "Inspect the complete folder, then switch unfinished files" : "Signal Relay only switches to the same audio format safely"} onClick={() => {
+                            setSwitchingRelaySource(sourceKey);
+                            void onRelayReleaseSource(group.releaseId!, source)
+                              .catch(() => undefined)
+                              .finally(() => setSwitchingRelaySource(null));
+                          }}>{switching ? <CircleNotch className="search-spinner" size={13} /> : null}{switching ? "Checking…" : compatible ? "Switch source" : "Different format"}</button>
+                        </article>;
+                      })}
+                    </div> : relayRecord?.snapshot.state === "completed" && online ? <p className="signal-relay-empty"><Broadcast size={14} /> No other matching album folder answered this scan. You can rescan whenever you like.</p> : null}
+                  </section> : null}
                   <div className="release-file-header" aria-hidden="true">
                     <span>#</span><span>Filename</span><span>Size</span><span>Progress</span><span>Status</span><span />
                   </div>

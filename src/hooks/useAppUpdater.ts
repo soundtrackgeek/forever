@@ -30,20 +30,20 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.37",
-  version: "0.0.38",
-  body: `## What’s new in Forever 0.0.38
+  currentVersion: "0.0.38",
+  version: "0.0.39",
+  body: `## What’s new in Forever 0.0.39
 
 ### Added
 
-- Smart Match adds MP3-only profiles, reusable defaults for new Wanted albums, and MusicBrainz-assisted official track-count suggestions.
-- Download lanes run one file per user while up to three different users transfer in parallel by default; choose between one and six users in Settings.
-- Transfers now distinguish Forever’s local queue from a source’s remote queue and show lane occupancy while waiting.
+- Signal Relay shows how long a release has waited, distinguishes source queues from connection attempts, and searches for another route without leaving Transfers.
+- Fresh album folders are ranked by matching format, track count, available slots, speed, and source queue length.
+- Settings can suggest alternatives after 5, 10, 20, 30, or 60 minutes, or leave suggestions off. Ten minutes is the default.
 
 ### Changed
 
-- Releases already submitted to a source keep their remote queue position, while locally waiting releases remain reorderable.
-- The Windows CI album-discovery regression has a focused allowance for cold-runner startup instead of changing the global test timeout.`,
+- Switching remains user-approved. Completed files stay untouched, exact mirrors retain safe partial progress, and non-identical partial files restart cleanly.
+- Signal Relay searches use separate bounded capacity, so rescue scans do not consume Dial Memory’s eight visible search presets.`,
   date: "2026-07-27",
 };
 

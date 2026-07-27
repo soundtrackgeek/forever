@@ -5,6 +5,34 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.39] - 2026-07-27
+
+### Added
+
+- **Signal Relay** adds an in-place rescue drawer for stalled album downloads,
+  showing known exact mirrors and freshly discovered Soulseek source folders.
+- A configurable **Suggest another source after** setting supports Off, 5, 10,
+  20, 30, or 60 minutes, with ten minutes as the default.
+- Background relay scans use dedicated search capacity and notify inside the app
+  when a compatible route is ready for review.
+
+### Changed
+
+- Transfer cards distinguish local ordering from a source wait and show how long
+  a release has been waiting before offering another route.
+- Fresh source candidates are ranked by format, track completeness, upload-slot
+  readiness, speed, and remote queue length; format changes remain disabled.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.39`.
+
+### Fixed
+
+- Switching to an exact mirror retains safe partial progress, while a compatible
+  renamed replacement restarts that unfinished file instead of resuming bytes
+  against different remote content. Completed files are never redownloaded.
+- The preview runtime now preserves the selected download-lane and Signal Relay
+  settings across its periodic transfer refresh.
+
 ## [0.0.38] - 2026-07-27
 
 ### Added

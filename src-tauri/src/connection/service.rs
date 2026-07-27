@@ -3,8 +3,8 @@ use super::{
     diagnostics::{DiagnosticEntry, Diagnostics},
     distributed::{DistributedHub, DistributedSnapshot, RequestAdmission},
     downloads::{
-        DownloadPlan, EnqueueReleaseRequest, EnqueueTransferRequest, TransferError, TransferHub,
-        TransferQueueSnapshot, TransferTicket,
+        DownloadPlan, EnqueueReleaseRequest, EnqueueTransferRequest, ReleaseAlternativeSource,
+        TransferError, TransferHub, TransferQueueSnapshot, TransferTicket,
     },
     folders::{FolderError, FolderHub, FolderInspection, FolderTicket},
     local_shares::{
@@ -1207,6 +1207,24 @@ impl ConnectionManager {
             .switch_release_source(release_id, username, remote_folder)?;
         self.schedule_downloads();
         Ok(snapshot)
+    }
+
+    pub fn relay_release_source(
+        &self,
+        release_id: &str,
+        source: ReleaseAlternativeSource,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        self.people.remember(&source.username)?;
+        let snapshot = self.transfers.relay_release_source(release_id, source)?;
+        self.schedule_downloads();
+        Ok(snapshot)
+    }
+
+    pub fn set_relay_suggestion_minutes(
+        &self,
+        minutes: u32,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        Ok(self.transfers.set_relay_suggestion_minutes(minutes)?)
     }
 
     pub fn reveal_release_path(&self, release_id: &str) -> Result<String, ConnectionServiceError> {

@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.38` adds Smart Match defaults and MP3-only
-> profiles, catalog-aware track counts, plus configurable multi-user download
-> lanes with a three-user default.
+> **Status:** pre-alpha. Version `0.0.39` adds Signal Relay: stalled album
+> downloads can discover, compare, and safely switch to a healthier Soulseek
+> source without disturbing files that already finished.
 
-If `0.0.16` is installed, download and run the latest `0.0.38` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.39` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -135,16 +135,21 @@ configuration and transfers.
 - Whole-release enqueue into a collision-free local release folder, with
   MusicBrainz-guided `Artist - Album (Year)` naming plus persisted file order
   and resume state across restarts
-- Persistent transfers with source-queue position, byte progress, speed, ETA,
-  pause, resume, retry, cancel, completion, and Show in folder controls
+- Persistent transfers with source-queue position and waiting age, byte
+  progress, speed, ETA, pause, resume, retry, cancel, completion, and Show in
+  folder controls
 - Bounded automatic recovery for transient peer interruptions with visible
   retry attempts and countdowns while preserving safe `.part` progress
 - **Finish Line** release health with expected-file verification, Moved,
   Missing, and Size mismatch states, a Needs attention filter, manual
   recheck/retry actions, and persistent completion history that never deletes
   downloaded files
-- Exact alternative-source switching for album queues, preserving verified
-  files and accepting a replacement only when basename and byte size match
+- **Signal Relay** source rescue for stalled album queues, with a configurable
+  suggestion delay, fresh background Soulseek scans, ranked same-format routes,
+  and an in-place approval drawer instead of an automatic source change
+- Safe source handoff preserves completed files and partial progress only for
+  exact basename-and-size mirrors; compatible replacement files restart from
+  zero rather than risking corrupt output
 - A full release-grouped Transfers workspace with All, Active, Queued,
   Completed, and Needs attention filters, transfer search, aggregate and
   per-file progress, whole-album ETA, release-level controls, Clear history,
@@ -381,6 +386,11 @@ Downloads use one file at a time from each source user, while different users
 can transfer in parallel. Set **Settings → Download lanes → Simultaneous users**
 from one to six; the default is three. Transfers labels Forever's reorderable
 **Local queue** separately from the source's already-submitted **Source queue**.
+Set **Suggest another source after** to Off, 5, 10, 20, 30, or 60 minutes; the
+default is 10 minutes. Once a release has waited that long, Signal Relay quietly
+checks Soulseek for compatible album folders, shows a notification when routes
+are ready, and leaves the final switch to you. The active transfer card can also
+open Signal Relay or start a scan immediately.
 Uploads default to one slot and can be raised to three. Edition/pressing lookup,
 playback, and private-room administration remain outside this release.
 

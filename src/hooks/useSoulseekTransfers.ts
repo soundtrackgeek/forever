@@ -123,16 +123,24 @@ const emptySnapshot: TransferQueueSnapshot = {
   transfers: [],
   activeCount: 0,
   maxConcurrentDownloads: 3,
+  relaySuggestionMinutes: 10,
 };
 
-const withCount = (transfers: Transfer[]): TransferQueueSnapshot => ({
+const withCount = (
+  transfers: Transfer[],
+  settings: Pick<TransferQueueSnapshot, "maxConcurrentDownloads" | "relaySuggestionMinutes"> = {
+    maxConcurrentDownloads: 3,
+    relaySuggestionMinutes: 10,
+  },
+): TransferQueueSnapshot => ({
   transfers,
   activeCount: transfers.filter((transfer) =>
     ["requesting", "remotelyQueued", "connecting", "downloading"].includes(
       transfer.status,
     ),
   ).length,
-  maxConcurrentDownloads: 3,
+  maxConcurrentDownloads: settings.maxConcurrentDownloads,
+  relaySuggestionMinutes: settings.relaySuggestionMinutes,
 });
 
 const errorMessage = (cause: unknown) =>
@@ -373,7 +381,7 @@ export function useSoulseekTransfers() {
           }
           return transfer;
         });
-        return withCount(next);
+        return withCount(next, current);
       });
     }, 500);
     return () => window.clearInterval(timer);
@@ -425,11 +433,11 @@ export function useSoulseekTransfers() {
         createdAtMs: Date.now(),
         updatedAtMs: Date.now(),
       };
-      const next = withCount([...snapshot.transfers, transfer]);
+      const next = withCount([...snapshot.transfers, transfer], snapshot);
       setSnapshot(next);
       return next;
     },
-    [native, snapshot.transfers],
+    [native, snapshot],
   );
 
   const enqueueRelease = useCallback(
@@ -525,11 +533,11 @@ export function useSoulseekTransfers() {
           };
         },
       );
-      const next = withCount([...snapshot.transfers, ...preview]);
+      const next = withCount([...snapshot.transfers, ...preview], snapshot);
       setSnapshot(next);
       return next;
     },
-    [native, snapshot.transfers],
+    [native, snapshot],
   );
 
   const pause = useCallback(
@@ -557,6 +565,7 @@ export function useSoulseekTransfers() {
                 }
               : transfer,
           ),
+          current,
         ),
       );
     },
@@ -588,6 +597,7 @@ export function useSoulseekTransfers() {
                 }
               : transfer,
           ),
+          current,
         ),
       );
     },
@@ -608,7 +618,7 @@ export function useSoulseekTransfers() {
         }
       }
       setSnapshot((current) =>
-        withCount(current.transfers.filter((transfer) => transfer.id !== id)),
+        withCount(current.transfers.filter((transfer) => transfer.id !== id), current),
       );
     },
     [native],
@@ -656,6 +666,7 @@ export function useSoulseekTransfers() {
                 }
               : transfer,
           ),
+          current,
         ),
       );
     },
@@ -691,6 +702,7 @@ export function useSoulseekTransfers() {
                 }
               : transfer,
           ),
+          current,
         ),
       );
     },
@@ -718,6 +730,7 @@ export function useSoulseekTransfers() {
           current.transfers.filter(
             (transfer) => transfer.releaseId !== releaseId,
           ),
+          current,
         ),
       );
     },
@@ -747,6 +760,7 @@ export function useSoulseekTransfers() {
             releaseId,
             beforeTransferId,
           ),
+          current,
         ),
       );
     },
@@ -778,6 +792,7 @@ export function useSoulseekTransfers() {
           const groupId = transfer.releaseId ?? `single:${transfer.id}`;
           return !completedGroups.has(groupId);
         }),
+        current,
       );
     });
   }, [native]);
@@ -814,7 +829,7 @@ export function useSoulseekTransfers() {
       transfer.releaseId === releaseId && transfer.status === "completed"
         ? { ...transfer, verifiedAtMs: Date.now() }
         : transfer,
-    )));
+    ), current));
   }, [native]);
 
   const retryReleaseIssues = useCallback(async (releaseId: string) => {
@@ -844,7 +859,7 @@ export function useSoulseekTransfers() {
         retryCount: 0,
         retryAtMs: null,
       } : transfer;
-    })));
+    }), current));
   }, [native]);
 
   const switchReleaseSource = useCallback(async (
@@ -901,9 +916,31 @@ export function useSoulseekTransfers() {
           verifiedAtMs: null,
           alternativeSources: alternatives,
         };
-      }));
+      }), current);
     });
   }, [native]);
+
+  const relayReleaseSource = useCallback(async (
+    releaseId: string,
+    source: ReleaseAlternativeSource,
+  ) => {
+    setError(null);
+    try {
+      if (native) {
+        const next = await invoke<TransferQueueSnapshot>("transfer_relay_release_source", {
+          releaseId,
+          source,
+        });
+        setSnapshot(next);
+        return next;
+      }
+      await switchReleaseSource(releaseId, source);
+      return snapshot;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native, snapshot, switchReleaseSource]);
 
   const clearCompletionNotice = useCallback(() => setCompletionNotice(null), []);
   const clearActivityNotice = useCallback(() => setActivityNotice(null), []);
@@ -914,6 +951,20 @@ export function useSoulseekTransfers() {
       const next = native
         ? await invoke<TransferQueueSnapshot>("transfer_set_max_concurrent_downloads", { maxConcurrentDownloads })
         : { ...snapshot, maxConcurrentDownloads };
+      setSnapshot(next);
+      return next;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native, snapshot]);
+
+  const setRelaySuggestionMinutes = useCallback(async (minutes: number) => {
+    setError(null);
+    try {
+      const next = native
+        ? await invoke<TransferQueueSnapshot>("transfer_set_relay_suggestion_minutes", { minutes })
+        : { ...snapshot, relaySuggestionMinutes: minutes };
       setSnapshot(next);
       return next;
     } catch (cause) {
@@ -942,7 +993,9 @@ export function useSoulseekTransfers() {
       verifyRelease,
       retryReleaseIssues,
       switchReleaseSource,
+      relayReleaseSource,
       setMaxConcurrentDownloads,
+      setRelaySuggestionMinutes,
       completionNotice,
       clearCompletionNotice,
       activityNotice,
@@ -970,7 +1023,9 @@ export function useSoulseekTransfers() {
       verifyRelease,
       retryReleaseIssues,
       switchReleaseSource,
+      relayReleaseSource,
       setMaxConcurrentDownloads,
+      setRelaySuggestionMinutes,
       completionNotice,
       activityNotice,
       snapshot,

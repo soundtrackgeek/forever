@@ -4,7 +4,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
         Arc, Mutex, RwLock,
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -17,9 +17,15 @@ const STORE_VERSION: u32 = 1;
 const MAX_AUTOMATIC_RETRIES: u32 = 3;
 const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u8 = 3;
 const MAX_CONCURRENT_DOWNLOADS: u8 = 6;
+const DEFAULT_RELAY_SUGGESTION_MINUTES: u32 = 10;
+const RELAY_SUGGESTION_MINUTES: [u32; 6] = [0, 5, 10, 20, 30, 60];
 
 fn default_max_concurrent_downloads() -> u8 {
     DEFAULT_MAX_CONCURRENT_DOWNLOADS
+}
+
+fn default_relay_suggestion_minutes() -> u32 {
+    DEFAULT_RELAY_SUGGESTION_MINUTES
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -101,6 +107,8 @@ pub struct TransferSnapshot {
     #[serde(default)]
     pub retry_at_ms: Option<u64>,
     #[serde(default)]
+    pub waiting_since_ms: Option<u64>,
+    #[serde(default)]
     pub verification_status: VerificationStatus,
     #[serde(default)]
     pub verification_message: Option<String>,
@@ -122,6 +130,7 @@ pub struct TransferQueueSnapshot {
     pub transfers: Vec<TransferSnapshot>,
     pub active_count: usize,
     pub max_concurrent_downloads: u8,
+    pub relay_suggestion_minutes: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -174,6 +183,8 @@ struct TransferStore {
     version: u32,
     #[serde(default = "default_max_concurrent_downloads")]
     max_concurrent_downloads: u8,
+    #[serde(default = "default_relay_suggestion_minutes")]
+    relay_suggestion_minutes: u32,
     transfers: Vec<TransferSnapshot>,
 }
 
@@ -183,6 +194,7 @@ pub struct TransferHub {
     path: PathBuf,
     transfers: Arc<RwLock<Vec<TransferSnapshot>>>,
     max_concurrent_downloads: Arc<AtomicU8>,
+    relay_suggestion_minutes: Arc<AtomicU32>,
     tasks: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     next_id: Arc<AtomicU64>,
 }
@@ -211,6 +223,7 @@ impl TransferHub {
             path,
             transfers: Arc::new(RwLock::new(transfers)),
             max_concurrent_downloads: Arc::new(AtomicU8::new(store.max_concurrent_downloads)),
+            relay_suggestion_minutes: Arc::new(AtomicU32::new(store.relay_suggestion_minutes)),
             tasks: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(AtomicU64::new(timestamp_ms())),
         };
@@ -232,6 +245,7 @@ impl TransferHub {
             transfers,
             active_count,
             max_concurrent_downloads: self.max_concurrent_downloads.load(Ordering::SeqCst),
+            relay_suggestion_minutes: self.relay_suggestion_minutes.load(Ordering::SeqCst),
         }
     }
 
@@ -244,6 +258,19 @@ impl TransferHub {
         }
         self.max_concurrent_downloads
             .store(max_concurrent_downloads, Ordering::SeqCst);
+        self.persist_and_publish()?;
+        Ok(self.snapshot())
+    }
+
+    pub fn set_relay_suggestion_minutes(
+        &self,
+        relay_suggestion_minutes: u32,
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        if !RELAY_SUGGESTION_MINUTES.contains(&relay_suggestion_minutes) {
+            return Err(TransferError::InvalidRelaySuggestionMinutes);
+        }
+        self.relay_suggestion_minutes
+            .store(relay_suggestion_minutes, Ordering::SeqCst);
         self.persist_and_publish()?;
         Ok(self.snapshot())
     }
@@ -285,6 +312,7 @@ impl TransferHub {
             error: None,
             retry_count: 0,
             retry_at_ms: None,
+            waiting_since_ms: None,
             verification_status: VerificationStatus::Pending,
             verification_message: None,
             verified_at_ms: None,
@@ -356,6 +384,7 @@ impl TransferHub {
                 error: None,
                 retry_count: 0,
                 retry_at_ms: None,
+                waiting_since_ms: None,
                 verification_status: VerificationStatus::Pending,
                 verification_message: None,
                 verified_at_ms: None,
@@ -382,6 +411,7 @@ impl TransferHub {
                     transfer.status = TransferStatus::Paused;
                     transfer.speed_bytes_per_second = 0;
                     transfer.eta_seconds = None;
+                    transfer.waiting_since_ms = None;
                     transfer.connection_token = None;
                     transfer.transfer_token = None;
                     transfer.updated_at_ms = timestamp_ms();
@@ -411,6 +441,7 @@ impl TransferHub {
                     transfer.error = None;
                     transfer.retry_count = 0;
                     transfer.retry_at_ms = None;
+                    transfer.waiting_since_ms = None;
                     transfer.verification_status = VerificationStatus::Pending;
                     transfer.verification_message = None;
                     transfer.verified_at_ms = None;
@@ -580,6 +611,7 @@ impl TransferHub {
                     transfer.error = None;
                     transfer.retry_count = 0;
                     transfer.retry_at_ms = None;
+                    transfer.waiting_since_ms = None;
                     transfer.verification_status = VerificationStatus::Pending;
                     transfer.verification_message = None;
                     transfer.verified_at_ms = None;
@@ -604,6 +636,20 @@ impl TransferHub {
         username: &str,
         remote_folder: &str,
     ) -> Result<TransferQueueSnapshot, TransferError> {
+        let active_ids = self
+            .transfers
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .filter(|transfer| {
+                transfer.release_id.as_deref() == Some(release_id)
+                    && transfer.status.occupies_slot()
+            })
+            .map(|transfer| transfer.id.clone())
+            .collect::<Vec<_>>();
+        for id in active_ids {
+            self.abort(&id);
+        }
         let mut transfers = self
             .transfers
             .write()
@@ -655,24 +701,34 @@ impl TransferHub {
                     continue;
                 }
             }
-            let Some(file) = matching_alternative_file(transfer, &alternative) else {
+            let Some((file, exact_mirror)) = matching_alternative_file(transfer, &alternative)
+            else {
                 continue;
             };
+            if !exact_mirror {
+                let partial = partial_path(Path::new(&transfer.local_path));
+                if partial.exists() {
+                    fs::remove_file(partial)?;
+                }
+            }
             transfer.username = alternative.username.clone();
             transfer.remote_filename = normalize_remote_filename(&file.remote_filename);
             transfer.title = file.title.clone();
+            transfer.size_bytes = file.size_bytes;
             transfer.status = TransferStatus::Queued;
-            transfer.transferred_bytes = if partial_path(Path::new(&transfer.local_path)).exists() {
-                fs::metadata(partial_path(Path::new(&transfer.local_path)))
-                    .map(|metadata| metadata.len().min(transfer.size_bytes))
-                    .unwrap_or(0)
-            } else {
-                0
-            };
+            transfer.transferred_bytes =
+                if exact_mirror && partial_path(Path::new(&transfer.local_path)).exists() {
+                    fs::metadata(partial_path(Path::new(&transfer.local_path)))
+                        .map(|metadata| metadata.len().min(transfer.size_bytes))
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
             reset_runtime_state(transfer);
             transfer.error = None;
             transfer.retry_count = 0;
             transfer.retry_at_ms = None;
+            transfer.waiting_since_ms = None;
             transfer.verification_status = VerificationStatus::Pending;
             transfer.verification_message = None;
             transfer.verified_at_ms = None;
@@ -700,6 +756,60 @@ impl TransferHub {
         drop(transfers);
         self.persist_and_publish()?;
         Ok(self.snapshot())
+    }
+
+    pub fn relay_release_source(
+        &self,
+        release_id: &str,
+        source: ReleaseAlternativeSource,
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        validate_alternative_source(&source)?;
+        {
+            let transfers = self
+                .transfers
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let release = transfers
+                .iter()
+                .filter(|transfer| transfer.release_id.as_deref() == Some(release_id))
+                .collect::<Vec<_>>();
+            if release.is_empty() {
+                return Err(TransferError::ReleaseNotFound);
+            }
+            let compatible = release.iter().any(|transfer| {
+                (transfer.status != TransferStatus::Completed
+                    || transfer.verification_status == VerificationStatus::Missing)
+                    && matching_alternative_file(transfer, &source).is_some()
+            });
+            if !compatible {
+                return Err(TransferError::AlternativeSourceMismatch);
+            }
+        }
+        let username = source.username.clone();
+        let remote_folder = source.remote_folder.clone();
+        {
+            let mut transfers = self
+                .transfers
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut found = false;
+            for transfer in transfers
+                .iter_mut()
+                .filter(|transfer| transfer.release_id.as_deref() == Some(release_id))
+            {
+                found = true;
+                transfer.alternative_sources.retain(|candidate| {
+                    !(candidate.username.eq_ignore_ascii_case(&username)
+                        && normalize_remote_folder(&candidate.remote_folder)
+                            .eq_ignore_ascii_case(&normalize_remote_folder(&remote_folder)))
+                });
+                transfer.alternative_sources.push(source.clone());
+            }
+            if !found {
+                return Err(TransferError::ReleaseNotFound);
+            }
+        }
+        self.switch_release_source(release_id, &username, &remote_folder)
     }
 
     pub fn clear_completed(&self) -> Result<TransferQueueSnapshot, TransferError> {
@@ -775,7 +885,8 @@ impl TransferHub {
             transfer.queue_position = None;
             transfer.error = None;
             transfer.retry_at_ms = None;
-            transfer.updated_at_ms = timestamp_ms();
+            transfer.waiting_since_ms = Some(now);
+            transfer.updated_at_ms = now;
             TransferTicket {
                 id: transfer.id.clone(),
                 username: transfer.username.clone(),
@@ -942,6 +1053,7 @@ impl TransferHub {
             transfer.transferred_bytes = offset;
             transfer.speed_bytes_per_second = 0;
             transfer.eta_seconds = None;
+            transfer.waiting_since_ms = None;
             transfer.updated_at_ms = timestamp_ms();
             DownloadPlan {
                 id: transfer.id.clone(),
@@ -986,6 +1098,7 @@ impl TransferHub {
                 transfer.error = None;
                 transfer.retry_count = 0;
                 transfer.retry_at_ms = None;
+                transfer.waiting_since_ms = None;
                 transfer.connection_token = None;
                 transfer.transfer_token = None;
                 transfer.updated_at_ms = timestamp_ms();
@@ -1020,6 +1133,7 @@ impl TransferHub {
                     transfer.queue_position = None;
                     transfer.error = None;
                     transfer.retry_at_ms = None;
+                    transfer.waiting_since_ms = None;
                     transfer.connection_token = None;
                     transfer.transfer_token = None;
                     transfer.updated_at_ms = timestamp_ms();
@@ -1095,6 +1209,7 @@ impl TransferHub {
                 transfer.queue_position = None;
                 transfer.error = Some(message);
                 transfer.retry_at_ms = None;
+                transfer.waiting_since_ms = None;
                 transfer.connection_token = None;
                 transfer.transfer_token = None;
                 transfer.updated_at_ms = timestamp_ms();
@@ -1115,6 +1230,7 @@ impl TransferHub {
                 transfer.queue_position = None;
                 transfer.connection_token = None;
                 transfer.transfer_token = None;
+                transfer.waiting_since_ms = None;
                 transfer.updated_at_ms = timestamp_ms();
                 if transfer.retry_count <= MAX_AUTOMATIC_RETRIES {
                     transfer.status = TransferStatus::Retrying;
@@ -1169,6 +1285,7 @@ impl TransferHub {
         let store = TransferStore {
             version: STORE_VERSION,
             max_concurrent_downloads: self.max_concurrent_downloads.load(Ordering::SeqCst),
+            relay_suggestion_minutes: self.relay_suggestion_minutes.load(Ordering::SeqCst),
             transfers: self
                 .transfers
                 .read()
@@ -1233,6 +1350,22 @@ fn validate_release_request(request: &EnqueueReleaseRequest) -> Result<(), Trans
         })
     {
         return Err(TransferError::InvalidReleaseRequest);
+    }
+    Ok(())
+}
+
+fn validate_alternative_source(source: &ReleaseAlternativeSource) -> Result<(), TransferError> {
+    if source.username.trim().is_empty()
+        || source.remote_folder.trim().is_empty()
+        || source.files.is_empty()
+        || source.files.len() > 5_000
+        || source.files.iter().any(|file| {
+            file.title.trim().is_empty()
+                || file.remote_filename.trim().is_empty()
+                || file.size_bytes == 0
+        })
+    {
+        return Err(TransferError::InvalidAlternativeSource);
     }
     Ok(())
 }
@@ -1331,6 +1464,7 @@ fn reset_runtime_state(transfer: &mut TransferSnapshot) {
     transfer.queue_position = None;
     transfer.connection_token = None;
     transfer.transfer_token = None;
+    transfer.waiting_since_ms = None;
 }
 
 fn next_download_index(
@@ -1363,6 +1497,7 @@ fn load_store(path: &Path) -> Result<TransferStore, TransferError> {
         return Ok(TransferStore {
             version: STORE_VERSION,
             max_concurrent_downloads: DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+            relay_suggestion_minutes: DEFAULT_RELAY_SUGGESTION_MINUTES,
             transfers: Vec::new(),
         });
     }
@@ -1372,6 +1507,9 @@ fn load_store(path: &Path) -> Result<TransferStore, TransferError> {
     }
     if !(1..=MAX_CONCURRENT_DOWNLOADS).contains(&store.max_concurrent_downloads) {
         return Err(TransferError::InvalidConcurrentDownloads);
+    }
+    if !RELAY_SUGGESTION_MINUTES.contains(&store.relay_suggestion_minutes) {
+        return Err(TransferError::InvalidRelaySuggestionMinutes);
     }
     Ok(store)
 }
@@ -1436,12 +1574,45 @@ fn automatic_retry_delay_ms(attempt: u32) -> u64 {
 fn matching_alternative_file<'a>(
     transfer: &TransferSnapshot,
     source: &'a ReleaseAlternativeSource,
-) -> Option<&'a ReleaseAlternativeFile> {
-    source.files.iter().find(|file| {
+) -> Option<(&'a ReleaseAlternativeFile, bool)> {
+    if let Some(file) = source.files.iter().find(|file| {
         file.size_bytes == transfer.size_bytes
             && safe_basename(&file.remote_filename)
                 .eq_ignore_ascii_case(&safe_basename(&transfer.remote_filename))
-    })
+    }) {
+        return Some((file, true));
+    }
+    let current_name = safe_basename(&transfer.remote_filename);
+    let current_path = Path::new(&current_name);
+    let current_stem = current_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(&current_name);
+    let current_extension = current_path.extension().and_then(|value| value.to_str());
+    if let Some(file) = source.files.iter().find(|file| {
+        let candidate_name = safe_basename(&file.remote_filename);
+        let candidate = Path::new(&candidate_name);
+        candidate
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .is_some_and(|stem| stem.eq_ignore_ascii_case(current_stem))
+            && candidate
+                .extension()
+                .and_then(|value| value.to_str())
+                .zip(current_extension)
+                .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right))
+    }) {
+        return Some((file, false));
+    }
+    let index = transfer.file_index?.checked_sub(1)? as usize;
+    let file = source.files.get(index)?;
+    let candidate_name = safe_basename(&file.remote_filename);
+    let same_extension = Path::new(&candidate_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .zip(current_extension)
+        .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right));
+    same_extension.then_some((file, false))
 }
 
 fn partial_path(final_path: &Path) -> PathBuf {
@@ -1620,8 +1791,10 @@ pub enum TransferError {
     NoRecoverableIssues,
     #[error("That alternative source is no longer available for this release.")]
     AlternativeSourceNotFound,
-    #[error("The alternative source did not contain any exact filename-and-size matches.")]
+    #[error("The alternative source did not contain compatible files for the unfinished release.")]
     AlternativeSourceMismatch,
+    #[error("Choose a complete, valid folder before relaying this release to another source.")]
+    InvalidAlternativeSource,
     #[error("That exact listener and folder are already in the release queue.")]
     DuplicateReleaseSource,
     #[error("Only a queued release can be reordered.")]
@@ -1630,6 +1803,8 @@ pub enum TransferError {
     InvalidReleaseOrder,
     #[error("Choose between 1 and 6 simultaneous download users.")]
     InvalidConcurrentDownloads,
+    #[error("Choose Off, 5, 10, 20, 30, or 60 minutes for Signal Relay suggestions.")]
+    InvalidRelaySuggestionMinutes,
     #[error("Choose at least one valid file before downloading the release.")]
     InvalidReleaseRequest,
     #[error("The incoming Soulseek file connection did not match the active download.")]
@@ -1678,6 +1853,7 @@ mod tests {
             error: None,
             retry_count: 0,
             retry_at_ms: None,
+            waiting_since_ms: None,
             verification_status: VerificationStatus::Pending,
             verification_message: None,
             verified_at_ms: None,
@@ -1725,6 +1901,7 @@ mod tests {
             error: None,
             retry_count: 0,
             retry_at_ms: None,
+            waiting_since_ms: None,
             verification_status: VerificationStatus::Pending,
             verification_message: None,
             verified_at_ms: None,
@@ -1766,6 +1943,7 @@ mod tests {
             error: None,
             retry_count: 0,
             retry_at_ms: None,
+            waiting_since_ms: None,
             verification_status: VerificationStatus::Pending,
             verification_message: None,
             verified_at_ms: None,
@@ -1782,6 +1960,7 @@ mod tests {
         let serialized = serde_json::to_vec_pretty(&TransferStore {
             version: STORE_VERSION,
             max_concurrent_downloads: DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+            relay_suggestion_minutes: DEFAULT_RELAY_SUGGESTION_MINUTES,
             transfers: vec![transfer],
         })
         .unwrap();
@@ -2036,7 +2215,7 @@ mod tests {
     }
 
     #[test]
-    fn alternative_sources_require_exact_filename_and_size_matches() {
+    fn alternative_sources_prefer_exact_filename_and_size_matches() {
         let transfer = release_transfer(
             "track",
             "release",
@@ -2062,9 +2241,49 @@ mod tests {
             ],
         };
         assert_eq!(
-            matching_alternative_file(&transfer, &source).map(|file| file.title.as_str()),
-            Some("exact")
+            matching_alternative_file(&transfer, &source)
+                .map(|(file, exact)| (file.title.as_str(), exact)),
+            Some(("exact", true))
         );
+    }
+
+    #[test]
+    fn relay_sources_restart_non_identical_partial_files() {
+        let transfer = release_transfer(
+            "track",
+            "release",
+            "first",
+            "Music\\Album\\01 - Signal.flac",
+            TransferStatus::RemotelyQueued,
+            1,
+        );
+        let renamed = ReleaseAlternativeSource {
+            username: "second".to_owned(),
+            remote_folder: "Archive\\Album".to_owned(),
+            files: vec![ReleaseAlternativeFile {
+                title: "01 Signal.flac".to_owned(),
+                remote_filename: "Archive\\Album\\01 Signal.flac".to_owned(),
+                size_bytes: 120,
+            }],
+        };
+        assert_eq!(
+            matching_alternative_file(&transfer, &renamed)
+                .map(|(file, exact)| (file.title.as_str(), exact)),
+            Some(("01 Signal.flac", false))
+        );
+    }
+
+    #[test]
+    fn transfer_store_defaults_signal_relay_to_ten_minutes() {
+        let value = serde_json::json!({
+            "version": STORE_VERSION,
+            "max_concurrent_downloads": 3,
+            "transfers": []
+        });
+        let store: TransferStore = serde_json::from_value(value).unwrap();
+        assert_eq!(store.relay_suggestion_minutes, 10);
+        assert!(RELAY_SUGGESTION_MINUTES.contains(&0));
+        assert!(RELAY_SUGGESTION_MINUTES.contains(&30));
     }
 
     #[test]

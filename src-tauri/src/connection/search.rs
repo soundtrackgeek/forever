@@ -12,6 +12,8 @@ pub const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
 const SEARCH_RESULT_LIMIT: usize = 5_000;
 const SEARCH_EVENT_BATCH_SIZE: usize = 200;
 const SEARCH_SESSION_LIMIT: usize = 8;
+const RELAY_SESSION_LIMIT: usize = 4;
+const RELAY_CLIENT_PREFIX: &str = "signal-relay:";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -246,10 +248,29 @@ impl SearchHub {
             });
             if let Some(existing) = existing {
                 runtimes.remove(&existing);
-            } else if runtimes.len() >= SEARCH_SESSION_LIMIT {
-                return Err(format!(
-                    "Dial Memory can hold at most {SEARCH_SESSION_LIMIT} searches. Close one before starting another."
-                ));
+            } else {
+                let relay = client_id.starts_with(RELAY_CLIENT_PREFIX);
+                let matching_count = runtimes
+                    .values()
+                    .filter(|runtime| {
+                        runtime.snapshot.client_id.starts_with(RELAY_CLIENT_PREFIX) == relay
+                    })
+                    .count();
+                let limit = if relay {
+                    RELAY_SESSION_LIMIT
+                } else {
+                    SEARCH_SESSION_LIMIT
+                };
+                if matching_count >= limit {
+                    return Err(if relay {
+                        "Signal Relay is already comparing four releases. Let one finish before rescuing another."
+                            .to_owned()
+                    } else {
+                        format!(
+                            "Dial Memory can hold at most {SEARCH_SESSION_LIMIT} searches. Close one before starting another."
+                        )
+                    });
+                }
             }
             let mut runtime = SearchRuntime::new();
             let snapshot = runtime.start(token, client_id, query);

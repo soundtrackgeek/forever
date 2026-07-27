@@ -807,6 +807,12 @@ describe("Forever shell", () => {
     fireEvent.change(downloadLanes, { target: { value: "5" } });
     expect(downloadLanes).toHaveValue("5");
     expect(screen.getByText("1/5 lanes · 3 releases")).toBeInTheDocument();
+    const relayDelay = screen.getByRole("combobox", {
+      name: "Signal Relay suggestion delay",
+    });
+    expect(relayDelay).toHaveValue("10");
+    fireEvent.change(relayDelay, { target: { value: "20" } });
+    expect(relayDelay).toHaveValue("20");
 
     view.unmount();
     render(<App />);
@@ -824,16 +830,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.38 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.39 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Smart Match adds MP3-only profiles, reusable defaults for new Wanted albums, and MusicBrainz-assisted official track-count suggestions.",
+        "Signal Relay shows how long a release has waited, distinguishes source queues from connection attempts, and searches for another route without leaving Transfers.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Releases already submitted to a source keep their remote queue position, while locally waiting releases remain reorderable.",
+        "Switching remains user-approved. Completed files stay untouched, exact mirrors retain safe partial progress, and non-identical partial files restart cleanly.",
       ),
     ).toBeInTheDocument();
   });

@@ -474,6 +474,16 @@ pub async fn transfer_set_max_concurrent_downloads(
 }
 
 #[tauri::command]
+pub async fn transfer_set_relay_suggestion_minutes(
+    manager: State<'_, ConnectionManager>,
+    minutes: u32,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .set_relay_suggestion_minutes(minutes)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn transfer_enqueue(
     manager: State<'_, ConnectionManager>,
     request: downloads::EnqueueTransferRequest,
@@ -612,6 +622,17 @@ pub async fn transfer_switch_release_source(
 ) -> Result<downloads::TransferQueueSnapshot, String> {
     manager
         .switch_release_source(&release_id, &username, &remote_folder)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_relay_release_source(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+    source: downloads::ReleaseAlternativeSource,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .relay_release_source(&release_id, source)
         .map_err(|error| error.to_string())
 }
 
