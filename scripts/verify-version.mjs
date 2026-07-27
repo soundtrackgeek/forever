@@ -13,13 +13,42 @@ const cargoToml = await readFile(
   "utf8",
 );
 const changelog = await readFile(new URL("CHANGELOG.md", root), "utf8");
+const canonicalRepository = "https://github.com/soundtrackgeek/forever";
+const canonicalUpdaterEndpoint =
+  `${canonicalRepository}/releases/latest/download/latest.json`;
 
 const cargoPackage = cargoToml.match(
   /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
 );
+const cargoRepository = cargoToml.match(
+  /\[package\][\s\S]*?^repository\s*=\s*"([^"]+)"/m,
+);
 
 if (!cargoPackage) {
   throw new Error("Could not find the Cargo package version.");
+}
+
+if (packageJson.homepage !== canonicalRepository) {
+  throw new Error(`package.json homepage must be ${canonicalRepository}.`);
+}
+
+if (packageJson.repository?.url !== `${canonicalRepository}.git`) {
+  throw new Error(`package.json repository must be ${canonicalRepository}.git.`);
+}
+
+if (cargoRepository?.[1] !== canonicalRepository) {
+  throw new Error(`Cargo repository must be ${canonicalRepository}.`);
+}
+
+const updaterEndpoints = tauriConfig.plugins?.updater?.endpoints;
+if (
+  !Array.isArray(updaterEndpoints)
+  || updaterEndpoints.length !== 1
+  || updaterEndpoints[0] !== canonicalUpdaterEndpoint
+) {
+  throw new Error(
+    `Tauri updater must use the canonical endpoint ${canonicalUpdaterEndpoint}.`,
+  );
 }
 
 const versions = {

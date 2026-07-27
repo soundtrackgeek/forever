@@ -30,20 +30,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.25",
-  version: "0.0.26",
-  body: `## What’s new in Forever 0.0.26
-
-### Added
-
-- Smart Match profiles let each wanted album prefer lossless audio, require lossless, or accept any format with optional bitrate and track-count limits.
-- Review best opens the recommended remote folder before download, showing its listener, format, track count, size, speed, and preserved companion files.
-- Wanted albums move to Fulfilled automatically when the read-only Music Library Archive reports that you own them.
+  currentVersion: "0.0.26",
+  version: "0.0.27",
+  body: `## What’s new in Forever 0.0.27
 
 ### Changed
 
-- Forever ranks qualifying sources by completeness, format, free upload slot, speed, and queue length, but never downloads one without confirmation.`,
-  date: "2026-07-26",
+- The GitHub repository now matches the app name: Forever.
+- Forever now checks the canonical soundtrackgeek/forever release feed for signed updates.
+
+### Fixed
+
+- Release validation now rejects an updater endpoint or repository URL that drifts from the canonical location.`,
+  date: "2026-07-27",
 };
 
 const wait = (duration: number) =>

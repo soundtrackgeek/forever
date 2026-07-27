@@ -5,6 +5,25 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.27] - 2026-07-27
+
+### Changed
+
+- Renamed the GitHub repository from `soundtrackgeek/soulseek_forever` to the
+  app-aligned canonical name `soundtrackgeek/forever`.
+- Updated local Git, npm, Cargo, MusicBrainz User-Agent, README, and release
+  metadata to use `https://github.com/soundtrackgeek/forever`.
+- Application and updater preview metadata now identify version `0.0.27` and
+  explain the repository migration.
+
+### Fixed
+
+- Tauri now requests signed updates from the canonical
+  `soundtrackgeek/forever` `latest.json` feed instead of relying on GitHub's
+  redirect from the former repository name.
+- Release validation now fails when npm, Cargo, or Tauri updater metadata drifts
+  from the canonical repository URL, preventing future broken update feeds.
+
 ## [0.0.26] - 2026-07-26
 
 ### Added

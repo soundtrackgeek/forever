@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.26` adds Smart Matches: per-album quality
-> profiles, ranked source recommendations, a complete-folder review before
-> queueing, and automatic fulfillment from the read-only Music Library Archive.
+> **Status:** pre-alpha. Version `0.0.27` moves the project to its canonical
+> `soundtrackgeek/forever` repository and points signed in-app updates at the
+> matching release feed.
 
-If `0.0.16` is installed, download and run the latest `0.0.26` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.27` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -242,7 +242,7 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.26` intentionally keeps one active download at a time, even when an
+Version `0.0.27` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
 three. Edition/pressing lookup, playback, rooms, and public
 chat remain outside this release.
@@ -319,7 +319,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.26 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.27 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks
@@ -339,6 +339,11 @@ that constructs the MusicBrainz client with its explicit TLS provider.
 
 ## Release process
 
+The canonical repository is
+[`soundtrackgeek/forever`](https://github.com/soundtrackgeek/forever). Tauri
+checks its signed updater feed at
+`https://github.com/soundtrackgeek/forever/releases/latest/download/latest.json`.
+
 Every application release uses the same version in:
 
 - `package.json`
@@ -346,7 +351,7 @@ Every application release uses the same version in:
 - `src-tauri/tauri.conf.json`
 - the dated `CHANGELOG.md` release heading
 
-Validate them locally with:
+Validate them locally with the repository metadata and updater endpoint:
 
 ```powershell
 npm run verify:version

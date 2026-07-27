@@ -1,9 +1,10 @@
 [package]
 name = "forever"
-version = "0.0.26"
+version = "0.0.27"
 description = "A polished, modern desktop client for the Soulseek network."
 authors = ["soundtrackgeek"]
 edition = "2021"
+repository = "https://github.com/soundtrackgeek/forever"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

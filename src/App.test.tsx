@@ -620,16 +620,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.26 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.27 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Smart Match profiles let each wanted album prefer lossless audio, require lossless, or accept any format with optional bitrate and track-count limits.",
+        "The GitHub repository now matches the app name: Forever.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Review best opens the recommended remote folder before download, showing its listener, format, track count, size, speed, and preserved companion files.",
+        "Forever now checks the canonical soundtrackgeek/forever release feed for signed updates.",
       ),
     ).toBeInTheDocument();
   });
