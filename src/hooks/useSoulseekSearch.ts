@@ -80,7 +80,7 @@ const barsFor = (result: LiveSearchResult) => {
   );
 };
 
-const presentResult = (result: LiveSearchResult): SearchResult => {
+export const presentLiveSearchResult = (result: LiveSearchResult): SearchResult => {
   const title = basename(result.filename);
   const duration = formatDuration(result.durationSeconds);
   return {
@@ -130,7 +130,7 @@ type PreviewAlbumSource = {
 const previewAlbumSource = (source: PreviewAlbumSource) => [
   ...source.tracks.map((track, index) => {
     const extension = source.format;
-    return presentResult({
+    return presentLiveSearchResult({
       id: `${source.id}-${index + 1}`,
       token: 2,
       username: source.username,
@@ -149,7 +149,7 @@ const previewAlbumSource = (source: PreviewAlbumSource) => [
       isPrivate: false,
     });
   }),
-  presentResult({
+  presentLiveSearchResult({
     id: `${source.id}-cover`,
     token: 2,
     username: source.username,
@@ -239,7 +239,7 @@ export function useSoulseekSearch() {
       } else if (event.payload.results.length > 0) {
         setResults((current) => [
           ...current,
-          ...event.payload.results.map(presentResult),
+          ...event.payload.results.map(presentLiveSearchResult),
         ]);
       } else if (event.payload.event === "error") {
         setError(event.payload.snapshot.message);

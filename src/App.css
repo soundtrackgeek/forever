@@ -10435,3 +10435,440 @@ form.settings-panel {
   .smart-preferences-dialog,
   .smart-review-dialog { animation: none; }
 }
+
+/* v0.0.29 — Shelf Radar. */
+.shelf-radar-scan-visible,
+.missing-scan-selected,
+.shelf-radar-rescan,
+.shelf-radar-watch,
+.shelf-radar-download,
+.shelf-radar-source-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: #cfc4dc;
+  font-family: inherit;
+  font-size: 7px;
+  font-weight: 670;
+  background: #171624;
+  border: 1px solid #42384f;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.shelf-radar-scan-visible {
+  min-height: 29px;
+  padding: 0 9px;
+  color: #d4b7f0;
+  background: rgba(77, 55, 102, 0.23);
+  border-color: #514064;
+}
+
+.shelf-radar-scan-visible:disabled,
+.missing-scan-selected:disabled,
+.shelf-radar-download:disabled,
+.shelf-radar-source-download:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.shelf-radar-progress {
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: 22px minmax(190px, auto) minmax(100px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  color: #b88be1;
+  background: linear-gradient(90deg, rgba(55, 38, 76, 0.5), rgba(20, 24, 38, 0.78));
+  border-bottom: 1px solid #463653;
+}
+
+.shelf-radar-progress > span {
+  display: grid;
+  gap: 2px;
+}
+
+.shelf-radar-progress strong {
+  color: #e5dfea;
+  font-size: 9px;
+}
+
+.shelf-radar-progress small {
+  color: #8c8198;
+  font-size: 7px;
+}
+
+.shelf-radar-progress > i {
+  height: 3px;
+  overflow: hidden;
+  background: #29273a;
+  border-radius: 99px;
+}
+
+.shelf-radar-progress > i > b {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8062b7, #b98ae2);
+  border-radius: inherit;
+  transition: width 220ms ease;
+}
+
+.shelf-radar-progress > button {
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  color: #d5a8ad;
+  font: 650 7px inherit;
+  background: rgba(91, 38, 47, 0.18);
+  border: 1px solid rgba(163, 70, 79, 0.38);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.missing-bulk-bar:not(.is-complete) {
+  grid-template-columns: minmax(170px, 1fr) 105px 84px 68px auto auto;
+}
+
+.missing-scan-selected {
+  min-height: 34px;
+  padding: 0 10px;
+  color: #ccb2ea;
+  background: rgba(76, 54, 102, 0.3);
+  border-color: #554268;
+}
+
+.missing-release-row {
+  grid-template-columns: 27px 45px minmax(160px, 1fr) minmax(130px, 0.58fr) 120px 72px;
+}
+
+.missing-release-block.is-radar-open {
+  background: rgba(24, 21, 34, 0.36);
+  box-shadow: inset 2px 0 #9c72d1;
+}
+
+.shelf-radar-status {
+  display: grid;
+  min-width: 0;
+  min-height: 38px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  color: #8d8499;
+  font-family: inherit;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.shelf-radar-status:hover:not(:disabled) {
+  background: rgba(75, 57, 96, 0.22);
+  border-color: #45394f;
+}
+
+.shelf-radar-status:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.shelf-radar-status > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.shelf-radar-status strong {
+  color: #aaa0b5;
+  font-size: 8px;
+}
+
+.shelf-radar-status small {
+  overflow: hidden;
+  color: #6f7486;
+  font-size: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-radar-status.is-scanning,
+.shelf-radar-status.is-queued {
+  color: #c192e7;
+}
+
+.shelf-radar-status.is-found {
+  color: #efb24b;
+}
+
+.shelf-radar-status.is-lossless {
+  color: #72ce80;
+}
+
+.shelf-radar-status.is-found strong {
+  color: #e4b763;
+}
+
+.shelf-radar-status.is-lossless strong {
+  color: #83d68f;
+}
+
+.shelf-radar-status.is-empty {
+  color: #766f82;
+}
+
+.shelf-radar-status.is-error {
+  color: #d68b94;
+}
+
+.shelf-radar-unavailable {
+  color: #686e80;
+  font-size: 7px;
+  text-align: center;
+}
+
+.shelf-radar-drawer {
+  padding: 13px 16px 15px 98px;
+  background: linear-gradient(110deg, rgba(36, 28, 49, 0.75), rgba(13, 17, 28, 0.95) 64%);
+  border-bottom: 1px solid #3a3047;
+}
+
+.shelf-radar-drawer > header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.shelf-radar-drawer > header > span {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  grid-template-columns: 23px minmax(0, 1fr);
+  align-items: center;
+  color: #bb8ce2;
+}
+
+.shelf-radar-drawer > header > span svg {
+  grid-row: 1 / span 2;
+}
+
+.shelf-radar-drawer > header strong {
+  color: #e5e0ea;
+  font-size: 9px;
+}
+
+.shelf-radar-drawer > header small {
+  overflow: hidden;
+  color: #817889;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-radar-drawer > header > div {
+  display: flex;
+  gap: 6px;
+}
+
+.shelf-radar-rescan,
+.shelf-radar-watch,
+.shelf-radar-download {
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.shelf-radar-watch {
+  color: #efb655;
+  border-color: #604a29;
+}
+
+.shelf-radar-download {
+  color: #121b14;
+  background: linear-gradient(180deg, #84dc90, #55ad64);
+  border-color: #65bd72;
+}
+
+.shelf-radar-sources {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid #323043;
+  border-radius: 6px;
+}
+
+.shelf-radar-sources > article {
+  display: grid;
+  min-height: 51px;
+  grid-template-columns: minmax(90px, 0.72fr) minmax(130px, 1.4fr) 100px 100px 70px 28px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border-bottom: 1px solid #2b2d3e;
+}
+
+.shelf-radar-sources > article:last-child {
+  border-bottom: 0;
+}
+
+.shelf-radar-sources > article > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.shelf-radar-sources strong {
+  overflow: hidden;
+  color: #dcd8e2;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-radar-sources small {
+  overflow: hidden;
+  color: #73798b;
+  font-size: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-radar-sources .is-ready strong {
+  color: #7fd08a;
+}
+
+.shelf-radar-sources .is-queued strong {
+  color: #e3ae55;
+}
+
+.shelf-radar-sources details {
+  position: relative;
+}
+
+.shelf-radar-sources summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #bda3dc;
+  font-size: 7px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.shelf-radar-sources details[open] ol {
+  position: absolute;
+  z-index: 20;
+  top: 24px;
+  right: 0;
+  width: min(360px, 72vw);
+  max-height: 330px;
+  margin: 0;
+  padding: 8px 10px 8px 32px;
+  overflow: auto;
+  color: #c9c3d1;
+  background: #111522;
+  border: 1px solid #443a52;
+  border-radius: 6px;
+  box-shadow: 0 16px 40px rgba(2, 3, 8, 0.55);
+}
+
+.shelf-radar-sources details li {
+  min-height: 22px;
+  padding: 4px 0;
+  font-size: 7px;
+  border-bottom: 1px solid #272a3a;
+}
+
+.shelf-radar-sources details li span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-radar-source-download {
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  color: #ddb066;
+}
+
+@media (max-width: 1100px) {
+  .missing-release-row {
+    grid-template-columns: 25px 43px minmax(150px, 1fr) 112px 67px;
+  }
+
+  .missing-release-local {
+    display: none;
+  }
+
+  .missing-bulk-bar:not(.is-complete) {
+    grid-template-columns: minmax(150px, 1fr) 96px 74px auto auto;
+  }
+
+  .missing-bulk-bar > label:nth-of-type(3) {
+    display: none;
+  }
+
+  .shelf-radar-drawer {
+    padding-left: 78px;
+  }
+
+  .shelf-radar-sources > article {
+    grid-template-columns: minmax(80px, 0.7fr) minmax(120px, 1.3fr) 92px 90px 58px 28px;
+  }
+}
+
+@media (max-width: 850px), (max-height: 650px) {
+  .shelf-radar-scan-visible {
+    margin-left: auto;
+  }
+
+  .missing-bulk-bar:not(.is-complete) {
+    grid-template-columns: 1fr 90px 78px;
+  }
+
+  .missing-scan-selected,
+  .missing-add-wanted {
+    min-width: 78px;
+  }
+
+  .missing-release-row {
+    grid-template-columns: 25px 40px minmax(130px, 1fr) 108px 64px;
+  }
+
+  .shelf-radar-progress {
+    grid-template-columns: 20px minmax(155px, 1fr) auto;
+  }
+
+  .shelf-radar-progress > i {
+    display: none;
+  }
+
+  .shelf-radar-drawer {
+    padding: 11px 10px;
+  }
+
+  .shelf-radar-drawer > header {
+    align-items: flex-start;
+  }
+
+  .shelf-radar-watch {
+    display: none;
+  }
+
+  .shelf-radar-sources > article {
+    grid-template-columns: minmax(80px, 0.8fr) minmax(120px, 1.3fr) 85px 58px 27px;
+  }
+
+  .shelf-radar-sources > article > span:nth-of-type(3) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf-radar-progress > i > b { transition: none; }
+}

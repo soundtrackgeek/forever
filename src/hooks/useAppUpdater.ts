@@ -30,20 +30,20 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.27",
-  version: "0.0.28",
-  body: `## What’s new in Forever 0.0.28
+  currentVersion: "0.0.28",
+  version: "0.0.29",
+  body: `## What’s new in Forever 0.0.29
 
 ### Added
 
-- Missing Shelf compares one selected Music Library artist with their official MusicBrainz catalog.
-- Owned, Wanted, and Missing states, completion totals, release-type and era filters, and bulk selection.
-- One shared Smart Match profile can add up to 100 missing releases to Wanted without duplicate watches.
+- Shelf Radar scans up to 12 selected or visible missing albums without disturbing the main Search workspace.
+- Live availability shows grouped folders, formats, track counts, album size, upload readiness, speed, and queue depth.
+- Source drawers include track previews plus Download best and Watch for better actions directly from Missing Shelf.
 
 ### Changed
 
-- Verified artist links and cached release groups are read directly from Music Library; live MusicBrainz lookup happens only when a selected shelf needs it.
-- Music Library remains SQLite read-only and query-only throughout every comparison.`,
+- Radar searches run one album at a time with a courtesy delay, explicit progress and cancellation, and session-only results.
+- Music Library remains SQLite read-only and query-only; Shelf Radar writes only to Forever's own transfer and Wanted stores when you ask it to.`,
   date: "2026-07-27",
 };
 

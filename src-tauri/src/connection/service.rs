@@ -44,6 +44,7 @@ use super::{
         USER_INFO_RESPONSE_CODE, USER_INTERESTS_CODE, USER_STATS_CODE, USER_STATUS_CODE,
         WATCH_USER_CODE,
     },
+    radar::{RadarAlbumRequest, RadarError, RadarHub, RadarSnapshot},
     search::{SearchHub, SearchSnapshot, SearchState},
     settings::{ConnectionProfile, SettingsStore},
     shares::{
@@ -341,6 +342,7 @@ enum ConnectionCommand {
 struct PeerServices {
     search: SearchHub,
     wanted: WantedHub,
+    radar: RadarHub,
     folders: FolderHub,
     shares: SharesHub,
     people: PeopleHub,
@@ -377,6 +379,7 @@ pub struct ConnectionManager {
     next_connection_token: Arc<AtomicU32>,
     search: SearchHub,
     wanted: WantedHub,
+    radar: RadarHub,
     folders: FolderHub,
     shares: SharesHub,
     people: PeopleHub,
@@ -418,6 +421,7 @@ impl ConnectionManager {
         let people = PeopleHub::new(app.clone(), paths.people)?;
         let messages = MessagesHub::new(app.clone(), paths.messages)?;
         let wanted = WantedHub::new(app.clone(), paths.wanted)?;
+        let radar = RadarHub::new(app.clone());
 
         Ok(Self {
             app,
@@ -438,6 +442,7 @@ impl ConnectionManager {
             )),
             search,
             wanted,
+            radar,
             folders: FolderHub::default(),
             shares: SharesHub::default(),
             people,
@@ -572,6 +577,35 @@ impl ConnectionManager {
 
     pub fn current_wanted(&self) -> WantedSnapshot {
         self.wanted.snapshot()
+    }
+
+    pub fn current_radar(&self) -> RadarSnapshot {
+        self.radar.snapshot()
+    }
+
+    pub fn start_radar(
+        &self,
+        albums: Vec<RadarAlbumRequest>,
+    ) -> Result<RadarSnapshot, ConnectionServiceError> {
+        if self.current_snapshot().state != ConnectionState::Online {
+            return Err(ConnectionServiceError::RadarUnavailable);
+        }
+        let snapshot = self.radar.start(albums)?;
+        self.diagnostics.record(
+            "info",
+            "radar_started",
+            "A bounded Shelf Radar scan was started.",
+        );
+        Ok(snapshot)
+    }
+
+    pub fn stop_radar(&self) -> RadarSnapshot {
+        let snapshot = self.radar.stop();
+        if snapshot.state == super::radar::RadarState::Stopped {
+            self.diagnostics
+                .record("info", "radar_stopped", "The Shelf Radar scan was stopped.");
+        }
+        snapshot
     }
 
     pub fn add_wanted(
@@ -1212,6 +1246,7 @@ impl ConnectionManager {
         PeerServices {
             search: self.search.clone(),
             wanted: self.wanted.clone(),
+            radar: self.radar.clone(),
             folders: self.folders.clone(),
             shares: self.shares.clone(),
             people: self.people.clone(),
@@ -1466,6 +1501,7 @@ impl ConnectionManager {
             self.people.connection_lost();
             self.distributed.offline();
             self.wanted.connection_lost();
+            self.radar.connection_lost();
             self.search
                 .fail("Search stopped because the Soulseek connection was interrupted.");
 
@@ -1671,10 +1707,12 @@ impl ConnectionManager {
         let mut keepalive = tokio::time::interval(KEEPALIVE_INTERVAL);
         let mut search_tick = tokio::time::interval(Duration::from_millis(250));
         let mut wanted_tick = tokio::time::interval(Duration::from_secs(5));
+        let mut radar_tick = tokio::time::interval(Duration::from_millis(500));
         let peer_limit = Arc::new(Semaphore::new(MAX_CONCURRENT_PEERS));
         keepalive.tick().await;
         search_tick.tick().await;
         wanted_tick.tick().await;
+        radar_tick.tick().await;
         loop {
             tokio::select! {
                 _ = keepalive.tick() => {
@@ -2259,6 +2297,18 @@ impl ConnectionManager {
                 _ = search_tick.tick() => {
                     self.search.expire_if_due();
                     self.wanted.expire_if_due();
+                    self.radar.expire_if_due();
+                }
+                _ = radar_tick.tick() => {
+                    let mut token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
+                    if token == 0 {
+                        token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
+                    }
+                    if let Some((token, query)) = self.radar.start_next(token) {
+                        if let Err(error) = write_raw_frame(&mut server_writer, &file_search_frame(token, &query)).await {
+                            self.radar.fail_active(format!("The Shelf Radar search could not be sent: {error}"));
+                        }
+                    }
                 }
                 _ = wanted_tick.tick() => {
                     let mut token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
@@ -2320,6 +2370,7 @@ impl ConnectionManager {
         self.people.connection_lost();
         self.distributed.offline();
         self.wanted.connection_lost();
+        self.radar.connection_lost();
         if let Some(active) = self
             .task
             .lock()
@@ -2809,6 +2860,7 @@ fn spawn_outbound_download_peer(
         let PeerServices {
             search,
             wanted,
+            radar,
             folders,
             shares,
             people,
@@ -2844,6 +2896,7 @@ fn spawn_outbound_download_peer(
             PeerServices {
                 search,
                 wanted,
+                radar,
                 folders,
                 shares,
                 people,
@@ -2884,6 +2937,7 @@ fn spawn_outbound_folder_peer(
         let PeerServices {
             search,
             wanted,
+            radar,
             folders,
             shares,
             people,
@@ -2919,6 +2973,7 @@ fn spawn_outbound_folder_peer(
             PeerServices {
                 search,
                 wanted,
+                radar,
                 folders: folders.clone(),
                 shares,
                 people,
@@ -3257,6 +3312,7 @@ async fn handle_peer_messages(
                         });
                 }
                 services.wanted.record(&response);
+                services.radar.record(&response);
                 services.search.record(response);
                 if purpose == PeerMessagePurpose::General {
                     return Ok(());
@@ -3683,6 +3739,8 @@ pub enum ConnectionServiceError {
     Messages(#[from] MessagesError),
     #[error("{0}")]
     Wanted(#[from] WantedError),
+    #[error("{0}")]
+    Radar(#[from] RadarError),
     #[error("Add your Soulseek account before connecting.")]
     NotConfigured,
     #[error("Enter your Soulseek password.")]
@@ -3691,6 +3749,8 @@ pub enum ConnectionServiceError {
     SearchUnavailable,
     #[error("Connect to Soulseek before checking a wanted album.")]
     WantedUnavailable,
+    #[error("Connect to Soulseek before scanning the Missing Shelf.")]
+    RadarUnavailable,
     #[error("Connect to Soulseek before browsing a source folder.")]
     FolderUnavailable,
     #[error("Choose a valid Soulseek source folder.")]

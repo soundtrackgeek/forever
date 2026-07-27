@@ -3,16 +3,16 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.28` adds Missing Shelf: a selective,
-> read-only comparison between artists in Music Library and their official
-> MusicBrainz catalogs, with a direct handoff from collection gaps to Wanted.
+> **Status:** pre-alpha. Version `0.0.29` adds Shelf Radar: bounded live
+> Soulseek availability scans, grouped source previews, and direct download or
+> watch actions for albums identified by Missing Shelf.
 
-If `0.0.16` is installed, download and run the latest `0.0.28` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.29` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
 
-![Forever Missing Shelf interface](design/implementation/missing-shelf-0.0.28-desktop.png)
+![Forever Shelf Radar interface](design/implementation/shelf-radar-0.0.29-overview.png)
 
 ## Current foundation
 
@@ -47,6 +47,14 @@ configuration and transfers.
 - Studio, Live, Compilation, EP, and decade filters, selection of visible
   collection gaps, and an atomic bulk handoff of up to 100 missing releases to
   Wanted using one shared Smart Match profile without duplicate watches
+- **Shelf Radar** scans one missing album, up to 12 selected albums, or up to 12
+  visible gaps without replacing the main Search workspace; scans are explicit,
+  sequential, cancellable, and held only for the current app session
+- Live Shelf Radar states for queued, scanning, no sources, sources found, and
+  lossless found, plus expandable grouped folders with listener, format, track
+  count, size, upload slot, speed, queue, and track-list details
+- Direct **Download best**, per-source download, rescan, and **Watch for better**
+  actions inside Missing Shelf
 - Batched **Owned** and **Don't own** markers across MusicBrainz discographies
   and Soulseek album-source reports, matched from the Archive's normalized
   artist, album, release-year, and track-count metadata
@@ -222,6 +230,23 @@ bitrate, and optional track minimum, then use **Add to Wanted**. The bulk action
 deduplicates existing watches and writes once to Forever's separate
 `wanted.json`; the Music Library database remains untouched.
 
+Use **Scan visible** to check up to the first 12 visible missing albums, or
+select specific gaps and use **Scan selected**. Shelf Radar sends one search at
+a time, listens for 12 seconds, and pauses briefly between albums. Its progress
+strip shows the current album and can stop the remaining queue immediately.
+Scanning never replaces or clears the main Search workspace.
+
+Completed scans stay in memory for the current app session. A release reports
+whether no sources answered, grouped sources were found, or a lossless folder
+is available. Open the signal to compare up to five responding folders and
+preview their audio tracks. **Download best** inspects the recommended remote
+folder before queueing the complete release, while **Watch for better** creates
+an ordinary Wanted entry using the selected Smart Match profile. Non-audio-only
+folders are excluded from album-source availability. Neither action writes to
+Music Library; downloads and watches remain in Forever's own stores.
+
+![Forever Shelf Radar source drawer](design/implementation/shelf-radar-0.0.29-desktop.png)
+
 Choose **Add to Wanted** on a missing MusicBrainz album, then open **Archive →
 Wanted** to follow it. Forever serializes background checks while connected and
 groups returned audio by listener and remote folder without disturbing the
@@ -266,7 +291,7 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.28` intentionally keeps one active download at a time, even when an
+Version `0.0.29` intentionally keeps one active download at a time, even when an
 entire release is queued. Uploads default to one slot and can be raised to
 three. Edition/pressing lookup, playback, rooms, and public
 chat remain outside this release.
@@ -346,7 +371,7 @@ announced size match the active queue item. Folder responses must also match
 the requesting user, request token, and exact requested folder. The Soulseek
 Shared File List parser bounds peer frames, decompressed payloads, directory
 counts, file counts, and file attributes before caching a response. The
-protocol does not provide chunk hashes, so v0.0.28 verifies the expected byte
+protocol does not provide chunk hashes, so v0.0.29 verifies the expected byte
 count but cannot cryptographically verify file contents.
 
 ## Quality checks

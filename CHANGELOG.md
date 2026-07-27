@@ -5,6 +5,42 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.29] - 2026-07-27
+
+### Added
+
+- **Shelf Radar** inside Missing Shelf, with explicit single-album, selected,
+  or visible-gap scans capped at 12 albums per batch.
+- Live queued, scanning, no-source, source-found, and lossless-found states plus
+  a progress strip with current completion and immediate cancellation.
+- Expandable album-source drawers showing grouped listener folders, formats,
+  track counts, aggregate size, free-slot readiness, speed, queue depth, and
+  track previews.
+- Direct **Download best**, per-source download, rescan, and **Watch for better**
+  actions without leaving Archive.
+- An isolated Rust radar state machine and frontend regression coverage for
+  token routing, bounded sequencing, cancellation, track preview, download,
+  and Wanted handoff.
+
+### Changed
+
+- Radar searches run sequentially with a 12-second response window and a
+  one-second courtesy delay instead of launching a library-wide search burst.
+- Live search responses are routed independently by token to Search, Wanted,
+  and Shelf Radar, so radar activity does not replace the visible Search state.
+- Radar results are cached only for the current app session; Music Library
+  remains SQLite read-only and query-only, while explicit downloads and watches
+  use Forever's existing stores.
+- Application, updater preview, package, Cargo, and Tauri metadata now identify
+  version `0.0.29` and describe Shelf Radar accurately.
+
+### Fixed
+
+- Non-audio-only response folders are excluded from Shelf Radar album-source
+  availability and recommendation counts.
+- Shelf Radar rows and source drawers avoid horizontal overflow at both the
+  standard 1280×720 preview and Forever's 1024×680 minimum window size.
+
 ## [0.0.28] - 2026-07-27
 
 ### Added

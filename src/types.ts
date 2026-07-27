@@ -220,6 +220,43 @@ export type SearchEvent = {
   results: LiveSearchResult[];
 };
 
+export type RadarState = "idle" | "scanning" | "completed" | "stopped" | "error";
+export type RadarAlbumState = "queued" | "scanning" | "completed" | "stopped" | "error";
+
+export type RadarAlbumRequest = {
+  albumId: string;
+  artist: string;
+  title: string;
+  firstReleaseDate: string;
+  coverArtUrl: string | null;
+};
+
+export type RadarAlbumScan = RadarAlbumRequest & {
+  state: RadarAlbumState;
+  resultCount: number;
+  peerCount: number;
+  startedAtMs: number | null;
+  finishedAtMs: number | null;
+  error: string | null;
+};
+
+export type RadarSnapshot = {
+  state: RadarState;
+  albums: RadarAlbumScan[];
+  activeAlbumId: string | null;
+  completedCount: number;
+  totalCount: number;
+  message: string;
+  updatedAtMs: number;
+};
+
+export type RadarEvent = {
+  event: "started" | "albumStarted" | "results" | "albumCompleted" | "stopped" | "error";
+  snapshot: RadarSnapshot;
+  albumId: string | null;
+  results: LiveSearchResult[];
+};
+
 export type Track = {
   id: number;
   title: string;

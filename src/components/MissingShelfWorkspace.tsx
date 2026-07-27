@@ -1,12 +1,16 @@
 import {
+  Broadcast,
   Check,
   CheckCircle,
   CircleNotch,
   Database,
+  DownloadSimple,
+  Eye,
   MagnifyingGlass,
   Plus,
   Record,
   SlidersHorizontal,
+  Stop,
   WarningCircle,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
@@ -14,13 +18,19 @@ import type {
   AlbumArtist,
   AlbumCatalog,
   AlbumReleaseGroup,
+  AlbumSource,
   ArchiveAlbumMatch,
   ArchiveArtistSummary,
+  RadarAlbumScan,
+  RadarSnapshot,
+  SearchResult,
   WantedAlbum,
   WantedFormatPreference,
   WantedPreferences,
 } from "../types";
 import type { MissingShelfLoading } from "../hooks/useMissingShelf";
+import { formatAlbumBytes, groupAlbumSources } from "../utils/albumSources";
+import { rankAlbumSources } from "../utils/smartMatches";
 
 type MissingShelfWorkspaceProps = {
   query: string;
@@ -35,6 +45,11 @@ type MissingShelfWorkspaceProps = {
   error: string | null;
   matchByAlbumId: ReadonlyMap<string, ArchiveAlbumMatch>;
   wantedAlbums: WantedAlbum[];
+  online: boolean;
+  radarReady: boolean;
+  radarSnapshot: RadarSnapshot;
+  radarScans: ReadonlyMap<string, RadarAlbumScan>;
+  radarResults: ReadonlyMap<string, SearchResult[]>;
   onSearchArtists: (query: string) => Promise<ArchiveArtistSummary[]>;
   onSelectArtist: (artist: ArchiveArtistSummary) => Promise<AlbumCatalog | null>;
   onSelectIdentity: (artist: AlbumArtist) => Promise<AlbumCatalog | null>;
@@ -43,6 +58,9 @@ type MissingShelfWorkspaceProps = {
     albums: AlbumReleaseGroup[],
     preferences: WantedPreferences,
   ) => Promise<unknown>;
+  onScan: (artist: string, albums: AlbumReleaseGroup[]) => Promise<unknown>;
+  onStopScan: () => Promise<unknown>;
+  onQueueSource: (album: AlbumReleaseGroup, source: AlbumSource) => Promise<void>;
   onDismissError: () => void;
 };
 
@@ -87,6 +105,59 @@ function ReleaseArtwork({ album }: { album: AlbumReleaseGroup }) {
   );
 }
 
+const filename = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-1)[0] ?? path;
+const speed = (bytesPerSecond: number) => bytesPerSecond > 0 ? `${formatAlbumBytes(bytesPerSecond)}/s` : "Speed unknown";
+const losslessFormats = new Set(["FLAC", "ALAC", "APE", "WAV", "AIFF", "WV"]);
+
+function RadarSourceDrawer({
+  album,
+  sources,
+  watched,
+  preparingSourceId,
+  onDownload,
+  onWatch,
+  onRescan,
+}: {
+  album: AlbumReleaseGroup;
+  sources: AlbumSource[];
+  watched: boolean;
+  preparingSourceId: string | null;
+  onDownload: (source: AlbumSource) => void;
+  onWatch: () => void;
+  onRescan: () => void;
+}) {
+  const ranked = rankAlbumSources(sources, defaultPreferences);
+  const best = ranked.find((source) => source.eligible)?.source ?? sources[0];
+  return (
+    <section className="shelf-radar-drawer">
+      <header>
+        <span><Broadcast size={17} /><strong>{sources.length} {sources.length === 1 ? "source" : "sources"} on radar</strong><small>{best ? `Best signal: ${best.formats.join(" + ") || "unknown format"} from ${best.owner}` : "No grouped folders were returned."}</small></span>
+        <div>
+          <button type="button" className="shelf-radar-rescan" onClick={onRescan}><Broadcast size={14} /> Rescan</button>
+          {!watched ? <button type="button" className="shelf-radar-watch" onClick={onWatch}><Plus size={14} weight="bold" /> Watch for better</button> : null}
+          {best ? <button type="button" className="shelf-radar-download" disabled={preparingSourceId !== null} onClick={() => onDownload(best)}>{preparingSourceId === best.id ? <CircleNotch className="search-spinner" size={15} /> : <DownloadSimple size={15} weight="bold" />} Download best</button> : null}
+        </div>
+      </header>
+      <div className="shelf-radar-sources">
+        {sources.slice(0, 5).map((source) => (
+          <article key={source.id}>
+            <span><strong>{source.owner}</strong><small>{source.isPrivate ? "Private share" : "Public share"}</small></span>
+            <span className="shelf-radar-folder"><strong>{source.folderName}</strong><small title={source.folder}>{source.folder.replace(/[\\/]/g, " / ")}</small></span>
+            <span><strong>{source.tracks.length} tracks</strong><small>{source.formats.join(" + ") || "Unknown format"} · {formatAlbumBytes(source.totalSizeBytes)}</small></span>
+            <span className={source.slotFree ? "is-ready" : "is-queued"}><strong>{source.slotFree ? "Ready now" : `${source.queueLength} queued`}</strong><small>{speed(source.averageSpeed)}</small></span>
+            <details>
+              <summary><Eye size={15} /> Tracks</summary>
+              <ol>{source.tracks.slice(0, 24).map((track) => <li key={track.id}><span>{filename(track.filename ?? track.title)}</span><small>{track.format}</small></li>)}</ol>
+              {source.tracks.length > 24 ? <p>+ {source.tracks.length - 24} more tracks</p> : null}
+            </details>
+            <button type="button" className="shelf-radar-source-download" disabled={preparingSourceId !== null} onClick={() => onDownload(source)} aria-label={`Download ${album.title} from ${source.owner}`}><DownloadSimple size={15} /></button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function MissingShelfWorkspace({
   query,
   artists,
@@ -100,10 +171,18 @@ export function MissingShelfWorkspace({
   error,
   matchByAlbumId,
   wantedAlbums,
+  online,
+  radarReady,
+  radarSnapshot,
+  radarScans,
+  radarResults,
   onSearchArtists,
   onSelectArtist,
   onSelectIdentity,
   onAddMany,
+  onScan,
+  onStopScan,
+  onQueueSource,
   onDismissError,
 }: MissingShelfWorkspaceProps) {
   const [artistQuery, setArtistQuery] = useState(query);
@@ -113,6 +192,8 @@ export function MissingShelfWorkspace({
   const [preferences, setPreferences] = useState(defaultPreferences);
   const [adding, setAdding] = useState(false);
   const [addedCount, setAddedCount] = useState(0);
+  const [openRadarAlbumId, setOpenRadarAlbumId] = useState<string | null>(null);
+  const [preparingSourceId, setPreparingSourceId] = useState<string | null>(null);
   const wantedIds = useMemo(
     () => new Set(wantedAlbums.map((album) => album.albumId.toLowerCase())),
     [wantedAlbums],
@@ -136,6 +217,21 @@ export function MissingShelfWorkspace({
   });
   const selectable = visibleAlbums.filter((album) => stateFor(album) === "missing");
   const selectedAlbums = albums.filter((album) => selectedIds.has(album.id) && stateFor(album) === "missing");
+  const radarScanning = radarSnapshot.state === "scanning";
+
+  const scan = (nextAlbums: AlbumReleaseGroup[]) => {
+    if (!selectedArtist || nextAlbums.length === 0) return;
+    void onScan(selectedArtist.canonicalName ?? selectedArtist.name, nextAlbums.slice(0, 12)).catch(() => undefined);
+  };
+
+  const queueSource = async (album: AlbumReleaseGroup, source: AlbumSource) => {
+    setPreparingSourceId(source.id);
+    try {
+      await onQueueSource(album, source);
+    } finally {
+      setPreparingSourceId(null);
+    }
+  };
 
   const chooseArtist = (artist: ArchiveArtistSummary) => {
     setSelectedIds(new Set());
@@ -245,7 +341,17 @@ export function MissingShelfWorkspace({
               </div>
               <label><span>Era</span><select aria-label="Release year" value={decade} onChange={(event) => setDecade(event.target.value)}><option value="all">All years</option>{decades.map((value) => <option value={value} key={value}>{value}s</option>)}</select></label>
               <button type="button" className="missing-select-all" disabled={selectable.length === 0} onClick={() => setSelectedIds(new Set(selectable.map((album) => album.id)))}><Check size={14} /> Select visible missing</button>
+              <button type="button" className="shelf-radar-scan-visible" disabled={!online || !radarReady || radarScanning || selectable.length === 0} title={!online ? "Reconnect before scanning the network" : selectable.length > 12 ? "Scans the first 12 visible missing albums" : "Scan visible missing albums"} onClick={() => scan(selectable)}><Broadcast size={14} /> Scan visible{selectable.length > 12 ? " 12" : ""}</button>
             </div>
+
+            {radarSnapshot.totalCount > 0 && (radarScanning || radarSnapshot.state === "stopped") ? (
+              <section className={`shelf-radar-progress is-${radarSnapshot.state}`} aria-live="polite">
+                <Broadcast size={18} />
+                <span><strong>Shelf Radar · {radarSnapshot.completedCount}/{radarSnapshot.totalCount}</strong><small>{radarSnapshot.message}</small></span>
+                <i><b style={{ width: `${radarSnapshot.totalCount ? Math.max(4, (radarSnapshot.completedCount / radarSnapshot.totalCount) * 100) : 0}%` }} /></i>
+                {radarScanning ? <button type="button" onClick={() => void onStopScan().catch(() => undefined)}><Stop size={13} weight="fill" /> Stop</button> : null}
+              </section>
+            ) : null}
 
             {selectedAlbums.length > 0 || addedCount > 0 ? (
               <section className={`missing-bulk-bar ${addedCount ? "is-complete" : ""}`} aria-live="polite">
@@ -254,6 +360,7 @@ export function MissingShelfWorkspace({
                   <label><span>Format</span><select aria-label="Bulk format preference" value={preferences.formatPreference} onChange={(event) => setPreferences((current) => ({ ...current, formatPreference: event.target.value as WantedFormatPreference }))}><option value="preferLossless">Prefer FLAC</option><option value="losslessOnly">Lossless only</option><option value="any">Any format</option></select></label>
                   <label><span>Lossy floor</span><select aria-label="Bulk minimum bitrate" disabled={preferences.formatPreference === "losslessOnly"} value={preferences.minimumBitrateKbps ?? 0} onChange={(event) => setPreferences((current) => ({ ...current, minimumBitrateKbps: Number(event.target.value) ? Number(event.target.value) as 128 | 192 | 256 | 320 : null }))}><option value={320}>320 kbps</option><option value={256}>256 kbps</option><option value={192}>192 kbps</option><option value={128}>128 kbps</option><option value={0}>Any</option></select></label>
                   <label><span>Tracks</span><input aria-label="Bulk minimum track count" type="number" min={1} max={250} placeholder="Any" value={preferences.minimumTrackCount ?? ""} onChange={(event) => setPreferences((current) => ({ ...current, minimumTrackCount: event.target.value ? Number(event.target.value) : null }))} /></label>
+                  <button type="button" className="missing-scan-selected" disabled={!online || radarScanning} onClick={() => scan(selectedAlbums)}><Broadcast size={15} /> Scan {Math.min(selectedAlbums.length, 12)}</button>
                   <button type="button" className="missing-add-wanted" disabled={adding} onClick={() => void addSelected().catch(() => undefined)}><Plus size={15} weight="bold" />{adding ? "Adding…" : `Add ${selectedAlbums.length} to Wanted`}</button>
                 </> : null}
               </section>
@@ -264,14 +371,24 @@ export function MissingShelfWorkspace({
                 const shelfState = stateFor(album);
                 const selected = shelfState === "missing" && selectedIds.has(album.id);
                 const archiveMatch = matchByAlbumId.get(album.id);
+                const radarScan = radarScans.get(album.id);
+                const sources = groupAlbumSources(radarResults.get(album.id) ?? []).filter((source) => source.tracks.length > 0);
+                const lossless = sources.some((source) => source.formats.some((format) => losslessFormats.has(format)));
+                const radarLabel = radarScan?.state === "queued" ? "Queued" : radarScan?.state === "scanning" ? "Scanning" : radarScan?.state === "error" ? "Scan failed" : sources.length ? lossless ? "Lossless found" : `${sources.length} ${sources.length === 1 ? "source" : "sources"}` : radarScan?.state === "completed" ? "No sources" : "Not scanned";
+                const radarClass = radarScan?.state === "scanning" ? "is-scanning" : radarScan?.state === "queued" ? "is-queued" : radarScan?.state === "error" ? "is-error" : sources.length ? lossless ? "is-lossless" : "is-found" : radarScan?.state === "completed" ? "is-empty" : "is-idle";
+                const radarOpen = openRadarAlbumId === album.id && sources.length > 0;
                 return (
-                  <article className={`missing-release-row is-${shelfState} ${selected ? "is-selected" : ""}`} key={album.id}>
-                    <button type="button" className="missing-release-check" aria-label={`${selected ? "Deselect" : "Select"} ${album.title}`} aria-pressed={selected} disabled={shelfState !== "missing"} onClick={() => toggle(album)}>{selected || shelfState === "owned" ? <Check size={13} weight="bold" /> : shelfState === "wanted" ? <Plus size={12} /> : null}</button>
-                    <ReleaseArtwork album={album} />
-                    <span className="missing-release-title"><small>{year(album) ?? "Year unknown"} · {category(album)}</small><strong>{album.title}</strong><p>{album.primaryType ?? "Release group"}{album.secondaryTypes.length ? ` · ${album.secondaryTypes.join(" + ")}` : " · Official catalog"}</p></span>
-                    <span className="missing-release-local"><small>{shelfState === "owned" ? "Music Library match" : shelfState === "wanted" ? "Forever watchlist" : "Collection gap"}</small><strong>{shelfState === "owned" ? archiveMatch?.localTitle ?? "Owned" : shelfState === "wanted" ? "Wanted" : "Don’t own"}</strong><p>{shelfState === "owned" ? `${archiveMatch?.trackCount ?? "—"} tracks · ${archiveMatch?.localYear ?? "year unknown"}` : shelfState === "wanted" ? "Smart Match is listening" : "Ready to add as Wanted"}</p></span>
-                    <strong className={`missing-release-state is-${shelfState}`}>{shelfState === "owned" ? <CheckCircle size={14} weight="fill" /> : shelfState === "wanted" ? <Plus size={13} weight="bold" /> : <span aria-hidden="true" />}{shelfState === "owned" ? "Own" : shelfState === "wanted" ? "Wanted" : "Missing"}</strong>
-                  </article>
+                  <div className={`missing-release-block ${radarOpen ? "is-radar-open" : ""}`} key={album.id}>
+                    <article className={`missing-release-row is-${shelfState} ${selected ? "is-selected" : ""}`}>
+                      <button type="button" className="missing-release-check" aria-label={`${selected ? "Deselect" : "Select"} ${album.title}`} aria-pressed={selected} disabled={shelfState !== "missing"} onClick={() => toggle(album)}>{selected || shelfState === "owned" ? <Check size={13} weight="bold" /> : shelfState === "wanted" ? <Plus size={12} /> : null}</button>
+                      <ReleaseArtwork album={album} />
+                      <span className="missing-release-title"><small>{year(album) ?? "Year unknown"} · {category(album)}</small><strong>{album.title}</strong><p>{album.primaryType ?? "Release group"}{album.secondaryTypes.length ? ` · ${album.secondaryTypes.join(" + ")}` : " · Official catalog"}</p></span>
+                      <span className="missing-release-local"><small>{shelfState === "owned" ? "Music Library match" : shelfState === "wanted" ? "Forever watchlist" : "Collection gap"}</small><strong>{shelfState === "owned" ? archiveMatch?.localTitle ?? "Owned" : shelfState === "wanted" ? "Wanted" : "Don’t own"}</strong><p>{shelfState === "owned" ? `${archiveMatch?.trackCount ?? "—"} tracks · ${archiveMatch?.localYear ?? "year unknown"}` : shelfState === "wanted" ? "Smart Match is listening" : "Ready for Shelf Radar"}</p></span>
+                      {shelfState === "missing" ? <button type="button" className={`shelf-radar-status ${radarClass}`} disabled={!online || radarScanning} onClick={() => sources.length ? setOpenRadarAlbumId(radarOpen ? null : album.id) : scan([album])} title={sources.length ? "Show or hide available album sources" : online ? "Scan this album" : "Reconnect before scanning"}>{radarScan?.state === "scanning" ? <CircleNotch className="search-spinner" size={14} /> : sources.length ? <Eye size={14} /> : <Broadcast size={14} />}<span><strong>{radarLabel}</strong><small>{sources.length ? `${radarScan?.peerCount ?? 0} people replied` : radarScan?.state === "completed" ? "Click to rescan" : "Click to listen"}</small></span></button> : <span className="shelf-radar-unavailable">{shelfState === "wanted" ? "Watch active" : "In library"}</span>}
+                      <strong className={`missing-release-state is-${shelfState}`}>{shelfState === "owned" ? <CheckCircle size={14} weight="fill" /> : shelfState === "wanted" ? <Plus size={13} weight="bold" /> : <span aria-hidden="true" />}{shelfState === "owned" ? "Own" : shelfState === "wanted" ? "Wanted" : "Missing"}</strong>
+                    </article>
+                    {radarOpen ? <RadarSourceDrawer album={album} sources={sources} watched={wantedIds.has(album.id.toLowerCase())} preparingSourceId={preparingSourceId} onDownload={(source) => void queueSource(album, source).catch(() => undefined)} onWatch={() => void onAddMany(selectedArtist.canonicalName ?? selectedArtist.name, [album], preferences).catch(() => undefined)} onRescan={() => scan([album])} /> : null}
+                  </div>
                 );
               })}
             </div>

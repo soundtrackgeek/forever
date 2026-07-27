@@ -250,6 +250,38 @@ describe("Forever shell", () => {
     expect(screen.getByText("Slang")).toBeInTheDocument();
   });
 
+  it("scans one missing album, previews sources, downloads the best copy, and starts a watch", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Missing shelf" }));
+
+    const adrenalize = screen.getByText("Adrenalize").closest("article") as HTMLElement;
+    fireEvent.click(within(adrenalize).getByRole("button", { name: /Not scanned/ }));
+    expect(screen.getByText(/Shelf Radar · 0\/1/)).toBeInTheDocument();
+
+    const lossless = await within(adrenalize).findByRole(
+      "button",
+      { name: /Lossless found/ },
+      { timeout: 1_800 },
+    );
+    fireEvent.click(lossless);
+
+    expect(screen.getByText("2 sources on radar")).toBeInTheDocument();
+    expect(screen.getByText("rockvault")).toBeInTheDocument();
+    const trackDetails = screen.getAllByText("Tracks")[0].closest("details") as HTMLDetailsElement;
+    fireEvent.click(within(trackDetails).getByText("Tracks"));
+    expect(within(trackDetails).getByText(/01 - Let’s Get Rocked\.flac/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Download best" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Download best" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Expand transfer activity" }));
+    expect(screen.getByText("Def Leppard - Adrenalize (1992)")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Watch for better" }));
+    await waitFor(() => expect(within(adrenalize).getAllByText("Wanted").length).toBeGreaterThan(0));
+  });
+
   it("watches missing albums and opens newly available sources without changing Archive", async () => {
     render(<App />);
 
@@ -647,16 +679,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.28 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.29 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Missing Shelf compares one selected Music Library artist with their official MusicBrainz catalog.",
+        "Shelf Radar scans up to 12 selected or visible missing albums without disturbing the main Search workspace.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "One shared Smart Match profile can add up to 100 missing releases to Wanted without duplicate watches.",
+        "Source drawers include track previews plus Download best and Watch for better actions directly from Missing Shelf.",
       ),
     ).toBeInTheDocument();
   });

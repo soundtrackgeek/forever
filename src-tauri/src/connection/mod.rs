@@ -7,6 +7,7 @@ mod local_shares;
 mod messages;
 mod people;
 mod protocol;
+mod radar;
 mod search;
 mod service;
 mod settings;
@@ -136,6 +137,30 @@ pub async fn wanted_check(
     manager
         .check_wanted(&album_id)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn radar_snapshot(
+    manager: State<'_, ConnectionManager>,
+) -> Result<radar::RadarSnapshot, String> {
+    Ok(manager.current_radar())
+}
+
+#[tauri::command]
+pub async fn radar_start(
+    manager: State<'_, ConnectionManager>,
+    albums: Vec<radar::RadarAlbumRequest>,
+) -> Result<radar::RadarSnapshot, String> {
+    manager
+        .start_radar(albums)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn radar_stop(
+    manager: State<'_, ConnectionManager>,
+) -> Result<radar::RadarSnapshot, String> {
+    Ok(manager.stop_radar())
 }
 
 #[tauri::command]

@@ -33,6 +33,7 @@ import { useSoulseekTransfers } from "./hooks/useSoulseekTransfers";
 import { useLocalSharing } from "./hooks/useLocalSharing";
 import { useMissingShelf } from "./hooks/useMissingShelf";
 import { usePrivateMessages } from "./hooks/usePrivateMessages";
+import { useShelfRadar } from "./hooks/useShelfRadar";
 import { useWantedAlbums } from "./hooks/useWantedAlbums";
 import type {
   AlbumReleaseGroup,
@@ -125,6 +126,7 @@ function App() {
   const archiveAlbums = albums.catalog?.albums ?? emptyAlbumCatalog;
   const wanted = useWantedAlbums();
   const missingShelf = useMissingShelf();
+  const radar = useShelfRadar();
   const archive = useArchiveInventory(
     albums.selectedArtist?.name ?? null,
     archiveAlbums,
@@ -208,14 +210,18 @@ function App() {
     void transfers.enqueue(result).catch(() => undefined);
   };
 
-  const queueAlbumSource = async (source: AlbumSource) => {
+  const queueAlbumSourceFor = async (context: AlbumSearchContext | null, source: AlbumSource) => {
     const inspection = await folders.inspect(source.representative);
     await transfers.enqueueRelease({
-      title: albumDownloadTitle(albumContext, source.folderName),
+      title: albumDownloadTitle(context, source.folderName),
       username: source.owner,
       remoteFolder: inspection.requestedFolder,
       files: inspection.files,
     });
+  };
+
+  const queueAlbumSource = async (source: AlbumSource) => {
+    await queueAlbumSourceFor(albumContext, source);
   };
 
   const inspectSmartMatch = async (album: WantedAlbum) => {
@@ -508,15 +514,30 @@ function App() {
                 catalogSource={missingShelf.catalogSource}
                 catalogFetchedAt={missingShelf.catalogFetchedAt}
                 loading={missingShelf.loading}
-                error={missingShelf.error ?? wanted.error}
+                error={missingShelf.error ?? radar.error ?? wanted.error}
                 matchByAlbumId={missingShelf.matchByAlbumId}
                 wantedAlbums={wanted.snapshot.albums}
+                online={connection.snapshot.state === "online"}
+                radarReady={radar.ready}
+                radarSnapshot={radar.snapshot}
+                radarScans={radar.scansByAlbumId}
+                radarResults={radar.resultsByAlbumId}
                 onSearchArtists={missingShelf.loadArtists}
                 onSelectArtist={missingShelf.loadCatalog}
                 onSelectIdentity={missingShelf.selectIdentity}
                 onAddMany={wanted.addMany}
+                onScan={radar.start}
+                onStopScan={radar.stop}
+                onQueueSource={(album, source) => queueAlbumSourceFor({
+                  albumId: album.id,
+                  artist: missingShelf.selectedArtist?.canonicalName ?? missingShelf.selectedArtist?.name ?? "Unknown artist",
+                  title: album.title,
+                  coverArtUrl: album.coverArtUrl,
+                  firstReleaseDate: album.firstReleaseDate,
+                }, source)}
                 onDismissError={() => {
                   missingShelf.clearError();
+                  radar.clearError();
                   wanted.clearError();
                 }}
               />
