@@ -21,6 +21,7 @@ export const defaultWantedPreferences: WantedPreferences = {
 };
 
 const previewSnapshot: WantedSnapshot = {
+  defaultPreferences: defaultWantedPreferences,
   albums: [
     {
       albumId: "419fa215-3740-3b1c-aa04-a209eab30789",
@@ -180,7 +181,7 @@ export function useWantedAlbums() {
   const native = isTauri();
   const [snapshot, setSnapshot] = useState<WantedSnapshot>(
     native
-      ? { albums: [], intervalMinutes: 30, activeAlbumId: null, nextCheckAtMs: null, updatedAtMs: 0 }
+      ? { albums: [], defaultPreferences: defaultWantedPreferences, intervalMinutes: 30, activeAlbumId: null, nextCheckAtMs: null, updatedAtMs: 0 }
       : previewSnapshot,
   );
   const [ready, setReady] = useState(!native);
@@ -279,7 +280,7 @@ export function useWantedAlbums() {
           fulfilled: false,
           fulfilledAtMs: null,
           ownedTrackCount: null,
-          preferences: defaultWantedPreferences,
+          preferences: current.defaultPreferences,
           addedAtMs: Date.now(),
           lastCheckedAtMs: null,
           sourceCount: 0,
@@ -391,6 +392,14 @@ export function useWantedAlbums() {
     updatedAtMs: Date.now(),
   })), [invokeOrPreview]);
 
+  const setDefaultPreferences = useCallback(async (
+    preferences: WantedPreferences,
+  ) => await invokeOrPreview("wanted_set_default_preferences", { preferences }, (current) => ({
+    ...current,
+    defaultPreferences: preferences,
+    updatedAtMs: Date.now(),
+  })), [invokeOrPreview]);
+
   const syncFulfilled = useCallback(async (
     fulfillments: Array<{ albumId: string; owned: boolean; trackCount: number | null }>,
   ) => await invokeOrPreview("wanted_sync_fulfilled", { fulfillments }, (current) => ({
@@ -468,9 +477,10 @@ export function useWantedAlbums() {
     setPaused,
     setIntervalMinutes,
     setPreferences,
+    setDefaultPreferences,
     syncFulfilled,
     check,
     dismissAlert: () => setAlert(null),
     clearError: () => setError(null),
-  }), [add, addMany, alert, byAlbumId, check, error, ready, remove, setIntervalMinutes, setPaused, setPreferences, snapshot, syncFulfilled]);
+  }), [add, addMany, alert, byAlbumId, check, error, ready, remove, setDefaultPreferences, setIntervalMinutes, setPaused, setPreferences, snapshot, syncFulfilled]);
 }

@@ -38,6 +38,7 @@ pub enum WantedFormatPreference {
     #[default]
     PreferLossless,
     LosslessOnly,
+    Mp3Only,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -121,6 +122,7 @@ pub struct WantedAlbum {
 #[serde(rename_all = "camelCase")]
 pub struct WantedSnapshot {
     pub albums: Vec<WantedAlbum>,
+    pub default_preferences: WantedPreferences,
     pub interval_minutes: u32,
     pub active_album_id: Option<String>,
     pub next_check_at_ms: Option<u64>,
@@ -131,6 +133,8 @@ pub struct WantedSnapshot {
 struct WantedStore {
     version: u32,
     interval_minutes: u32,
+    #[serde(default)]
+    default_preferences: WantedPreferences,
     albums: Vec<WantedAlbum>,
 }
 
@@ -139,6 +143,7 @@ impl Default for WantedStore {
         Self {
             version: STORE_VERSION,
             interval_minutes: DEFAULT_INTERVAL_MINUTES,
+            default_preferences: WantedPreferences::default(),
             albums: Vec::new(),
         }
     }
@@ -214,6 +219,7 @@ impl WantedHub {
         });
         WantedSnapshot {
             albums,
+            default_preferences: store.default_preferences.clone(),
             interval_minutes: store.interval_minutes,
             active_album_id,
             next_check_at_ms,
@@ -241,6 +247,7 @@ impl WantedHub {
             if store.albums.len() >= MAX_WANTED_ALBUMS {
                 return Err(WantedError::TooManyAlbums);
             }
+            let preferences = store.default_preferences.clone();
             store.albums.push(WantedAlbum {
                 album_id: request.album_id,
                 artist: request.artist,
@@ -251,7 +258,7 @@ impl WantedHub {
                 fulfilled: false,
                 fulfilled_at_ms: None,
                 owned_track_count: None,
-                preferences: WantedPreferences::default(),
+                preferences,
                 added_at_ms: timestamp_ms(),
                 last_checked_at_ms: None,
                 source_count: 0,
@@ -404,6 +411,20 @@ impl WantedHub {
         album.best_source = None;
         album.source_fingerprints.clear();
         drop(store);
+        self.persist()?;
+        self.publish();
+        Ok(self.snapshot())
+    }
+
+    pub fn set_default_preferences(
+        &self,
+        preferences: WantedPreferences,
+    ) -> Result<WantedSnapshot, WantedError> {
+        validate_preferences(&preferences)?;
+        self.store
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .default_preferences = preferences;
         self.persist()?;
         self.publish();
         Ok(self.snapshot())
@@ -779,6 +800,15 @@ fn source_matches(source: &SourceAggregate, preferences: &WantedPreferences) -> 
     if preferences.format_preference == WantedFormatPreference::LosslessOnly && !lossless {
         return false;
     }
+    if preferences.format_preference == WantedFormatPreference::Mp3Only
+        && (source.formats.is_empty()
+            || source
+                .formats
+                .iter()
+                .any(|format| !format.eq_ignore_ascii_case("MP3")))
+    {
+        return false;
+    }
     if !lossless {
         if let Some(minimum) = preferences.minimum_bitrate_kbps {
             if source.unknown_lossy_bitrate
@@ -816,6 +846,7 @@ fn source_score(source: &SourceAggregate, preferences: &WantedPreferences) -> u3
     let preference_bonus = match preferences.format_preference {
         WantedFormatPreference::PreferLossless if lossless => 500,
         WantedFormatPreference::LosslessOnly => 500,
+        WantedFormatPreference::Mp3Only => 500,
         _ => 0,
     };
     let format_bonus = best_format(source)
@@ -1277,5 +1308,31 @@ mod tests {
         let summary = summarize_sources(sources, &WantedPreferences::default());
         assert_eq!(summary.matching_source_count, 2);
         assert_eq!(summary.best_source.unwrap().username, "lossless");
+    }
+
+    #[test]
+    fn mp3_only_rejects_lossless_and_mixed_format_folders() {
+        let preferences = WantedPreferences {
+            format_preference: WantedFormatPreference::Mp3Only,
+            minimum_bitrate_kbps: Some(320),
+            minimum_track_count: None,
+        };
+        let mp3 = SourceAggregate {
+            formats: HashSet::from(["MP3".to_owned()]),
+            minimum_bitrate_kbps: Some(320),
+            ..SourceAggregate::default()
+        };
+        let flac = SourceAggregate {
+            formats: HashSet::from(["FLAC".to_owned()]),
+            ..SourceAggregate::default()
+        };
+        let mixed = SourceAggregate {
+            formats: HashSet::from(["MP3".to_owned(), "FLAC".to_owned()]),
+            minimum_bitrate_kbps: Some(320),
+            ..SourceAggregate::default()
+        };
+        assert!(source_matches(&mp3, &preferences));
+        assert!(!source_matches(&flac, &preferences));
+        assert!(!source_matches(&mixed, &preferences));
     }
 }

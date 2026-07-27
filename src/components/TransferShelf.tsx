@@ -18,6 +18,7 @@ type TransferShelfProps = {
   expanded: boolean;
   transfers: Transfer[];
   activeCount: number;
+  maxConcurrentDownloads: number;
   error: string | null;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
@@ -52,11 +53,15 @@ const formatEta = (seconds: number) => {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 };
 
-const groupStatus = (group: TransferGroup) => {
+const groupStatus = (group: TransferGroup, maxConcurrentDownloads: number) => {
   if (group.status === "active") {
+    const remoteQueuePosition = group.transfers.find((transfer) => transfer.status === "remotelyQueued")?.queuePosition;
+    if (!group.speedBytesPerSecond && remoteQueuePosition) {
+      return `Source queue #${remoteQueuePosition} · 1 of ${maxConcurrentDownloads} lanes`;
+    }
     return `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}`;
   }
-  if (group.status === "queued") return `Queue #${group.queuePosition} · Waiting`;
+  if (group.status === "queued") return `Local queue #${group.queuePosition} · Waiting`;
   if (group.status === "paused") return "Paused";
   if (group.status === "failed") return "Retry";
   return "Completed";
@@ -66,6 +71,7 @@ export function TransferShelf({
   expanded,
   transfers,
   activeCount,
+  maxConcurrentDownloads,
   error,
   onPause,
   onResume,
@@ -110,7 +116,7 @@ export function TransferShelf({
             <strong>Transfers</strong>
             <small>
               <DownloadSimple size={14} weight="bold" />
-              {activeCount} active · one at a time
+              {activeCount} active · up to {maxConcurrentDownloads} users
             </small>
           </span>
         </div>
@@ -180,7 +186,7 @@ export function TransferShelf({
                   </small>
                 </span>
                 <span className="transfer-meta">
-                  <strong>{groupStatus(group)}</strong>
+                  <strong>{groupStatus(group, maxConcurrentDownloads)}</strong>
                   <small>{Math.round(progress)}%</small>
                 </span>
                 <button
@@ -226,7 +232,7 @@ export function TransferShelf({
           <i><DownloadSimple size={16} weight="bold" /></i>
           <strong>Transfers</strong>
           <small>
-            {activeCount} active · {groups.length} {groups.length === 1 ? "release" : "releases"}
+            {activeCount}/{maxConcurrentDownloads} lanes · {groups.length} {groups.length === 1 ? "release" : "releases"}
           </small>
           {error ? (
             <WarningCircle size={14} weight="fill" aria-label="Transfer needs attention" />

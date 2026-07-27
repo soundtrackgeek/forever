@@ -7659,6 +7659,12 @@ form.settings-panel {
 
 /* v0.0.11 · local sharing and outgoing transmissions */
 .sharing-panel { margin-top: 16px; padding: 20px; }
+.download-lanes-panel { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-top: 16px; padding: 17px 20px; }
+.download-lanes-field { display: flex; min-width: 310px; align-items: center; justify-content: flex-end; gap: 14px; }
+.download-lanes-field > span { display: grid; gap: 3px; text-align: right; }
+.download-lanes-field strong { color: #d8d7e0; font-size: 9px; font-weight: 600; }
+.download-lanes-field small { color: #73798d; font-size: 8px; }
+.download-lanes-field select { width: 105px; height: 34px; padding: 0 25px 0 10px; color: #dedbe5; background: #0e1321; border: 1px solid #3a4054; border-radius: 6px; }
 .sharing-panel-heading { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; }
 .sharing-total { display: grid; justify-items: end; gap: 2px; }
 .sharing-total strong { color: #ece9f3; font-size: 17px; font-weight: 480; }
@@ -11256,6 +11262,41 @@ form.settings-panel {
   color: #777d90;
   font-size: 8px;
   line-height: 1.4;
+}
+
+.smart-default-profile {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: -5px 20px 17px;
+  padding: 11px 12px;
+  background: #101522;
+  border: 1px solid #2d3345;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.smart-default-profile > input { position: absolute; opacity: 0; }
+.smart-default-profile .toggle-visual { grid-column: 1; }
+.smart-default-profile input:checked + .toggle-visual { background: rgba(144, 112, 224, .32); border-color: #765fb7; }
+.smart-default-profile input:checked + .toggle-visual i { background: #b39af2; transform: translateX(14px); }
+.smart-default-profile > span:last-child { display: grid; gap: 3px; }
+.smart-default-profile strong { color: #d8d4e0; font-size: 9px; font-weight: 600; }
+.smart-default-profile small { color: #71778a; font-size: 8px; line-height: 1.35; }
+
+@media (max-height: 720px) {
+  .smart-match-backdrop { padding-block: 12px; }
+  .smart-preferences-dialog > header { padding-block: 12px; }
+  .smart-format-options { gap: 5px; padding-block: 11px 9px; }
+  .smart-format-options label { min-height: 44px; padding-block: 6px; }
+  .smart-preference-fields { padding-bottom: 10px; }
+  .smart-preference-fields select,
+  .smart-preference-fields input { height: 34px; }
+  .smart-preference-summary { margin-bottom: 10px; padding-block: 9px; }
+  .smart-default-profile { margin-bottom: 10px; padding-block: 8px; }
+  .smart-preferences-dialog > footer { padding-block: 10px; }
 }
 
 .smart-dialog-error {

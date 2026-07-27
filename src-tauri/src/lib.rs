@@ -30,6 +30,7 @@ pub fn run() {
             connection::wanted_set_paused,
             connection::wanted_set_interval,
             connection::wanted_set_preferences,
+            connection::wanted_set_default_preferences,
             connection::wanted_sync_fulfilled,
             connection::wanted_check,
             connection::radar_snapshot,
@@ -54,6 +55,7 @@ pub fn run() {
             connection::search_stop_all,
             connection::search_close,
             connection::transfers_snapshot,
+            connection::transfer_set_max_concurrent_downloads,
             connection::transfer_enqueue,
             connection::transfer_enqueue_release,
             connection::transfer_pause,
@@ -97,6 +99,7 @@ pub fn run() {
             connection::messages_remove,
             musicbrainz::album_artists_search,
             musicbrainz::album_catalog,
+            musicbrainz::album_official_track_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

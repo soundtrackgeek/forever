@@ -36,6 +36,7 @@ describe("TransfersWorkspace signal order", () => {
     const onReorderRelease = vi.fn();
     render(
       <TransfersWorkspace
+        maxConcurrentDownloads={3}
         transfers={[
           releaseTransfer("release-a", "Release A", "downloading", {
             sizeBytes: 5_000,
@@ -78,8 +79,8 @@ describe("TransfersWorkspace signal order", () => {
     expect(within(summary).getByText("3 releases · 3 files")).toBeInTheDocument();
     expect(within(summary).getByText("17.0 KB")).toBeInTheDocument();
     expect(within(summary).getByText("17s")).toBeInTheDocument();
-    expect(screen.getByText("Queue #1")).toBeInTheDocument();
-    expect(screen.getByText("Queue #2")).toBeInTheDocument();
+    expect(screen.getByText("Local queue #1")).toBeInTheDocument();
+    expect(screen.getByText("Local queue #2")).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("button", { name: "Download Release C next" }),

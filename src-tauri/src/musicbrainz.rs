@@ -8,12 +8,13 @@ use tauri::State;
 use tokio::sync::{Mutex, RwLock};
 
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "Forever/0.0.37 (https://github.com/soundtrackgeek/forever)";
+const USER_AGENT: &str = "Forever/0.0.38 (https://github.com/soundtrackgeek/forever)";
 const REQUEST_INTERVAL: Duration = Duration::from_millis(1_050);
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const MAX_CATALOG_PAGES: usize = 3;
 const MAX_ARTIST_CACHE_ENTRIES: usize = 64;
 const MAX_CATALOG_CACHE_ENTRIES: usize = 32;
+const MAX_TRACK_COUNT_CACHE_ENTRIES: usize = 128;
 const MAX_ARTIST_QUERY_LENGTH: usize = 180;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -64,6 +65,19 @@ struct ReleaseGroupResponse {
     release_groups: Vec<AlbumReleaseGroup>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct OfficialRelease {
+    #[serde(default)]
+    date: String,
+    #[serde(rename = "track-count")]
+    track_count: Option<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct OfficialReleaseResponse {
+    releases: Vec<OfficialRelease>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AlbumCatalog {
@@ -83,6 +97,7 @@ pub struct MusicBrainzClient {
     request_gate: Arc<Mutex<Instant>>,
     artist_cache: RwLock<HashMap<String, CacheEntry<Vec<AlbumArtist>>>>,
     catalog_cache: RwLock<HashMap<String, CacheEntry<AlbumCatalog>>>,
+    track_count_cache: RwLock<HashMap<String, CacheEntry<Option<u32>>>>,
 }
 
 impl MusicBrainzClient {
@@ -106,6 +121,7 @@ impl MusicBrainzClient {
             )),
             artist_cache: RwLock::new(HashMap::new()),
             catalog_cache: RwLock::new(HashMap::new()),
+            track_count_cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -241,6 +257,80 @@ impl MusicBrainzClient {
         );
         Ok(catalog)
     }
+
+    pub async fn official_track_count(
+        &self,
+        release_group_id: &str,
+    ) -> Result<Option<u32>, String> {
+        let release_group_id = release_group_id.trim();
+        if !is_musicbrainz_id(release_group_id) {
+            return Err(
+                "Choose a valid MusicBrainz album before loading its track count.".to_owned(),
+            );
+        }
+        if let Some(cached) = self.track_count_cache.read().await.get(release_group_id) {
+            if cached.stored_at.elapsed() <= CACHE_TTL {
+                return Ok(cached.value);
+            }
+        }
+
+        self.wait_for_request_slot().await;
+        let response = self
+            .client()?
+            .get(format!("{MUSICBRAINZ_API}/release"))
+            .query(&[
+                ("release-group", release_group_id.to_owned()),
+                ("status", "official".to_owned()),
+                ("fmt", "json".to_owned()),
+                ("limit", "100".to_owned()),
+            ])
+            .send()
+            .await
+            .map_err(request_error)?
+            .error_for_status()
+            .map_err(request_error)?
+            .json::<OfficialReleaseResponse>()
+            .await
+            .map_err(request_error)?;
+        let track_count = canonical_track_count(&response.releases);
+        let mut cache = self.track_count_cache.write().await;
+        trim_cache(&mut cache, release_group_id, MAX_TRACK_COUNT_CACHE_ENTRIES);
+        cache.insert(
+            release_group_id.to_owned(),
+            CacheEntry {
+                stored_at: Instant::now(),
+                value: track_count,
+            },
+        );
+        Ok(track_count)
+    }
+}
+
+fn canonical_track_count(releases: &[OfficialRelease]) -> Option<u32> {
+    let earliest_date = releases
+        .iter()
+        .filter(|release| release.track_count.is_some() && !release.date.is_empty())
+        .map(|release| release.date.as_str())
+        .min();
+    let mut counts = HashMap::<u32, usize>::new();
+    for release in releases.iter().filter(|release| {
+        release.track_count.is_some()
+            && earliest_date.is_none_or(|date| release.date.starts_with(&date[..date.len().min(4)]))
+    }) {
+        *counts
+            .entry(release.track_count.unwrap_or_default())
+            .or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .max_by(
+            |(left_count, left_frequency), (right_count, right_frequency)| {
+                left_frequency
+                    .cmp(right_frequency)
+                    .then_with(|| right_count.cmp(left_count))
+            },
+        )
+        .map(|(count, _)| count)
 }
 
 fn trim_cache<T>(cache: &mut HashMap<String, CacheEntry<T>>, incoming: &str, limit: usize) {
@@ -296,6 +386,14 @@ pub async fn album_catalog(
     client.catalog(&artist_id).await
 }
 
+#[tauri::command]
+pub async fn album_official_track_count(
+    client: State<'_, MusicBrainzClient>,
+    release_group_id: String,
+) -> Result<Option<u32>, String> {
+    client.official_track_count(&release_group_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,5 +446,24 @@ mod tests {
 
         assert!(rustls::crypto::CryptoProvider::get_default().is_some());
         assert!(client.client.is_ok());
+    }
+
+    #[test]
+    fn chooses_the_common_track_count_from_the_earliest_official_year() {
+        let releases = vec![
+            OfficialRelease {
+                date: "1987-08-03".to_owned(),
+                track_count: Some(12),
+            },
+            OfficialRelease {
+                date: "1987-09-01".to_owned(),
+                track_count: Some(12),
+            },
+            OfficialRelease {
+                date: "2006-01-01".to_owned(),
+                track_count: Some(16),
+            },
+        ];
+        assert_eq!(canonical_track_count(&releases), Some(12));
     }
 }

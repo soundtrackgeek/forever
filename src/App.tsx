@@ -685,6 +685,7 @@ function App() {
                 error={missingShelf.error ?? radar.error ?? wanted.error}
                 matchByAlbumId={missingShelf.matchByAlbumId}
                 wantedAlbums={wanted.snapshot.albums}
+                defaultPreferences={wanted.snapshot.defaultPreferences}
                 online={connection.snapshot.state === "online"}
                 radarReady={radar.ready}
                 radarSnapshot={radar.snapshot}
@@ -851,6 +852,7 @@ function App() {
           <TransfersWorkspace
             key={transferFocus?.requestId ?? "transfers"}
             transfers={transfers.snapshot.transfers}
+            maxConcurrentDownloads={transfers.snapshot.maxConcurrentDownloads}
             uploads={sharing.uploads.uploads}
             uploadError={sharing.error}
             error={transfers.error}
@@ -904,6 +906,8 @@ function App() {
             onSetShareEnabled={sharing.setRootEnabled}
             onRescanShares={sharing.rescan}
             onSetUploadSlots={sharing.setUploadSlots}
+            maxConcurrentDownloads={transfers.snapshot.maxConcurrentDownloads}
+            onSetMaxConcurrentDownloads={transfers.setMaxConcurrentDownloads}
             messageNotificationsEnabled={messages.notificationsEnabled}
             onMessageNotificationsChange={messages.setNotificationsEnabled}
             roomNotificationsEnabled={rooms.notificationsEnabled}
@@ -922,6 +926,7 @@ function App() {
         expanded={transferShelfExpanded}
         transfers={transfers.snapshot.transfers}
         activeCount={transfers.snapshot.activeCount}
+        maxConcurrentDownloads={transfers.snapshot.maxConcurrentDownloads}
         error={transfers.error}
         onPause={(id) => void transfers.pause(id).catch(() => undefined)}
         onResume={(id) => void transfers.resume(id).catch(() => undefined)}
@@ -965,7 +970,11 @@ function App() {
         <SmartMatchPreferencesDialog
           key={preferencesAlbum.albumId}
           album={wanted.byAlbumId.get(preferencesAlbum.albumId) ?? preferencesAlbum}
-          onSave={(preferences) => wanted.setPreferences(preferencesAlbum.albumId, preferences)}
+          defaultPreferences={wanted.snapshot.defaultPreferences}
+          onSave={async (preferences, saveAsDefault) => {
+            await wanted.setPreferences(preferencesAlbum.albumId, preferences);
+            if (saveAsDefault) await wanted.setDefaultPreferences(preferences);
+          }}
           onClose={() => setPreferencesAlbum(null)}
         />
       ) : null}

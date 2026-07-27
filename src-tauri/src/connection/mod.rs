@@ -184,6 +184,16 @@ pub async fn wanted_set_preferences(
 }
 
 #[tauri::command]
+pub async fn wanted_set_default_preferences(
+    manager: State<'_, ConnectionManager>,
+    preferences: wanted::WantedPreferences,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .set_default_wanted_preferences(preferences)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn wanted_sync_fulfilled(
     manager: State<'_, ConnectionManager>,
     fulfillments: Vec<wanted::WantedFulfillmentRequest>,
@@ -451,6 +461,16 @@ pub async fn transfers_snapshot(
     manager: State<'_, ConnectionManager>,
 ) -> Result<downloads::TransferQueueSnapshot, String> {
     Ok(manager.current_transfers())
+}
+
+#[tauri::command]
+pub async fn transfer_set_max_concurrent_downloads(
+    manager: State<'_, ConnectionManager>,
+    max_concurrent_downloads: u8,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .set_max_concurrent_downloads(max_concurrent_downloads)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

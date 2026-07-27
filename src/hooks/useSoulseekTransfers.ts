@@ -122,6 +122,7 @@ const previewTransfers: Transfer[] = [
 const emptySnapshot: TransferQueueSnapshot = {
   transfers: [],
   activeCount: 0,
+  maxConcurrentDownloads: 3,
 };
 
 const withCount = (transfers: Transfer[]): TransferQueueSnapshot => ({
@@ -131,6 +132,7 @@ const withCount = (transfers: Transfer[]): TransferQueueSnapshot => ({
       transfer.status,
     ),
   ).length,
+  maxConcurrentDownloads: 3,
 });
 
 const errorMessage = (cause: unknown) =>
@@ -906,6 +908,19 @@ export function useSoulseekTransfers() {
   const clearCompletionNotice = useCallback(() => setCompletionNotice(null), []);
   const clearActivityNotice = useCallback(() => setActivityNotice(null), []);
   const clearError = useCallback(() => setError(null), []);
+  const setMaxConcurrentDownloads = useCallback(async (maxConcurrentDownloads: number) => {
+    setError(null);
+    try {
+      const next = native
+        ? await invoke<TransferQueueSnapshot>("transfer_set_max_concurrent_downloads", { maxConcurrentDownloads })
+        : { ...snapshot, maxConcurrentDownloads };
+      setSnapshot(next);
+      return next;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native, snapshot]);
 
   return useMemo(
     () => ({
@@ -927,6 +942,7 @@ export function useSoulseekTransfers() {
       verifyRelease,
       retryReleaseIssues,
       switchReleaseSource,
+      setMaxConcurrentDownloads,
       completionNotice,
       clearCompletionNotice,
       activityNotice,
@@ -954,6 +970,7 @@ export function useSoulseekTransfers() {
       verifyRelease,
       retryReleaseIssues,
       switchReleaseSource,
+      setMaxConcurrentDownloads,
       completionNotice,
       activityNotice,
       snapshot,

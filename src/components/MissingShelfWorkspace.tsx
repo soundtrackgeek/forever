@@ -53,6 +53,7 @@ type MissingShelfWorkspaceProps = {
   error: string | null;
   matchByAlbumId: ReadonlyMap<string, ArchiveAlbumMatch>;
   wantedAlbums: WantedAlbum[];
+  defaultPreferences: WantedPreferences;
   online: boolean;
   radarReady: boolean;
   radarSnapshot: RadarSnapshot;
@@ -80,12 +81,6 @@ type MissingShelfWorkspaceProps = {
 
 type ReleaseFilter = "studio" | "live" | "compilation" | "ep" | "all";
 type ShelfState = "owned" | "wanted" | "missing";
-
-const defaultPreferences: WantedPreferences = {
-  formatPreference: "preferLossless",
-  minimumBitrateKbps: 320,
-  minimumTrackCount: null,
-};
 
 const category = (album: AlbumReleaseGroup): Exclude<ReleaseFilter, "all"> => {
   const secondary = album.secondaryTypes.map((value) => value.toLowerCase());
@@ -135,6 +130,7 @@ function RadarSourceDrawer({
   album,
   sources,
   transfers,
+  preferences,
   watched,
   preparingSourceId,
   onDownload,
@@ -145,6 +141,7 @@ function RadarSourceDrawer({
   album: AlbumReleaseGroup;
   sources: AlbumSource[];
   transfers: Transfer[];
+  preferences: WantedPreferences;
   watched: boolean;
   preparingSourceId: string | null;
   onDownload: (source: AlbumSource) => void;
@@ -152,7 +149,7 @@ function RadarSourceDrawer({
   onRescan: () => void;
   onOpenTransfer: (groupId: string) => void;
 }) {
-  const ranked = rankAlbumSources(sources, defaultPreferences);
+  const ranked = rankAlbumSources(sources, preferences);
   const best = ranked.find((source) => source.eligible)?.source ?? sources[0];
   const downloadStates = useMemo(
     () => albumDownloadStates(sources, transfers),
@@ -210,6 +207,7 @@ export function MissingShelfWorkspace({
   error,
   matchByAlbumId,
   wantedAlbums,
+  defaultPreferences,
   online,
   radarReady,
   radarSnapshot,
@@ -280,6 +278,7 @@ export function MissingShelfWorkspace({
 
   const chooseArtist = (artist: ArchiveArtistSummary) => {
     setSelectedIds(new Set());
+    setPreferences(defaultPreferences);
     setAddedCount(0);
     setReleaseFilter("studio");
     setDecade("all");
@@ -288,6 +287,7 @@ export function MissingShelfWorkspace({
 
   const toggle = (album: AlbumReleaseGroup) => {
     if (stateFor(album) !== "missing") return;
+    if (selectedIds.size === 0 && !selectedIds.has(album.id)) setPreferences(defaultPreferences);
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(album.id)) next.delete(album.id);
@@ -385,7 +385,7 @@ export function MissingShelfWorkspace({
                 ))}
               </div>
               <label><span>Era</span><select aria-label="Release year" value={decade} onChange={(event) => setDecade(event.target.value)}><option value="all">All years</option>{decades.map((value) => <option value={value} key={value}>{value}s</option>)}</select></label>
-              <button type="button" className="missing-select-all" disabled={selectable.length === 0} onClick={() => setSelectedIds(new Set(selectable.map((album) => album.id)))}><Check size={14} /> Select visible missing</button>
+              <button type="button" className="missing-select-all" disabled={selectable.length === 0} onClick={() => { setPreferences(defaultPreferences); setSelectedIds(new Set(selectable.map((album) => album.id))); }}><Check size={14} /> Select visible missing</button>
               <button type="button" className="shelf-radar-scan-visible" disabled={!online || !radarReady || radarScanning || selectable.length === 0} title={!online ? "Reconnect before scanning the network" : selectable.length > 12 ? "Scans the first 12 visible missing albums" : "Scan visible missing albums"} onClick={() => scan(selectable)}><Broadcast size={14} /> Scan visible{selectable.length > 12 ? " 12" : ""}</button>
             </div>
 
@@ -402,7 +402,7 @@ export function MissingShelfWorkspace({
               <section className={`missing-bulk-bar ${addedCount ? "is-complete" : ""}`} aria-live="polite">
                 <span><SlidersHorizontal size={18} /><strong>{addedCount ? `${addedCount} added to Wanted` : `${selectedAlbums.length} missing selected`}</strong><small>{addedCount ? "Smart Match will begin listening on its normal rhythm." : "One Smart Match profile will be shared by this batch."}</small></span>
                 {!addedCount ? <>
-                  <label><span>Format</span><select aria-label="Bulk format preference" value={preferences.formatPreference} onChange={(event) => setPreferences((current) => ({ ...current, formatPreference: event.target.value as WantedFormatPreference }))}><option value="preferLossless">Prefer FLAC</option><option value="losslessOnly">Lossless only</option><option value="any">Any format</option></select></label>
+                  <label><span>Format</span><select aria-label="Bulk format preference" value={preferences.formatPreference} onChange={(event) => setPreferences((current) => ({ ...current, formatPreference: event.target.value as WantedFormatPreference }))}><option value="preferLossless">Prefer FLAC</option><option value="losslessOnly">Lossless only</option><option value="mp3Only">MP3 only</option><option value="any">Any format</option></select></label>
                   <label><span>Lossy floor</span><select aria-label="Bulk minimum bitrate" disabled={preferences.formatPreference === "losslessOnly"} value={preferences.minimumBitrateKbps ?? 0} onChange={(event) => setPreferences((current) => ({ ...current, minimumBitrateKbps: Number(event.target.value) ? Number(event.target.value) as 128 | 192 | 256 | 320 : null }))}><option value={320}>320 kbps</option><option value={256}>256 kbps</option><option value={192}>192 kbps</option><option value={128}>128 kbps</option><option value={0}>Any</option></select></label>
                   <label><span>Tracks</span><input aria-label="Bulk minimum track count" type="number" min={1} max={250} placeholder="Any" value={preferences.minimumTrackCount ?? ""} onChange={(event) => setPreferences((current) => ({ ...current, minimumTrackCount: event.target.value ? Number(event.target.value) : null }))} /></label>
                   <button type="button" className="missing-scan-selected" disabled={!online || radarScanning} onClick={() => scan(selectedAlbums)}><Broadcast size={15} /> Scan {Math.min(selectedAlbums.length, 12)}</button>
@@ -432,7 +432,7 @@ export function MissingShelfWorkspace({
                       {shelfState === "missing" ? <button type="button" className={`shelf-radar-status ${radarClass}`} disabled={!online || radarScanning} onClick={() => sources.length ? setOpenRadarAlbumId(radarOpen ? null : album.id) : scan([album])} title={sources.length ? "Show or hide available album sources" : online ? "Scan this album" : "Reconnect before scanning"}>{radarScan?.state === "scanning" ? <CircleNotch className="search-spinner" size={14} /> : sources.length ? <Eye size={14} /> : <Broadcast size={14} />}<span><strong>{radarLabel}</strong><small>{sources.length ? `${radarScan?.peerCount ?? 0} people replied` : radarScan?.state === "completed" ? "Click to rescan" : "Click to listen"}</small></span></button> : <span className="shelf-radar-unavailable">{shelfState === "wanted" ? "Watch active" : "In library"}</span>}
                       <strong className={`missing-release-state is-${shelfState}`}>{shelfState === "owned" ? <CheckCircle size={14} weight="fill" /> : shelfState === "wanted" ? <Plus size={13} weight="bold" /> : <span aria-hidden="true" />}{shelfState === "owned" ? "Own" : shelfState === "wanted" ? "Wanted" : "Missing"}</strong>
                     </article>
-                    {radarOpen ? <RadarSourceDrawer album={album} sources={sources} transfers={transfers} watched={wantedIds.has(album.id.toLowerCase())} preparingSourceId={preparingSourceId} onDownload={(source) => void queueSource(album, source, sources).catch(() => undefined)} onWatch={() => void onAddMany(selectedArtist.canonicalName ?? selectedArtist.name, [album], preferences).catch(() => undefined)} onRescan={() => scan([album])} onOpenTransfer={onOpenTransfer} /> : null}
+                    {radarOpen ? <RadarSourceDrawer album={album} sources={sources} transfers={transfers} preferences={preferences} watched={wantedIds.has(album.id.toLowerCase())} preparingSourceId={preparingSourceId} onDownload={(source) => void queueSource(album, source, sources).catch(() => undefined)} onWatch={() => void onAddMany(selectedArtist.canonicalName ?? selectedArtist.name, [album], preferences).catch(() => undefined)} onRescan={() => scan([album])} onOpenTransfer={onOpenTransfer} /> : null}
                   </div>
                 );
               })}

@@ -3,18 +3,18 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.37` adds Dial Memory: eight independent
-> Files or Albums searches with background-result signals, pinned presets, and
-> fast keyboard switching.
+> **Status:** pre-alpha. Version `0.0.38` adds Smart Match defaults and MP3-only
+> profiles, catalog-aware track counts, plus configurable multi-user download
+> lanes with a three-user default.
 
-If `0.0.16` is installed, download and run the latest `0.0.37` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.38` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
 
-![Forever Dial Memory search presets](design/implementation/dial-memory-0.0.37-desktop.png)
+![Forever Smart Match defaults and MP3-only profile](design/implementation/smart-match-0.0.38-desktop.png)
 
-![Forever Dial Memory at the minimum window size](design/implementation/dial-memory-0.0.37-minimum.png)
+![Forever configurable download lanes](design/implementation/download-lanes-0.0.38-desktop.png)
 
 ![Forever Finish Line transfer health](design/implementation/finish-line-0.0.30-desktop.png)
 
@@ -85,7 +85,7 @@ configuration and transfers.
   with 15-minute, 30-minute, hourly, or manual background checks, per-album
   pause/check/remove controls, in-app and Windows availability alerts, and
   configurable **Smart Match** profiles for format, minimum bitrate, and track
-  count
+  count, including MP3-only matching and a reusable default for new watches
 - Ranked Smart Match recommendations based on completeness, format, upload-slot
   readiness, speed, and queue length, with a remote-folder review that preserves
   artwork, cue sheets, lyrics, logs, and other companion files when explicitly
@@ -118,7 +118,8 @@ configuration and transfers.
 - Separate Ignore User filtering for messages/search activity and Ban User
   protection for local share browsing, queues, and downloads
 - Real single-file downloads from live results using direct and indirect peer
-  connections, with one active file at a time
+  connections, with one active file per source user and one to six concurrent
+  users (three by default)
 - Live source-folder inspection using Soulseek Folder Contents requests, with
   complete subfolder results, file sizes, formats, and available audio quality
   attributes
@@ -319,9 +320,12 @@ Choose **Add to Wanted** on a missing MusicBrainz album, then open **Archive →
 Wanted** to follow it. Forever serializes background checks while connected and
 groups returned audio by listener and remote folder without disturbing the
 visible Search workspace. Edit a row's **Smart Match profile** to prefer
-lossless, require lossless, or accept any format, then optionally set minimum
-bitrate and track-count requirements. Qualifying folders are ranked by
-completeness, format, free upload slot, speed, and queue length.
+lossless, require lossless, require MP3, or accept any format, then optionally
+set minimum bitrate and track-count requirements. Forever suggests the track
+count from the earliest official MusicBrainz edition when available. Select
+**Use this as my default profile** to apply the same starting profile to future
+Wanted albums. Qualifying folders are ranked by completeness, format, free
+upload slot, speed, and queue length.
 
 Use **Download best** to inspect the recommended folder before anything is
 queued. The review shows the listener, remote path, format, tracks, aggregate
@@ -373,10 +377,12 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
-Version `0.0.31` intentionally keeps one active download at a time, even when an
-entire release is queued. Uploads default to one slot and can be raised to
-three. Edition/pressing lookup, playback, and private-room administration
-remain outside this release.
+Downloads use one file at a time from each source user, while different users
+can transfer in parallel. Set **Settings → Download lanes → Simultaneous users**
+from one to six; the default is three. Transfers labels Forever's reorderable
+**Local queue** separately from the source's already-submitted **Source queue**.
+Uploads default to one slot and can be raised to three. Edition/pressing lookup,
+playback, and private-room administration remain outside this release.
 
 Soulseek does not have a separate sign-up step. Connecting with a valid unused
 username creates that account using the password you enter; only an existing

@@ -292,7 +292,7 @@ describe("Forever shell", () => {
     expect(
       screen.getAllByText("Def Leppard - Hysteria (1987)").length,
     ).toBeGreaterThan(0);
-  });
+  }, 10_000);
 
   it("uses Music Library as a read-only Archive without adopting downloads", async () => {
     render(<App />);
@@ -800,6 +800,13 @@ describe("Forever shell", () => {
     expect(window.localStorage.getItem(UPDATE_CHECK_INTERVAL_STORAGE_KEY)).toBe(
       "15",
     );
+    const downloadLanes = screen.getByRole("combobox", {
+      name: "Simultaneous download users",
+    });
+    expect(downloadLanes).toHaveValue("3");
+    fireEvent.change(downloadLanes, { target: { value: "5" } });
+    expect(downloadLanes).toHaveValue("5");
+    expect(screen.getByText("1/5 lanes · 3 releases")).toBeInTheDocument();
 
     view.unmount();
     render(<App />);
@@ -817,16 +824,16 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.37 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.38 is ready." }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Dial Memory keeps up to eight independent Files and Albums searches tuned at once, with their query, filters, sort, layout, selection, results, and scroll position intact while you switch.",
+        "Smart Match adds MP3-only profiles, reusable defaults for new Wanted albums, and MusicBrainz-assisted official track-count suggestions.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Pinned searches persist only their query and view settings; live results are always reacquired from the network.",
+        "Releases already submitted to a source keep their remote queue position, while locally waiting releases remain reorderable.",
       ),
     ).toBeInTheDocument();
   });

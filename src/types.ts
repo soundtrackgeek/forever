@@ -52,7 +52,7 @@ export type AlbumSource = {
   representative: SearchResult;
 };
 
-export type WantedFormatPreference = "any" | "preferLossless" | "losslessOnly";
+export type WantedFormatPreference = "any" | "preferLossless" | "losslessOnly" | "mp3Only";
 
 export type WantedPreferences = {
   formatPreference: WantedFormatPreference;
@@ -101,6 +101,7 @@ export type WantedAlbum = {
 
 export type WantedSnapshot = {
   albums: WantedAlbum[];
+  defaultPreferences: WantedPreferences;
   intervalMinutes: 0 | 15 | 30 | 60;
   activeAlbumId: string | null;
   nextCheckAtMs: number | null;
@@ -496,6 +497,7 @@ export type ArchiveCachedCatalog = {
 export type TransferQueueSnapshot = {
   transfers: Transfer[];
   activeCount: number;
+  maxConcurrentDownloads: number;
 };
 
 export type SharedRoot = {

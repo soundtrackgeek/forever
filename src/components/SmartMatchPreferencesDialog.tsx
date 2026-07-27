@@ -1,11 +1,13 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Check, SlidersHorizontal, X } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { WantedAlbum, WantedFormatPreference, WantedPreferences } from "../types";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
 
 type SmartMatchPreferencesDialogProps = {
   album: WantedAlbum;
-  onSave: (preferences: WantedPreferences) => Promise<unknown>;
+  defaultPreferences: WantedPreferences;
+  onSave: (preferences: WantedPreferences, saveAsDefault: boolean) => Promise<unknown>;
   onClose: () => void;
 };
 
@@ -16,23 +18,47 @@ const formatOptions: Array<{
 }> = [
   { value: "preferLossless", label: "Prefer FLAC", copy: "Recommend lossless first, with a high-quality lossy fallback." },
   { value: "losslessOnly", label: "Lossless only", copy: "Ignore MP3, AAC, OGG, and other lossy folders." },
+  { value: "mp3Only", label: "MP3 only", copy: "Recommend folders made entirely of MP3 files at your chosen bitrate." },
   { value: "any", label: "Any format", copy: "Rank every source by completeness and availability." },
 ];
 
 export function SmartMatchPreferencesDialog({
   album,
+  defaultPreferences,
   onSave,
   onClose,
 }: SmartMatchPreferencesDialogProps) {
   const [preferences, setPreferences] = useState(album.preferences);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveAsDefault, setSaveAsDefault] = useState(false);
+  const [officialTrackCount, setOfficialTrackCount] = useState<number | null>(null);
+  const [trackCountLoading, setTrackCountLoading] = useState(isTauri());
+  const trackCountTouched = useRef(album.preferences.minimumTrackCount != null);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      const count = isTauri()
+        ? await invoke<number | null>("album_official_track_count", { releaseGroupId: album.albumId })
+        : album.bestTrackCount;
+      if (!mounted) return;
+      setOfficialTrackCount(count);
+      if (count && !trackCountTouched.current) {
+        setPreferences((current) => ({ ...current, minimumTrackCount: count }));
+      }
+    };
+    void load().catch(() => undefined).finally(() => {
+      if (mounted) setTrackCountLoading(false);
+    });
+    return () => { mounted = false; };
+  }, [album.albumId, album.bestTrackCount]);
 
   const save = async () => {
     setPending(true);
     setError(null);
     try {
-      await onSave(preferences);
+      await onSave(preferences, saveAsDefault);
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -106,8 +132,13 @@ export function SmartMatchPreferencesDialog({
                 ...current,
                 minimumTrackCount: event.target.value ? Number(event.target.value) : null,
               }))}
+              onInput={() => { trackCountTouched.current = true; }}
             />
-            <small>Leave empty when editions may have different track counts.</small>
+            <small>{trackCountLoading
+              ? "Checking the official MusicBrainz edition…"
+              : officialTrackCount
+                ? `MusicBrainz suggests ${officialTrackCount} tracks from the earliest official edition.`
+                : "Leave empty when editions may have different track counts."}</small>
           </label>
         </div>
 
@@ -116,6 +147,12 @@ export function SmartMatchPreferencesDialog({
           <strong>{wantedPreferencesLabel(preferences)}</strong>
           <p>Changing this profile schedules a fresh background check. Downloads still require your approval.</p>
         </div>
+
+        <label className="smart-default-profile">
+          <input type="checkbox" checked={saveAsDefault} onChange={(event) => setSaveAsDefault(event.target.checked)} />
+          <span className="toggle-visual" aria-hidden="true"><i /></span>
+          <span><strong>Use this as my default profile</strong><small>New Wanted albums will use this instead of {wantedPreferencesLabel(defaultPreferences)}.</small></span>
+        </label>
 
         {error ? <p className="smart-dialog-error" role="alert">{error}</p> : null}
         <footer>

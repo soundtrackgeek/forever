@@ -5,6 +5,37 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.38] - 2026-07-27
+
+### Added
+
+- Smart Match profiles now include **MP3 only**, which rejects lossless and
+  mixed-format folders while retaining the selected MP3 bitrate floor.
+- Any per-album Smart Match profile can be saved as the reusable default for
+  newly watched albums and Missing Shelf batches.
+- The profile editor looks up the earliest official MusicBrainz edition and
+  uses its canonical track count as the initial minimum when available.
+- **Settings → Download lanes** controls one to six simultaneous source users,
+  with three as the persisted default and one active file per user.
+- Desktop and minimum-window visual references cover the expanded Smart Match
+  editor and the new download-lane setting.
+
+### Changed
+
+- The native scheduler fills independent user lanes without allowing multiple
+  simultaneous files from the same Soulseek user. Lowering the limit lets
+  existing transfers finish and applies the new cap to subsequent work.
+- Transfers distinguish the reorderable **Local queue** from a source's
+  already-submitted **Source queue**, including remote position and lane usage.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.38`.
+
+### Fixed
+
+- A cold Windows Actions runner no longer fails the album-discovery integration
+  regression at the exact five-second default; only that test receives a
+  focused ten-second allowance.
+
 ## [0.0.37] - 2026-07-27
 
 ### Added

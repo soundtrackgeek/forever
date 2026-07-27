@@ -672,6 +672,13 @@ impl ConnectionManager {
         Ok(self.wanted.set_preferences(album_id, preferences)?)
     }
 
+    pub fn set_default_wanted_preferences(
+        &self,
+        preferences: WantedPreferences,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.set_default_preferences(preferences)?)
+    }
+
     pub fn sync_wanted_fulfilled(
         &self,
         fulfillments: Vec<WantedFulfillmentRequest>,
@@ -707,6 +714,17 @@ impl ConnectionManager {
 
     pub fn current_transfers(&self) -> TransferQueueSnapshot {
         self.transfers.snapshot()
+    }
+
+    pub fn set_max_concurrent_downloads(
+        &self,
+        max_concurrent_downloads: u8,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        let snapshot = self
+            .transfers
+            .set_max_concurrent_downloads(max_concurrent_downloads)?;
+        self.schedule_downloads();
+        Ok(snapshot)
     }
 
     pub fn current_local_shares(&self) -> LocalSharesSnapshot {
@@ -2424,8 +2442,11 @@ impl ConnectionManager {
                                 })?;
                         }
                         Some(ConnectionCommand::ScheduleDownloads) => {
-                            let token = self.take_connection_token();
-                            if let Some(ticket) = self.transfers.activate_next(token) {
+                            loop {
+                                let token = self.take_connection_token();
+                                let Some(ticket) = self.transfers.activate_next(token) else {
+                                    break;
+                                };
                                 write_raw_frame(
                                     &mut server_writer,
                                     &connect_to_peer_frame(

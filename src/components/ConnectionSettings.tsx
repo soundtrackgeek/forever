@@ -3,6 +3,7 @@ import {
   ArrowsClockwise,
   BellRinging,
   Check,
+  DownloadSimple,
   FolderOpen,
   FolderPlus,
   HardDrives,
@@ -48,6 +49,8 @@ type ConnectionSettingsProps = {
   onSetShareEnabled: (id: string, enabled: boolean) => Promise<unknown>;
   onRescanShares: () => Promise<unknown>;
   onSetUploadSlots: (slots: number) => Promise<unknown>;
+  maxConcurrentDownloads: number;
+  onSetMaxConcurrentDownloads: (maximum: number) => Promise<unknown>;
   messageNotificationsEnabled: boolean;
   onMessageNotificationsChange: (enabled: boolean) => void;
   roomNotificationsEnabled: boolean;
@@ -114,6 +117,8 @@ export function ConnectionSettings({
   onSetShareEnabled,
   onRescanShares,
   onSetUploadSlots,
+  maxConcurrentDownloads,
+  onSetMaxConcurrentDownloads,
   messageNotificationsEnabled,
   onMessageNotificationsChange,
   roomNotificationsEnabled,
@@ -375,6 +380,22 @@ export function ConnectionSettings({
           </div>
         </form>
 
+        <section className="settings-panel download-lanes-panel">
+          <div className="settings-panel-heading">
+            <div className="settings-icon"><DownloadSimple size={19} weight="light" /></div>
+            <div>
+              <h2>Download lanes</h2>
+              <p>Download one file per user while several different users send in parallel.</p>
+            </div>
+          </div>
+          <label className="download-lanes-field">
+            <span><strong>Simultaneous users</strong><small>Three is the default. Existing downloads finish naturally if you lower it.</small></span>
+            <select aria-label="Simultaneous download users" value={maxConcurrentDownloads} onChange={(event) => void onSetMaxConcurrentDownloads(Number(event.target.value))}>
+              {[1, 2, 3, 4, 5, 6].map((maximum) => <option value={maximum} key={maximum}>{maximum} {maximum === 1 ? "user" : "users"}</option>)}
+            </select>
+          </label>
+        </section>
+
         <section className="settings-panel sharing-panel">
           <div className="settings-panel-heading sharing-panel-heading">
             <div className="settings-icon">
@@ -481,7 +502,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.37</h2>
+              <h2>Forever 0.0.38</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="update-interval-field">
                 <span>Automatic update checks</span>

@@ -67,4 +67,16 @@ describe("Smart Match ranking", () => {
   it("summarizes persisted preferences clearly", () => {
     expect(wantedPreferencesLabel(preferences)).toBe("Prefer FLAC · 320+ kbps · 10+ tracks");
   });
+
+  it("accepts only MP3 sources in MP3-only mode", () => {
+    const mp3Only = { ...preferences, formatPreference: "mp3Only" as const };
+    const ranked = rankAlbumSources([
+      source("flac", "FLAC", 10, null, true),
+      source("mp3", "MP3", 10, 320, true),
+    ], mp3Only);
+    expect(ranked[0].source.id).toBe("mp3");
+    expect(ranked[0].eligible).toBe(true);
+    expect(ranked[1].eligible).toBe(false);
+    expect(wantedPreferencesLabel(mp3Only)).toBe("MP3 only · 320+ kbps · 10+ tracks");
+  });
 });

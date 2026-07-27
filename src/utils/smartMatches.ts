@@ -50,15 +50,22 @@ export function rankAlbumSources(
   return sources
     .map((source) => {
       const lossless = hasLossless(source);
+      const mp3Only = source.formats.length > 0
+        && source.formats.every((format) => format.toUpperCase() === "MP3");
       const minimumBitrateKbps = minimumLossyBitrate(source);
       const enoughTracks = preferences.minimumTrackCount == null
         || source.tracks.length >= preferences.minimumTrackCount;
-      const formatAllowed = preferences.formatPreference !== "losslessOnly" || lossless;
+      const formatAllowed = preferences.formatPreference === "losslessOnly"
+        ? lossless
+        : preferences.formatPreference === "mp3Only"
+          ? mp3Only
+          : true;
       const bitrateAllowed = lossless
         || preferences.minimumBitrateKbps == null
         || (minimumBitrateKbps != null && minimumBitrateKbps >= preferences.minimumBitrateKbps);
       const eligible = enoughTracks && formatAllowed && bitrateAllowed;
-      const score = (preferences.formatPreference !== "any" && lossless ? 500 : 0)
+      const score = ((preferences.formatPreference !== "any" && lossless)
+        || (preferences.formatPreference === "mp3Only" && mp3Only) ? 500 : 0)
         + formatRank(primaryFormat(source)) * 20
         + source.tracks.length * 30
         + (source.slotFree ? 180 : 0)
@@ -67,7 +74,7 @@ export function rankAlbumSources(
       const reason = !enoughTracks
         ? `Needs ${preferences.minimumTrackCount} tracks`
         : !formatAllowed
-          ? "Lossless required"
+          ? preferences.formatPreference === "mp3Only" ? "MP3 required" : "Lossless required"
           : !bitrateAllowed
             ? `${preferences.minimumBitrateKbps} kbps minimum`
             : source.slotFree
@@ -91,6 +98,8 @@ export function rankAlbumSources(
 export const wantedPreferencesLabel = (preferences: WantedPreferences) => {
   const format = preferences.formatPreference === "losslessOnly"
     ? "Lossless only"
+    : preferences.formatPreference === "mp3Only"
+      ? "MP3 only"
     : preferences.formatPreference === "preferLossless"
       ? "Prefer FLAC"
       : "Any format";

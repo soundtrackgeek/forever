@@ -16,6 +16,7 @@ dist-ssr
 design/implementation/*-pass1.png
 design/implementation/comparison-pass1.jpg
 /.playwright-mcp/
+/.playwright-cli/
 
 # Editor directories and files
 .vscode/*

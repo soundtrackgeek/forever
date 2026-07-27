@@ -4,7 +4,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
         Arc, Mutex, RwLock,
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -15,6 +15,12 @@ use thiserror::Error;
 const TRANSFER_EVENT: &str = "forever://transfers";
 const STORE_VERSION: u32 = 1;
 const MAX_AUTOMATIC_RETRIES: u32 = 3;
+const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u8 = 3;
+const MAX_CONCURRENT_DOWNLOADS: u8 = 6;
+
+fn default_max_concurrent_downloads() -> u8 {
+    DEFAULT_MAX_CONCURRENT_DOWNLOADS
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +121,7 @@ pub struct TransferSnapshot {
 pub struct TransferQueueSnapshot {
     pub transfers: Vec<TransferSnapshot>,
     pub active_count: usize,
+    pub max_concurrent_downloads: u8,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +172,8 @@ pub struct DownloadPlan {
 #[derive(Serialize, Deserialize)]
 struct TransferStore {
     version: u32,
+    #[serde(default = "default_max_concurrent_downloads")]
+    max_concurrent_downloads: u8,
     transfers: Vec<TransferSnapshot>,
 }
 
@@ -173,13 +182,15 @@ pub struct TransferHub {
     app: AppHandle,
     path: PathBuf,
     transfers: Arc<RwLock<Vec<TransferSnapshot>>>,
+    max_concurrent_downloads: Arc<AtomicU8>,
     tasks: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     next_id: Arc<AtomicU64>,
 }
 
 impl TransferHub {
     pub fn new(app: AppHandle, path: PathBuf) -> Result<Self, TransferError> {
-        let mut transfers = load_store(&path)?;
+        let store = load_store(&path)?;
+        let mut transfers = store.transfers;
         for transfer in &mut transfers {
             if transfer.status.occupies_slot() {
                 transfer.status = TransferStatus::Queued;
@@ -199,6 +210,7 @@ impl TransferHub {
             app,
             path,
             transfers: Arc::new(RwLock::new(transfers)),
+            max_concurrent_downloads: Arc::new(AtomicU8::new(store.max_concurrent_downloads)),
             tasks: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(AtomicU64::new(timestamp_ms())),
         };
@@ -219,7 +231,21 @@ impl TransferHub {
         TransferQueueSnapshot {
             transfers,
             active_count,
+            max_concurrent_downloads: self.max_concurrent_downloads.load(Ordering::SeqCst),
         }
+    }
+
+    pub fn set_max_concurrent_downloads(
+        &self,
+        max_concurrent_downloads: u8,
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        if !(1..=MAX_CONCURRENT_DOWNLOADS).contains(&max_concurrent_downloads) {
+            return Err(TransferError::InvalidConcurrentDownloads);
+        }
+        self.max_concurrent_downloads
+            .store(max_concurrent_downloads, Ordering::SeqCst);
+        self.persist_and_publish()?;
+        Ok(self.snapshot())
     }
 
     pub fn enqueue(
@@ -736,18 +762,13 @@ impl TransferHub {
                 .transfers
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if transfers
-                .iter()
-                .any(|transfer| transfer.status.occupies_slot())
-            {
-                return None;
-            }
             let now = timestamp_ms();
-            let transfer = transfers.iter_mut().find(|transfer| {
-                transfer.status == TransferStatus::Queued
-                    || (transfer.status == TransferStatus::Retrying
-                        && transfer.retry_at_ms.is_none_or(|retry_at| retry_at <= now))
-            })?;
+            let index = next_download_index(
+                &transfers,
+                self.max_concurrent_downloads.load(Ordering::SeqCst),
+                now,
+            )?;
+            let transfer = &mut transfers[index];
             transfer.status = TransferStatus::Requesting;
             transfer.connection_token = Some(connection_token);
             transfer.transfer_token = None;
@@ -1147,6 +1168,7 @@ impl TransferHub {
         }
         let store = TransferStore {
             version: STORE_VERSION,
+            max_concurrent_downloads: self.max_concurrent_downloads.load(Ordering::SeqCst),
             transfers: self
                 .transfers
                 .read()
@@ -1311,15 +1333,47 @@ fn reset_runtime_state(transfer: &mut TransferSnapshot) {
     transfer.transfer_token = None;
 }
 
-fn load_store(path: &Path) -> Result<Vec<TransferSnapshot>, TransferError> {
+fn next_download_index(
+    transfers: &[TransferSnapshot],
+    max_concurrent_downloads: u8,
+    now: u64,
+) -> Option<usize> {
+    let active_count = transfers
+        .iter()
+        .filter(|transfer| transfer.status.occupies_slot())
+        .count();
+    if active_count >= usize::from(max_concurrent_downloads) {
+        return None;
+    }
+    let active_usernames = transfers
+        .iter()
+        .filter(|transfer| transfer.status.occupies_slot())
+        .map(|transfer| transfer.username.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    transfers.iter().position(|transfer| {
+        !active_usernames.contains(&transfer.username.to_ascii_lowercase())
+            && (transfer.status == TransferStatus::Queued
+                || (transfer.status == TransferStatus::Retrying
+                    && transfer.retry_at_ms.is_none_or(|retry_at| retry_at <= now)))
+    })
+}
+
+fn load_store(path: &Path) -> Result<TransferStore, TransferError> {
     if !path.exists() {
-        return Ok(Vec::new());
+        return Ok(TransferStore {
+            version: STORE_VERSION,
+            max_concurrent_downloads: DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+            transfers: Vec::new(),
+        });
     }
     let store = serde_json::from_slice::<TransferStore>(&fs::read(path)?)?;
     if store.version != STORE_VERSION {
         return Err(TransferError::UnsupportedStoreVersion(store.version));
     }
-    Ok(store.transfers)
+    if !(1..=MAX_CONCURRENT_DOWNLOADS).contains(&store.max_concurrent_downloads) {
+        return Err(TransferError::InvalidConcurrentDownloads);
+    }
+    Ok(store)
 }
 
 fn refresh_partial_size(transfer: &mut TransferSnapshot) {
@@ -1574,6 +1628,8 @@ pub enum TransferError {
     ReleaseNotQueued,
     #[error("That release cannot be moved to the requested queue position.")]
     InvalidReleaseOrder,
+    #[error("Choose between 1 and 6 simultaneous download users.")]
+    InvalidConcurrentDownloads,
     #[error("Choose at least one valid file before downloading the release.")]
     InvalidReleaseRequest,
     #[error("The incoming Soulseek file connection did not match the active download.")]
@@ -1725,6 +1781,7 @@ mod tests {
         let store_path = directory.path().join("transfers.json");
         let serialized = serde_json::to_vec_pretty(&TransferStore {
             version: STORE_VERSION,
+            max_concurrent_downloads: DEFAULT_MAX_CONCURRENT_DOWNLOADS,
             transfers: vec![transfer],
         })
         .unwrap();
@@ -1732,7 +1789,10 @@ mod tests {
         let raw = String::from_utf8(serialized).unwrap();
         assert!(!raw.contains("connectionToken"));
         assert!(!raw.contains("transferToken"));
-        assert_eq!(load_store(&store_path).unwrap()[0].transferred_bytes, 37);
+        assert_eq!(
+            load_store(&store_path).unwrap().transfers[0].transferred_bytes,
+            37
+        );
     }
 
     #[test]
@@ -1876,6 +1936,38 @@ mod tests {
             reorder_queued_release(&mut transfers, "release-active", None),
             Err(TransferError::ReleaseNotQueued)
         ));
+    }
+
+    #[test]
+    fn download_lanes_skip_busy_users_and_respect_the_configured_limit() {
+        let transfers = vec![
+            release_transfer(
+                "active-a",
+                "release-a",
+                "listener-a",
+                "A\\01.flac",
+                TransferStatus::RemotelyQueued,
+                1,
+            ),
+            release_transfer(
+                "same-user",
+                "release-b",
+                "LISTENER-A",
+                "B\\01.flac",
+                TransferStatus::Queued,
+                1,
+            ),
+            release_transfer(
+                "other-user",
+                "release-c",
+                "listener-b",
+                "C\\01.flac",
+                TransferStatus::Queued,
+                1,
+            ),
+        ];
+        assert_eq!(next_download_index(&transfers, 3, timestamp_ms()), Some(2));
+        assert_eq!(next_download_index(&transfers, 1, timestamp_ms()), None);
     }
 
     #[test]

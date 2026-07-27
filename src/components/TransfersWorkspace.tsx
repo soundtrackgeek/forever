@@ -37,6 +37,7 @@ type QueueDropTarget = {
 
 type TransfersWorkspaceProps = {
   transfers: Transfer[];
+  maxConcurrentDownloads: number;
   uploads: Upload[];
   uploadError: string | null;
   error: string | null;
@@ -108,6 +109,7 @@ const isVisibleInFilter = (group: TransferGroup, filter: Filter) => {
 
 export function TransfersWorkspace({
   transfers,
+  maxConcurrentDownloads,
   uploads,
   uploadError,
   error,
@@ -464,6 +466,9 @@ export function TransfersWorkspace({
             ? null
             : Math.max(0, Math.ceil((health.nextRetryAtMs - clock) / 1_000));
           const sourceNames = [...new Set(group.transfers.map((transfer) => transfer.username))];
+          const remoteQueuePosition = group.transfers.find(
+            (transfer) => transfer.status === "remotelyQueued",
+          )?.queuePosition ?? null;
           const moved = health.state === "moved";
           const recoverableIssues = !moved && (health.missingCount > 0 || health.failedCount > 0);
           const knownArt = group.title.toLocaleLowerCase().includes("night geometry");
@@ -502,7 +507,7 @@ export function TransfersWorkspace({
                   </span>
                   {group.status === "queued" && group.releaseId ? (
                     <span className="release-queue-order">
-                      <b>Queue #{group.queuePosition}</b>
+                      <b>Local queue #{group.queuePosition}</b>
                       <button
                         type="button"
                         className="release-drag-handle"
@@ -533,7 +538,7 @@ export function TransfersWorkspace({
                         type="button"
                         disabled={group.queuePosition === 1}
                         aria-label={`Download ${group.title} next`}
-                        title="Download next"
+                        title={group.queuePosition === 1 ? "Already first in Forever’s local queue. Source queues already contacted keep their place." : "Download next"}
                         onClick={() => moveQueuedRelease(group, "next")}
                       >
                         <ArrowLineUp size={14} weight="bold" /><small>Next</small>
@@ -563,7 +568,7 @@ export function TransfersWorkspace({
                   <strong>{completed ? "Completed" : `${formatBytes(group.transferredBytes)} / ${formatBytes(group.sizeBytes)} (${Math.round(progress)}%)`}</strong>
                   <i><b style={{ width: `${progress}%` }} /></i>
                   <small>
-                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 3${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : group.status === "queued" ? `Queue #${group.queuePosition} · Waiting for slot…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : moved ? "Moved out of the download folder" : "Ready in your download folder"}
+                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 3${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? group.speedBytesPerSecond > 0 ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : remoteQueuePosition ? `Source queue #${remoteQueuePosition} · using 1 of ${maxConcurrentDownloads} user lanes` : `Contacting source · using 1 of ${maxConcurrentDownloads} user lanes` : group.status === "queued" ? `Local queue #${group.queuePosition} · Waiting for a user lane…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : moved ? "Moved out of the download folder" : "Ready in your download folder"}
                   </small>
                 </span>
                 <span className="release-transfer-actions">

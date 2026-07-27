@@ -30,20 +30,20 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.36",
-  version: "0.0.37",
-  body: `## What’s new in Forever 0.0.37
+  currentVersion: "0.0.37",
+  version: "0.0.38",
+  body: `## What’s new in Forever 0.0.38
 
 ### Added
 
-- Dial Memory keeps up to eight independent Files and Albums searches tuned at once, with their query, filters, sort, layout, selection, results, and scroll position intact while you switch.
-- Background searches show live Listening and new-result signals. Presets can be duplicated, stopped, closed, reopened, or pinned across restarts.
-- Ctrl+T opens a search, Ctrl+W closes the current search, and Ctrl+Tab or Ctrl+Shift+Tab moves between presets.
+- Smart Match adds MP3-only profiles, reusable defaults for new Wanted albums, and MusicBrainz-assisted official track-count suggestions.
+- Download lanes run one file per user while up to three different users transfer in parallel by default; choose between one and six users in Settings.
+- Transfers now distinguish Forever’s local queue from a source’s remote queue and show lane occupancy while waiting.
 
 ### Changed
 
-- Soulseek responses are routed to isolated native search sessions with a strict eight-session and per-session result limit.
-- Pinned searches persist only their query and view settings; live results are always reacquired from the network.`,
+- Releases already submitted to a source keep their remote queue position, while locally waiting releases remain reorderable.
+- The Windows CI album-discovery regression has a focused allowance for cold-runner startup instead of changing the global test timeout.`,
   date: "2026-07-27",
 };
 
