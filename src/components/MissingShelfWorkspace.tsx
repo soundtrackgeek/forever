@@ -85,6 +85,8 @@ type ReleaseFilter = "studio" | "live" | "compilation" | "ep" | "all";
 type ShelfState = "owned" | "wanted" | "missing";
 type TrackCountMode = "any" | "custom" | "musicbrainz";
 
+const DEFAULT_TRACK_COUNT_FALLBACK = 10;
+
 const trackCountModeFor = (preferences: WantedPreferences): TrackCountMode =>
   preferences.minimumTrackCount === null ? "any" : "custom";
 
@@ -240,6 +242,7 @@ export function MissingShelfWorkspace({
     trackCountModeFor(defaultPreferences),
   );
   const [trackCountError, setTrackCountError] = useState<string | null>(null);
+  const [trackCountNotice, setTrackCountNotice] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [addedCount, setAddedCount] = useState(0);
   const [openRadarAlbumId, setOpenRadarAlbumId] = useState<string | null>(null);
@@ -296,6 +299,7 @@ export function MissingShelfWorkspace({
     setPreferences(defaultPreferences);
     setTrackCountMode(trackCountModeFor(defaultPreferences));
     setTrackCountError(null);
+    setTrackCountNotice(null);
     setAddedCount(0);
     setReleaseFilter("studio");
     setDecade("all");
@@ -309,6 +313,7 @@ export function MissingShelfWorkspace({
       setTrackCountMode(trackCountModeFor(defaultPreferences));
     }
     setTrackCountError(null);
+    setTrackCountNotice(null);
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(album.id)) next.delete(album.id);
@@ -322,20 +327,32 @@ export function MissingShelfWorkspace({
     if (!selectedArtist || selectedAlbums.length === 0) return;
     setAdding(true);
     setTrackCountError(null);
+    setTrackCountNotice(null);
     try {
       const minimumTrackCounts: Record<string, number> = {};
+      const fallbackAlbums: string[] = [];
       if (trackCountMode === "musicbrainz") {
         for (const album of selectedAlbums) {
-          const officialTrackCount = await onResolveOfficialTrackCount(album);
-          if (officialTrackCount === null) {
-            throw new Error(`MusicBrainz has no official track count for ${album.title}.`);
-          }
-          minimumTrackCounts[album.id] = officialTrackCount;
+          const officialTrackCount = await onResolveOfficialTrackCount(album).catch(() => null);
+          if (officialTrackCount === null) fallbackAlbums.push(album.title);
+          minimumTrackCounts[album.id] = officialTrackCount
+            ?? defaultPreferences.minimumTrackCount
+            ?? DEFAULT_TRACK_COUNT_FALLBACK;
         }
       }
       await onAddMany(selectedArtist.name, selectedAlbums, preferences, minimumTrackCounts);
       setAddedCount(selectedAlbums.length);
       setSelectedIds(new Set());
+      if (fallbackAlbums.length > 0) {
+        const fallbackTrackCount = defaultPreferences.minimumTrackCount
+          ?? DEFAULT_TRACK_COUNT_FALLBACK;
+        const subject = fallbackAlbums.length === 1
+          ? fallbackAlbums[0]
+          : `${fallbackAlbums.length} selected albums`;
+        setTrackCountNotice(
+          `MusicBrainz has no official track count for ${subject}. Added ${fallbackAlbums.length === 1 ? "it" : "them"} with the default ${fallbackTrackCount}-track minimum.`,
+        );
+      }
     } catch (cause) {
       setTrackCountError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -419,7 +436,7 @@ export function MissingShelfWorkspace({
                 ))}
               </div>
               <label><span>Era</span><select aria-label="Release year" value={decade} onChange={(event) => setDecade(event.target.value)}><option value="all">All years</option>{decades.map((value) => <option value={value} key={value}>{value}s</option>)}</select></label>
-              <button type="button" className="missing-select-all" disabled={selectable.length === 0} onClick={() => { setPreferences(defaultPreferences); setTrackCountMode(trackCountModeFor(defaultPreferences)); setTrackCountError(null); setSelectedIds(new Set(selectable.map((album) => album.id))); }}><Check size={14} /> Select visible missing</button>
+              <button type="button" className="missing-select-all" disabled={selectable.length === 0} onClick={() => { setPreferences(defaultPreferences); setTrackCountMode(trackCountModeFor(defaultPreferences)); setTrackCountError(null); setTrackCountNotice(null); setSelectedIds(new Set(selectable.map((album) => album.id))); }}><Check size={14} /> Select visible missing</button>
               <button type="button" className="shelf-radar-scan-visible" disabled={!online || !radarReady || radarScanning || selectable.length === 0} title={!online ? "Reconnect before scanning the network" : selectable.length > 12 ? "Scans the first 12 visible missing albums" : "Scan visible missing albums"} onClick={() => scan(selectable)}><Broadcast size={14} /> Scan visible{selectable.length > 12 ? " 12" : ""}</button>
             </div>
 
@@ -438,11 +455,12 @@ export function MissingShelfWorkspace({
                 {!addedCount ? <>
                   <label><span>Format</span><select aria-label="Bulk format preference" value={preferences.formatPreference} onChange={(event) => setPreferences((current) => ({ ...current, formatPreference: event.target.value as WantedFormatPreference }))}><option value="preferLossless">Prefer FLAC</option><option value="losslessOnly">Lossless only</option><option value="mp3Only">MP3 only</option><option value="any">Any format</option></select></label>
                   <label><span>Lossy floor</span><select aria-label="Bulk minimum bitrate" disabled={preferences.formatPreference === "losslessOnly"} value={preferences.minimumBitrateKbps ?? 0} onChange={(event) => setPreferences((current) => ({ ...current, minimumBitrateKbps: Number(event.target.value) ? Number(event.target.value) as 128 | 192 | 256 | 320 : null }))}><option value={320}>320 kbps</option><option value={256}>256 kbps</option><option value={192}>192 kbps</option><option value={128}>128 kbps</option><option value={0}>Any</option></select></label>
-                  <label className="missing-track-count"><span>Tracks</span><span className={`missing-track-count-control is-${trackCountMode}`}><select aria-label="Bulk track count mode" value={trackCountMode} onChange={(event) => { const mode = event.target.value as TrackCountMode; setTrackCountMode(mode); setTrackCountError(null); if (mode !== "custom") setPreferences((current) => ({ ...current, minimumTrackCount: null })); }}><option value="any">Any</option><option value="custom">Custom</option><option value="musicbrainz">MusicBrainz</option></select>{trackCountMode === "custom" ? <input aria-label="Bulk custom track count" type="number" min={1} max={250} placeholder="#" value={preferences.minimumTrackCount ?? ""} onChange={(event) => { setTrackCountError(null); setPreferences((current) => ({ ...current, minimumTrackCount: event.target.value ? Number(event.target.value) : null })); }} /> : null}</span></label>
+                  <label className="missing-track-count"><span>Tracks</span><span className={`missing-track-count-control is-${trackCountMode}`}><select aria-label="Bulk track count mode" value={trackCountMode} onChange={(event) => { const mode = event.target.value as TrackCountMode; setTrackCountMode(mode); setTrackCountError(null); setTrackCountNotice(null); if (mode !== "custom") setPreferences((current) => ({ ...current, minimumTrackCount: null })); }}><option value="any">Any</option><option value="custom">Custom</option><option value="musicbrainz">MusicBrainz</option></select>{trackCountMode === "custom" ? <input aria-label="Bulk custom track count" type="number" min={1} max={250} placeholder="#" value={preferences.minimumTrackCount ?? ""} onChange={(event) => { setTrackCountError(null); setTrackCountNotice(null); setPreferences((current) => ({ ...current, minimumTrackCount: event.target.value ? Number(event.target.value) : null })); }} /> : null}</span></label>
                   <button type="button" className="missing-scan-selected" disabled={!online || radarScanning} onClick={() => scan(selectedAlbums)}><Broadcast size={15} /> Scan {Math.min(selectedAlbums.length, 12)}</button>
                   <button type="button" className="missing-add-wanted" disabled={adding || (trackCountMode === "custom" && (preferences.minimumTrackCount === null || !Number.isInteger(preferences.minimumTrackCount) || preferences.minimumTrackCount < 1 || preferences.minimumTrackCount > 250))} onClick={() => void addSelected()}><Plus size={15} weight="bold" />{adding ? trackCountMode === "musicbrainz" ? "Reading MusicBrainz…" : "Adding…" : `Add ${selectedAlbums.length} to Wanted`}</button>
-                  {trackCountError ? <p className="missing-track-count-error" role="alert">{trackCountError}</p> : null}
                 </> : null}
+                {trackCountNotice ? <p className="missing-track-count-notice" role="status">{trackCountNotice}</p> : null}
+                {trackCountError ? <p className="missing-track-count-error" role="alert">{trackCountError}</p> : null}
               </section>
             ) : null}
 

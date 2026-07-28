@@ -5,6 +5,26 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.51] - 2026-07-28
+
+### Changed
+
+- MusicBrainz track-count lookup is now best-effort per selected album while
+  the final Missing Shelf handoff remains one atomic Wanted-store write.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.51`.
+
+### Fixed
+
+- An absent official MusicBrainz tracklist or a failed lookup no longer blocks
+  the entire Missing Shelf batch. The affected album uses the saved default
+  track minimum, or a safe 10-track minimum when the default accepts any count.
+- A persistent amber completion notice names a single affected album—or reports
+  the affected count for larger batches—so the fallback is visible without
+  presenting a failed add state.
+- Frontend and rendered interaction coverage protects the fallback handoff,
+  successful completion message, and resulting `10+ tracks` Wanted profile.
+
 ## [0.0.50] - 2026-07-28
 
 ### Added

@@ -448,7 +448,7 @@ function App() {
         ["d58266a8-e00c-3a64-b7e1-549e28f772ee", 11],
         ["2dca8523-24e2-3a51-8bb4-038e979e689b", 13],
         ["233dec0f-611d-36c6-8675-90fb53707adb", 14],
-      ]).get(album.id) ?? 10;
+      ]).get(album.id) ?? null;
     }
     return await invoke<number | null>("album_official_track_count", {
       releaseGroupId: album.id,

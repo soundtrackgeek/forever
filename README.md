@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.50` adds per-album MusicBrainz track
-> targets to Missing Shelf and restores the Windows title-bar close action.
+> **Status:** pre-alpha. Version `0.0.51` keeps Missing Shelf batches moving
+> when MusicBrainz cannot provide an official track count.
 
-If `0.0.16` is installed, download and run the latest `0.0.50` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.51` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -94,7 +94,8 @@ configuration and transfers.
   collection gaps, and an atomic bulk handoff of up to 100 missing releases to
   Wanted using one shared Smart Match profile without duplicate watches;
   track matching can accept any count, use a custom minimum, or resolve each
-  album's official MusicBrainz count
+  album's official MusicBrainz count, with a visible saved-default or 10-track
+  fallback when that metadata is unavailable
 - **Shelf Radar** scans one missing album, up to 12 selected albums, or up to 12
   visible gaps without replacing the main Search workspace; scans are explicit,
   sequential, cancellable, and held only for the current app session
@@ -341,7 +342,9 @@ minimum for the batch, or read the earliest official edition from
 **MusicBrainz** and assign its count separately to each selected album. Then use
 **Add to Wanted**. The bulk action deduplicates existing watches and writes once
 to Forever's separate `wanted.json`; the Music Library database remains
-untouched.
+untouched. If an album has no official tracklist or the lookup is unavailable,
+Forever still adds it using your saved default track minimum—or 10 tracks when
+the default accepts any count—and identifies the fallback in the completed bar.
 
 Use **Scan visible** to check up to the first 12 visible missing albums, or
 select specific gaps and use **Scan selected**. Shelf Radar sends one search at

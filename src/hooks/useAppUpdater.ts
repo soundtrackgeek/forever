@@ -35,18 +35,18 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.49",
-  version: "0.0.50",
-  body: `## What’s new in Forever 0.0.50
-
-### Added
-
-- Missing Shelf track matching now offers Any, a custom minimum, or the official MusicBrainz count.
-- MusicBrainz mode applies the appropriate official track count to each album in a batch.
+  currentVersion: "0.0.50",
+  version: "0.0.51",
+  body: `## What’s new in Forever 0.0.51
 
 ### Fixed
 
-- The Windows title-bar X closes Forever again while preserving Safe Passage when transfers are active.`,
+- A missing or unavailable MusicBrainz track count no longer blocks a Missing Shelf batch.
+- Forever adds the affected album with the saved default track minimum, or 10 tracks when that default is Any, and explains the fallback in place.
+
+### Changed
+
+- MusicBrainz track-count lookup remains best-effort for every album while the Wanted write stays atomic.`,
   date: "2026-07-28",
 };
 

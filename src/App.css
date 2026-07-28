@@ -11200,6 +11200,17 @@ form.settings-panel {
   font-size: 7px;
 }
 
+.missing-track-count-notice {
+  grid-column: 1 / -1;
+  margin: -4px 0 0;
+  color: #d9aa59;
+  font-size: 7px;
+}
+
+.missing-bulk-bar.is-complete .missing-track-count-notice {
+  margin: -6px 0 0 25px;
+}
+
 .missing-add-wanted {
   display: inline-flex;
   min-height: 34px;

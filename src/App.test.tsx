@@ -382,6 +382,29 @@ describe("Forever shell", () => {
     expect(within(slang).getByText("Lossless only · 11+ tracks")).toBeInTheDocument();
   });
 
+  it("adds a MusicBrainz batch with the default track minimum when a count is unavailable", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Missing shelf" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select Songs From the Sparkle Lounge" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Bulk track count mode" }), {
+      target: { value: "musicbrainz" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 to Wanted" }));
+
+    expect(await screen.findByText("1 added to Wanted")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "MusicBrainz has no official track count for Songs From the Sparkle Lounge. Added it with the default 10-track minimum.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Wanted 4" }));
+    const fallbackAlbum = screen.getByText("Songs From the Sparkle Lounge").closest("article") as HTMLElement;
+    expect(within(fallbackAlbum).getByText("Prefer FLAC · 320+ kbps · 10+ tracks")).toBeInTheDocument();
+  });
+
   it("scans one missing album, previews sources, downloads the best copy, and starts a watch", async () => {
     render(<App />);
 
@@ -879,17 +902,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.50 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.51 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Missing Shelf track matching now offers Any, a custom minimum, or the official MusicBrainz count.",
+        "A missing or unavailable MusicBrainz track count no longer blocks a Missing Shelf batch.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "The Windows title-bar X closes Forever again while preserving Safe Passage when transfers are active.",
+        "Forever adds the affected album with the saved default track minimum, or 10 tracks when that default is Any, and explains the fallback in place.",
       ),
     ).toBeInTheDocument();
     expect(
