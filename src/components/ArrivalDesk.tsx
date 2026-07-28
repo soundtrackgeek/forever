@@ -5,9 +5,11 @@ import {
   CheckCircle,
   FolderOpen,
   LockKey,
+  MagnifyingGlass,
   Record,
   ShieldCheck,
   Trash,
+  Waveform,
   WarningCircle,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
@@ -22,6 +24,9 @@ type ArrivalDeskProps = {
   onRefreshArchive: () => Promise<unknown>;
   onRevealRelease: (releaseId: string) => Promise<unknown>;
   onVerifyRelease: (releaseId: string) => Promise<unknown>;
+  onSoundcheckRelease: (releaseId: string, deep: boolean) => Promise<unknown>;
+  onFindAlternatives: (releaseId: string, title: string) => Promise<unknown>;
+  soundcheckEnabled: boolean;
   onSetReleaseFiled: (releaseId: string, filed: boolean) => Promise<unknown>;
   onClearReleaseHistory: (releaseIds: string[]) => Promise<unknown>;
   onOpenTransfer: (groupId: string) => void;
@@ -57,6 +62,19 @@ const relativeTime = (timestamp: number) => {
 const stateCount = (arrivals: Arrival[], state: ArrivalState) =>
   arrivals.filter((arrival) => arrival.state === state).length;
 
+const soundcheckCopy = {
+  pending: { label: "Awaiting Soundcheck", detail: "Run a quick scan to inspect the audio" },
+  passed: { label: "Soundcheck passed", detail: "Headers, duration, and sequence look right" },
+  review: { label: "Review suggested", detail: "Audio is readable, with notes worth checking" },
+  failed: { label: "Soundcheck failed", detail: "One or more audio files need attention" },
+} as const;
+
+const formatDuration = (seconds: number | null) => {
+  if (!seconds) return "duration unknown";
+  const rounded = Math.round(seconds);
+  return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, "0")}`;
+};
+
 export function ArrivalDesk({
   groups,
   archiveOwnedReleaseIds,
@@ -64,6 +82,9 @@ export function ArrivalDesk({
   onRefreshArchive,
   onRevealRelease,
   onVerifyRelease,
+  onSoundcheckRelease,
+  onFindAlternatives,
+  soundcheckEnabled,
   onSetReleaseFiled,
   onClearReleaseHistory,
   onOpenTransfer,
@@ -107,6 +128,7 @@ export function ArrivalDesk({
         </div>
         <div className="arrival-hero-actions">
           <span><LockKey size={13} /> Music Library · read-only</span>
+          <span className={soundcheckEnabled ? "is-soundcheck-live" : ""}><Waveform size={13} /> Soundcheck · {soundcheckEnabled ? "automatic" : "manual"}</span>
           <button type="button" disabled={refreshing} onClick={() => void perform("refresh", onRefreshArchive)}>
             <ArrowsClockwise className={refreshing ? "is-spinning" : ""} size={15} />
             {refreshing ? "Reconciling…" : "Reconcile now"}
@@ -152,6 +174,7 @@ export function ArrivalDesk({
           const releaseId = arrival.group.releaseId;
           const actionBusy = Boolean(busy && busy.startsWith(arrival.group.id));
           const copy = stateCopy[arrival.state];
+          const signal = soundcheckCopy[arrival.soundcheck.state];
           return (
             <article className={`arrival-row is-${arrival.state}`} key={arrival.group.id}>
               <div className="arrival-row-art"><Record size={28} weight="thin" /><i /></div>
@@ -160,10 +183,10 @@ export function ArrivalDesk({
                 <strong>{release.album}</strong>
                 <p>from {arrival.group.username} · completed {relativeTime(arrival.group.updatedAtMs)}</p>
               </div>
-              <div className="arrival-row-files">
-                <small>RELEASE</small>
-                <strong>{arrival.audioCount} audio · {arrival.group.transfers.length} files</strong>
-                <p>{formatAlbumBytes(arrival.group.sizeBytes)} · {arrival.verifiedCount} verified</p>
+              <div className={`arrival-row-files is-${arrival.soundcheck.state}`}>
+                <small>SOUND CHECK</small>
+                <strong><Waveform size={13} /> {signal.label}</strong>
+                <p>{arrival.soundcheck.checkedCount}/{arrival.audioCount} scanned · {formatAlbumBytes(arrival.group.sizeBytes)}</p>
               </div>
               <div className="arrival-row-state">
                 <small>JOURNEY STATE</small>
@@ -185,6 +208,37 @@ export function ArrivalDesk({
                 <button type="button" onClick={() => onOpenTransfer(arrival.group.id)}><ArrowSquareOut size={15} /> Details</button>
                 {releaseId ? <button type="button" className="is-icon" aria-label={`Remove ${release.album} from Arrival Desk history`} title="Remove completed transfer history" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-remove`, () => onClearReleaseHistory([releaseId]))}><Trash size={15} /></button> : null}
               </div>
+              <details className={`arrival-soundcheck is-${arrival.soundcheck.state}`}>
+                <summary>
+                  <span><Waveform size={14} /><strong>{signal.label}</strong><small>{arrival.soundcheck.deep ? "Deep scan" : arrival.soundcheck.checkedCount ? "Quick scan" : "Not scanned"} · {arrival.audioCount} audio tracks{arrival.soundcheck.expectedTrackCount ? ` · ${arrival.soundcheck.expectedTrackCount} expected` : ""}</small></span>
+                  <span>View track evidence</span>
+                </summary>
+                <div className="arrival-soundcheck-body">
+                  {arrival.soundcheck.issues.length ? (
+                    <div className="arrival-soundcheck-release-issues">
+                      {arrival.soundcheck.issues.map((issue) => <span key={issue}><WarningCircle size={13} weight="fill" />{issue}</span>)}
+                    </div>
+                  ) : null}
+                  <div className="arrival-soundcheck-tracks">
+                    {arrival.soundcheck.audio.map((transfer) => {
+                      const result = transfer.soundcheck;
+                      return (
+                        <div key={transfer.id} className={`is-${result?.status ?? "pending"}`}>
+                          <span><strong>{transfer.title}</strong><small>{result ? `${result.codec ?? result.container ?? "Audio"} · ${formatDuration(result.durationSeconds)}${result.bitrateKbps ? ` · ${result.bitrateKbps} kbps` : ""}${result.sampleRate ? ` · ${(result.sampleRate / 1000).toFixed(1)} kHz` : ""}` : "Not scanned yet"}</small></span>
+                          <span>{result?.issues.length ? result.issues.join(" · ") : result ? result.status === "passed" ? "Passed" : "Review" : "Pending"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {releaseId ? (
+                    <div className="arrival-soundcheck-actions">
+                      <button type="button" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-quick`, () => onSoundcheckRelease(releaseId, false))}><Waveform size={14} /> {actionBusy ? "Scanning…" : "Quick scan"}</button>
+                      <button type="button" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-deep`, () => onSoundcheckRelease(releaseId, true))}><ShieldCheck size={14} /> {actionBusy ? "Scanning…" : "Deep scan"}</button>
+                      {arrival.soundcheck.state === "failed" ? <button type="button" className="is-replacement" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-find`, async () => { await onFindAlternatives(releaseId, arrival.group.title); onOpenTransfer(arrival.group.id); })}><MagnifyingGlass size={14} /> Find replacement</button> : null}
+                    </div>
+                  ) : null}
+                </div>
+              </details>
             </article>
           );
         })}

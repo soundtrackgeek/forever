@@ -746,6 +746,13 @@ impl ConnectionManager {
         Ok(snapshot)
     }
 
+    pub fn set_soundcheck_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        Ok(self.transfers.set_soundcheck_enabled(enabled)?)
+    }
+
     pub fn current_local_shares(&self) -> LocalSharesSnapshot {
         self.local_shares.snapshot()
     }
@@ -1222,6 +1229,14 @@ impl ConnectionManager {
 
     pub fn verify_completed(&self) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
         Ok(self.transfers.verify_completed()?)
+    }
+
+    pub fn soundcheck_release(
+        &self,
+        release_id: &str,
+        deep: bool,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        Ok(self.transfers.soundcheck_release(release_id, deep)?)
     }
 
     pub fn retry_release_issues(

@@ -13,6 +13,7 @@ mod search;
 mod service;
 mod settings;
 mod shares;
+mod soundcheck;
 mod uploads;
 mod wanted;
 
@@ -504,6 +505,16 @@ pub async fn transfer_set_relay_suggestion_minutes(
 }
 
 #[tauri::command]
+pub async fn transfer_set_soundcheck_enabled(
+    manager: State<'_, ConnectionManager>,
+    enabled: bool,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .set_soundcheck_enabled(enabled)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn transfer_enqueue(
     manager: State<'_, ConnectionManager>,
     request: downloads::EnqueueTransferRequest,
@@ -650,6 +661,19 @@ pub async fn transfers_verify_completed(
 ) -> Result<downloads::TransferQueueSnapshot, String> {
     manager
         .verify_completed()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn transfer_soundcheck_release(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+    deep: bool,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.soundcheck_release(&release_id, deep))
+        .await
+        .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
 }
 

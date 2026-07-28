@@ -1,3 +1,4 @@
+use super::soundcheck::{inspect_file, SoundcheckResult, SoundcheckStatus};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -60,6 +61,10 @@ fn default_max_concurrent_downloads() -> u8 {
 
 fn default_relay_suggestion_minutes() -> u32 {
     DEFAULT_RELAY_SUGGESTION_MINUTES
+}
+
+fn default_soundcheck_enabled() -> bool {
+    true
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -125,6 +130,8 @@ pub struct TransferSnapshot {
     pub file_index: Option<u32>,
     #[serde(default)]
     pub file_count: Option<u32>,
+    #[serde(default)]
+    pub expected_track_count: Option<u32>,
     pub title: String,
     pub username: String,
     pub remote_filename: String,
@@ -151,6 +158,8 @@ pub struct TransferSnapshot {
     #[serde(default)]
     pub filed_at_ms: Option<u64>,
     #[serde(default)]
+    pub soundcheck: Option<SoundcheckResult>,
+    #[serde(default)]
     pub alternative_sources: Vec<ReleaseAlternativeSource>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
@@ -167,6 +176,7 @@ pub struct TransferQueueSnapshot {
     pub active_count: usize,
     pub max_concurrent_downloads: u8,
     pub relay_suggestion_minutes: u32,
+    pub soundcheck_enabled: bool,
     pub safety_state: TransferSafetyState,
 }
 
@@ -195,6 +205,8 @@ pub struct EnqueueReleaseRequest {
     pub remote_folder: String,
     pub files: Vec<EnqueueReleaseFileRequest>,
     #[serde(default)]
+    pub expected_track_count: Option<u32>,
+    #[serde(default)]
     pub alternatives: Vec<ReleaseAlternativeSource>,
 }
 
@@ -222,6 +234,8 @@ struct TransferStore {
     max_concurrent_downloads: u8,
     #[serde(default = "default_relay_suggestion_minutes")]
     relay_suggestion_minutes: u32,
+    #[serde(default = "default_soundcheck_enabled")]
+    soundcheck_enabled: bool,
     transfers: Vec<TransferSnapshot>,
 }
 
@@ -232,6 +246,7 @@ pub struct TransferHub {
     transfers: Arc<RwLock<Vec<TransferSnapshot>>>,
     max_concurrent_downloads: Arc<AtomicU8>,
     relay_suggestion_minutes: Arc<AtomicU32>,
+    soundcheck_enabled: Arc<AtomicBool>,
     safety_state: Arc<AtomicU8>,
     tasks: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     next_id: Arc<AtomicU64>,
@@ -243,6 +258,13 @@ impl TransferHub {
         let mut transfers = store.transfers;
         for transfer in &mut transfers {
             reconcile_transfer_after_restart(transfer);
+            if store.soundcheck_enabled
+                && transfer.status == TransferStatus::Completed
+                && transfer.verification_status == VerificationStatus::Verified
+                && transfer.soundcheck.is_none()
+            {
+                refresh_soundcheck(transfer, false);
+            }
         }
 
         let hub = Self {
@@ -251,6 +273,7 @@ impl TransferHub {
             transfers: Arc::new(RwLock::new(transfers)),
             max_concurrent_downloads: Arc::new(AtomicU8::new(store.max_concurrent_downloads)),
             relay_suggestion_minutes: Arc::new(AtomicU32::new(store.relay_suggestion_minutes)),
+            soundcheck_enabled: Arc::new(AtomicBool::new(store.soundcheck_enabled)),
             safety_state: Arc::new(AtomicU8::new(TransferSafetyState::Running.as_u8())),
             tasks: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(AtomicU64::new(timestamp_ms())),
@@ -274,6 +297,7 @@ impl TransferHub {
             active_count,
             max_concurrent_downloads: self.max_concurrent_downloads.load(Ordering::SeqCst),
             relay_suggestion_minutes: self.relay_suggestion_minutes.load(Ordering::SeqCst),
+            soundcheck_enabled: self.soundcheck_enabled.load(Ordering::SeqCst),
             safety_state: self.safety_state(),
         }
     }
@@ -381,6 +405,28 @@ impl TransferHub {
         Ok(self.snapshot())
     }
 
+    pub fn set_soundcheck_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        self.soundcheck_enabled.store(enabled, Ordering::SeqCst);
+        if enabled {
+            let mut transfers = self
+                .transfers
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            for transfer in transfers.iter_mut().filter(|transfer| {
+                transfer.status == TransferStatus::Completed
+                    && transfer.verification_status == VerificationStatus::Verified
+                    && transfer.soundcheck.is_none()
+            }) {
+                refresh_soundcheck(transfer, false);
+            }
+        }
+        self.persist_and_publish()?;
+        Ok(self.snapshot())
+    }
+
     pub fn enqueue(
         &self,
         request: EnqueueTransferRequest,
@@ -405,6 +451,7 @@ impl TransferHub {
             release_folder: None,
             file_index: None,
             file_count: None,
+            expected_track_count: None,
             title: request.title.trim().to_owned(),
             username: request.username,
             remote_filename: normalize_remote_filename(&request.remote_filename),
@@ -423,6 +470,7 @@ impl TransferHub {
             verification_message: None,
             verified_at_ms: None,
             filed_at_ms: None,
+            soundcheck: None,
             alternative_sources: Vec::new(),
             created_at_ms: now,
             updated_at_ms: now,
@@ -478,6 +526,7 @@ impl TransferHub {
                 release_folder: Some(release_directory.to_string_lossy().into_owned()),
                 file_index: Some(u32::try_from(index + 1).unwrap_or(u32::MAX)),
                 file_count: Some(file_count),
+                expected_track_count: request.expected_track_count,
                 title: file.title.trim().to_owned(),
                 username: request.username.clone(),
                 remote_filename: normalize_remote_filename(&file.remote_filename),
@@ -496,6 +545,7 @@ impl TransferHub {
                 verification_message: None,
                 verified_at_ms: None,
                 filed_at_ms: None,
+                soundcheck: None,
                 alternative_sources: alternatives.clone(),
                 created_at_ms: now.saturating_add(index as u64),
                 updated_at_ms: now,
@@ -553,6 +603,7 @@ impl TransferHub {
                     transfer.verification_status = VerificationStatus::Pending;
                     transfer.verification_message = None;
                     transfer.verified_at_ms = None;
+                    transfer.soundcheck = None;
                     transfer.connection_token = None;
                     transfer.transfer_token = None;
                     transfer.updated_at_ms = timestamp_ms();
@@ -608,6 +659,7 @@ impl TransferHub {
                 transfer.verification_status = VerificationStatus::Pending;
                 transfer.verification_message = None;
                 transfer.verified_at_ms = None;
+                transfer.soundcheck = None;
                 reset_runtime_state(transfer);
             }
         })
@@ -700,6 +752,38 @@ impl TransferHub {
         Ok(self.snapshot())
     }
 
+    pub fn soundcheck_release(
+        &self,
+        release_id: &str,
+        deep: bool,
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        let mut found = false;
+        let mut completed = true;
+        self.mutate(|transfers| {
+            for transfer in transfers
+                .iter_mut()
+                .filter(|transfer| transfer.release_id.as_deref() == Some(release_id))
+            {
+                found = true;
+                if transfer.status != TransferStatus::Completed {
+                    completed = false;
+                    continue;
+                }
+                refresh_verification(transfer);
+                if transfer.verification_status == VerificationStatus::Verified {
+                    refresh_soundcheck(transfer, deep);
+                }
+            }
+        })?;
+        if !found {
+            return Err(TransferError::ReleaseNotFound);
+        }
+        if !completed {
+            return Err(TransferError::ReleaseNotCompleted);
+        }
+        Ok(self.snapshot())
+    }
+
     pub fn retry_release_issues(
         &self,
         release_id: &str,
@@ -735,6 +819,7 @@ impl TransferHub {
                     transfer.verification_status = VerificationStatus::Pending;
                     transfer.verification_message = None;
                     transfer.verified_at_ms = None;
+                    transfer.soundcheck = None;
                     transfer.connection_token = None;
                     transfer.transfer_token = None;
                     transfer.updated_at_ms = timestamp_ms();
@@ -815,9 +900,15 @@ impl TransferHub {
         let mut switched = 0;
         for index in &release_indices {
             let transfer = &mut transfers[*index];
+            let mut failed_soundcheck = false;
             if transfer.status == TransferStatus::Completed {
                 refresh_verification(transfer);
-                if transfer.verification_status != VerificationStatus::Missing {
+                failed_soundcheck = transfer
+                    .soundcheck
+                    .as_ref()
+                    .is_some_and(|result| result.status == SoundcheckStatus::Failed);
+                if transfer.verification_status != VerificationStatus::Missing && !failed_soundcheck
+                {
                     continue;
                 }
             }
@@ -825,6 +916,9 @@ impl TransferHub {
             else {
                 continue;
             };
+            if failed_soundcheck {
+                preserve_rejected_file(Path::new(&transfer.local_path))?;
+            }
             if !exact_mirror {
                 let partial = partial_path(Path::new(&transfer.local_path));
                 if partial.exists() {
@@ -852,6 +946,7 @@ impl TransferHub {
             transfer.verification_status = VerificationStatus::Pending;
             transfer.verification_message = None;
             transfer.verified_at_ms = None;
+            transfer.soundcheck = None;
             transfer.updated_at_ms = timestamp_ms();
             switched += 1;
         }
@@ -898,7 +993,11 @@ impl TransferHub {
             }
             let compatible = release.iter().any(|transfer| {
                 (transfer.status != TransferStatus::Completed
-                    || transfer.verification_status == VerificationStatus::Missing)
+                    || transfer.verification_status == VerificationStatus::Missing
+                    || transfer
+                        .soundcheck
+                        .as_ref()
+                        .is_some_and(|result| result.status == SoundcheckStatus::Failed))
                     && matching_alternative_file(transfer, &source).is_some()
             });
             if !compatible {
@@ -1258,6 +1357,9 @@ impl TransferHub {
                 transfer.transfer_token = None;
                 transfer.updated_at_ms = timestamp_ms();
                 refresh_verification(transfer);
+                if self.soundcheck_enabled.load(Ordering::SeqCst) {
+                    refresh_soundcheck(transfer, false);
+                }
             }
         })?;
         if !found {
@@ -1441,6 +1543,7 @@ impl TransferHub {
             version: STORE_VERSION,
             max_concurrent_downloads: self.max_concurrent_downloads.load(Ordering::SeqCst),
             relay_suggestion_minutes: self.relay_suggestion_minutes.load(Ordering::SeqCst),
+            soundcheck_enabled: self.soundcheck_enabled.load(Ordering::SeqCst),
             transfers: self
                 .transfers
                 .read()
@@ -1609,6 +1712,9 @@ fn validate_release_request(request: &EnqueueReleaseRequest) -> Result<(), Trans
         || request.remote_folder.trim().is_empty()
         || request.files.is_empty()
         || request.files.len() > 5_000
+        || request
+            .expected_track_count
+            .is_some_and(|count| count == 0 || count > 5_000)
         || request.files.iter().any(|file| {
             file.title.trim().is_empty()
                 || file.remote_filename.trim().is_empty()
@@ -1776,6 +1882,7 @@ fn load_store(path: &Path) -> Result<TransferStore, TransferError> {
             version: STORE_VERSION,
             max_concurrent_downloads: DEFAULT_MAX_CONCURRENT_DOWNLOADS,
             relay_suggestion_minutes: DEFAULT_RELAY_SUGGESTION_MINUTES,
+            soundcheck_enabled: true,
             transfers: Vec::new(),
         });
     }
@@ -1807,6 +1914,7 @@ fn refresh_verification(transfer: &mut TransferSnapshot) {
         transfer.verification_status = VerificationStatus::Pending;
         transfer.verification_message = None;
         transfer.verified_at_ms = None;
+        transfer.soundcheck = None;
         return;
     }
     let path = Path::new(&transfer.local_path);
@@ -1824,12 +1932,14 @@ fn refresh_verification(transfer: &mut TransferSnapshot) {
                 metadata.len()
             ));
             transfer.verified_at_ms = Some(timestamp_ms());
+            transfer.soundcheck = None;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             transfer.verification_status = VerificationStatus::Missing;
             transfer.verification_message =
                 Some("The completed file is no longer present in the download folder.".to_owned());
             transfer.verified_at_ms = Some(timestamp_ms());
+            transfer.soundcheck = None;
         }
         Err(error) => {
             transfer.verification_status = VerificationStatus::SizeMismatch;
@@ -1837,8 +1947,19 @@ fn refresh_verification(transfer: &mut TransferSnapshot) {
                 "Forever could not inspect the completed file: {error}"
             ));
             transfer.verified_at_ms = Some(timestamp_ms());
+            transfer.soundcheck = None;
         }
     }
+}
+
+fn refresh_soundcheck(transfer: &mut TransferSnapshot, deep: bool) {
+    transfer.soundcheck = if transfer.status == TransferStatus::Completed
+        && transfer.verification_status == VerificationStatus::Verified
+    {
+        inspect_file(Path::new(&transfer.local_path), deep, timestamp_ms())
+    } else {
+        None
+    };
 }
 
 fn automatic_retry_delay_ms(attempt: u32) -> u64 {
@@ -1897,6 +2018,23 @@ fn partial_path(final_path: &Path) -> PathBuf {
     let mut value = final_path.as_os_str().to_os_string();
     value.push(".part");
     PathBuf::from(value)
+}
+
+fn preserve_rejected_file(path: &Path) -> Result<(), TransferError> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut candidate = PathBuf::from(format!("{}.soundcheck-rejected", path.to_string_lossy()));
+    let mut suffix = 2_u32;
+    while candidate.exists() {
+        candidate = PathBuf::from(format!(
+            "{}.soundcheck-rejected-{suffix}",
+            path.to_string_lossy()
+        ));
+        suffix = suffix.saturating_add(1);
+    }
+    fs::rename(path, candidate)?;
+    Ok(())
 }
 
 fn unique_target_path(
@@ -2122,6 +2260,7 @@ mod tests {
             release_folder: Some(format!("C:\\Downloads\\{release_id}")),
             file_index: Some(file_index),
             file_count: Some(2),
+            expected_track_count: Some(2),
             title: remote_filename.to_owned(),
             username: username.to_owned(),
             remote_filename: remote_filename.to_owned(),
@@ -2140,6 +2279,7 @@ mod tests {
             verification_message: None,
             verified_at_ms: None,
             filed_at_ms: None,
+            soundcheck: None,
             alternative_sources: Vec::new(),
             created_at_ms: u64::from(file_index),
             updated_at_ms: u64::from(file_index),
@@ -2167,6 +2307,7 @@ mod tests {
             release_folder: None,
             file_index: None,
             file_count: None,
+            expected_track_count: None,
             title: "Track".to_owned(),
             username: "peer".to_owned(),
             remote_filename: "Track.flac".to_owned(),
@@ -2189,6 +2330,7 @@ mod tests {
             verification_message: None,
             verified_at_ms: None,
             filed_at_ms: None,
+            soundcheck: None,
             alternative_sources: Vec::new(),
             created_at_ms: 0,
             updated_at_ms: 0,
@@ -2199,6 +2341,25 @@ mod tests {
         assert_eq!(
             unique_target_path(directory.path(), "Track.flac", &transfers),
             directory.path().join("Track (3).flac")
+        );
+    }
+
+    #[test]
+    fn rejected_soundcheck_files_are_preserved_without_overwriting_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("Track.flac");
+        fs::write(&path, b"first rejected payload").unwrap();
+        preserve_rejected_file(&path).unwrap();
+        assert_eq!(
+            fs::read(directory.path().join("Track.flac.soundcheck-rejected")).unwrap(),
+            b"first rejected payload"
+        );
+
+        fs::write(&path, b"second rejected payload").unwrap();
+        preserve_rejected_file(&path).unwrap();
+        assert_eq!(
+            fs::read(directory.path().join("Track.flac.soundcheck-rejected-2")).unwrap(),
+            b"second rejected payload"
         );
     }
 
@@ -2214,6 +2375,7 @@ mod tests {
             release_folder: None,
             file_index: None,
             file_count: None,
+            expected_track_count: None,
             title: "Track.flac".to_owned(),
             username: "peer".to_owned(),
             remote_filename: "Music\\Track.flac".to_owned(),
@@ -2232,6 +2394,7 @@ mod tests {
             verification_message: None,
             verified_at_ms: None,
             filed_at_ms: None,
+            soundcheck: None,
             alternative_sources: Vec::new(),
             created_at_ms: 1,
             updated_at_ms: 2,
@@ -2246,6 +2409,7 @@ mod tests {
             version: STORE_VERSION,
             max_concurrent_downloads: DEFAULT_MAX_CONCURRENT_DOWNLOADS,
             relay_suggestion_minutes: DEFAULT_RELAY_SUGGESTION_MINUTES,
+            soundcheck_enabled: true,
             transfers: vec![transfer],
         })
         .unwrap();
@@ -2362,6 +2526,7 @@ mod tests {
                 remote_filename: "Music\\Night Geometry\\01 - Thresholds.flac".to_owned(),
                 size_bytes: 112_400_000,
             }],
+            expected_track_count: Some(1),
             alternatives: Vec::new(),
         };
         assert!(validate_release_request(&request).is_ok());
@@ -2385,6 +2550,7 @@ mod tests {
                 remote_filename: "Music\\Hysteria\\01 - Women.flac".to_owned(),
                 size_bytes: 100,
             }],
+            expected_track_count: Some(1),
             alternatives: Vec::new(),
         };
         let queued = release_transfer(

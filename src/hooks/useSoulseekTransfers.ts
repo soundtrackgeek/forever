@@ -42,6 +42,7 @@ const previewTransfers: Transfer[] = [
       releaseFolder: "C:\\Users\\Music\\Forever\\Night Geometry",
       fileIndex: index + 1,
       fileCount: previewNames.length,
+      expectedTrackCount: previewNames.length,
       title,
       username: "audiophile92",
       remoteFilename: `Music\\Liminal Structures\\Night Geometry\\${title}`,
@@ -67,6 +68,7 @@ const previewTransfers: Transfer[] = [
       releaseFolder: "C:\\Users\\Music\\Forever\\Spheric Dusk",
       fileIndex: index + 1,
       fileCount: 2,
+      expectedTrackCount: 2,
       title,
       username: "vinyljunkie",
       remoteFilename: `Music\\Carbon Echoes\\Spheric Dusk\\${title}`,
@@ -101,6 +103,7 @@ const previewTransfers: Transfer[] = [
       releaseFolder: "C:\\Users\\Music\\Forever\\Signal Choir - After Midnight (2026)",
       fileIndex: index + 1,
       fileCount: 2,
+      expectedTrackCount: 2,
       title,
       username: "midnightrelay",
       remoteFilename: `Music\\Signal Choir\\After Midnight\\${title}`,
@@ -115,6 +118,21 @@ const previewTransfers: Transfer[] = [
       verificationStatus: "verified",
       verifiedAtMs: now - 3_600_000,
       filedAtMs: null,
+      soundcheck: {
+        status: "passed",
+        checkedAtMs: now - 3_599_000,
+        deep: false,
+        codec: "MP3",
+        container: "MP3",
+        durationSeconds: 241 + index * 18,
+        bitrateKbps: 320,
+        sampleRate: 44_100,
+        bitsPerSample: null,
+        channels: 2,
+        trackNumber: index + 1,
+        trackTotal: 2,
+        issues: [],
+      },
       createdAtMs: now - 3_700_000 + index,
       updatedAtMs: now - 3_600_000,
     }),
@@ -126,6 +144,7 @@ const previewTransfers: Transfer[] = [
     releaseFolder: "C:\\Users\\Music\\Forever\\Apex Horizon (Deluxe)",
     fileIndex: 1,
     fileCount: 2,
+    expectedTrackCount: 1,
     title: "01 - First Light.mp3",
     username: "soulseeker7",
     remoteFilename: "Music\\Apex Horizon\\01 - First Light.mp3",
@@ -150,6 +169,7 @@ const previewTransfers: Transfer[] = [
     releaseFolder: "C:\\Users\\Music\\Forever\\Apex Horizon (Deluxe)",
     fileIndex: 2,
     fileCount: 2,
+    expectedTrackCount: 1,
     title: "album.nfo",
     username: "soulseeker7",
     remoteFilename: "Music\\Apex Horizon\\album.nfo",
@@ -173,14 +193,16 @@ const emptySnapshot: TransferQueueSnapshot = {
   activeCount: 0,
   maxConcurrentDownloads: 3,
   relaySuggestionMinutes: 10,
+  soundcheckEnabled: true,
   safetyState: "running",
 };
 
 const withCount = (
   transfers: Transfer[],
-  settings: Pick<TransferQueueSnapshot, "maxConcurrentDownloads" | "relaySuggestionMinutes" | "safetyState"> = {
+  settings: Pick<TransferQueueSnapshot, "maxConcurrentDownloads" | "relaySuggestionMinutes" | "soundcheckEnabled" | "safetyState"> = {
     maxConcurrentDownloads: 3,
     relaySuggestionMinutes: 10,
+    soundcheckEnabled: true,
     safetyState: "running",
   },
 ): TransferQueueSnapshot => ({
@@ -192,6 +214,7 @@ const withCount = (
   ).length,
   maxConcurrentDownloads: settings.maxConcurrentDownloads,
   relaySuggestionMinutes: settings.relaySuggestionMinutes,
+  soundcheckEnabled: settings.soundcheckEnabled,
   safetyState: settings.safetyState,
 });
 
@@ -236,6 +259,7 @@ export type EnqueueReleaseInput = {
   username: string;
   remoteFolder: string;
   files: FolderFile[];
+  expectedTrackCount?: number | null;
   alternatives?: ReleaseAlternativeSource[];
 };
 
@@ -531,6 +555,7 @@ export function useSoulseekTransfers() {
                   remoteFilename: file.remoteFilename,
                   sizeBytes: file.sizeBytes,
                 })),
+                expectedTrackCount: release.expectedTrackCount ?? null,
                 alternatives: release.alternatives ?? [],
               },
             },
@@ -566,6 +591,7 @@ export function useSoulseekTransfers() {
             releaseFolder: `C:\\Users\\Music\\Forever\\${folderName}`,
             fileIndex: index + 1,
             fileCount: release.files.length,
+            expectedTrackCount: release.expectedTrackCount ?? null,
             title: file.filename,
             username: release.username,
             remoteFilename: file.remoteFilename,
@@ -950,6 +976,48 @@ export function useSoulseekTransfers() {
     }
   }, [native, snapshot]);
 
+  const soundcheckRelease = useCallback(async (releaseId: string, deep = false) => {
+    setError(null);
+    try {
+      if (native) {
+        const next = await invoke<TransferQueueSnapshot>("transfer_soundcheck_release", {
+          releaseId,
+          deep,
+        });
+        setSnapshot(next);
+        return next;
+      }
+      const audioPattern = /\.(aac|aif|aiff|alac|ape|caf|flac|m4a|mp3|mp4|oga|ogg|opus|wav|wma|wv)$/i;
+      const next = withCount(snapshot.transfers.map((transfer) => {
+        if (transfer.releaseId !== releaseId || !audioPattern.test(transfer.remoteFilename)) return transfer;
+        const extension = transfer.remoteFilename.split(".").pop()?.toUpperCase() ?? "AUDIO";
+        return {
+          ...transfer,
+          soundcheck: {
+            status: "passed" as const,
+            checkedAtMs: Date.now(),
+            deep,
+            codec: extension === "M4A" ? "AAC" : extension,
+            container: extension,
+            durationSeconds: 238,
+            bitrateKbps: extension === "FLAC" ? 940 : 320,
+            sampleRate: 44_100,
+            bitsPerSample: extension === "FLAC" ? 16 : null,
+            channels: 2,
+            trackNumber: transfer.fileIndex ?? null,
+            trackTotal: transfer.expectedTrackCount ?? null,
+            issues: [],
+          },
+        };
+      }), snapshot);
+      setSnapshot(next);
+      return next;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native, snapshot]);
+
   const retryReleaseIssues = useCallback(async (releaseId: string) => {
     setError(null);
     if (native) {
@@ -1091,6 +1159,20 @@ export function useSoulseekTransfers() {
     }
   }, [native, snapshot]);
 
+  const setSoundcheckEnabled = useCallback(async (enabled: boolean) => {
+    setError(null);
+    try {
+      const next = native
+        ? await invoke<TransferQueueSnapshot>("transfer_set_soundcheck_enabled", { enabled })
+        : { ...snapshot, soundcheckEnabled: enabled };
+      setSnapshot(next);
+      return next;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native, snapshot]);
+
   const prepareForRestart = useCallback(async (
     mode: "pauseNow" | "finishCurrentFiles",
   ) => {
@@ -1176,11 +1258,13 @@ export function useSoulseekTransfers() {
       revealRelease,
       verifyRelease,
       verifyCompleted,
+      soundcheckRelease,
       retryReleaseIssues,
       switchReleaseSource,
       relayReleaseSource,
       setMaxConcurrentDownloads,
       setRelaySuggestionMinutes,
+      setSoundcheckEnabled,
       prepareForRestart,
       cancelRestartPreparation,
       completionNotice,
@@ -1211,11 +1295,13 @@ export function useSoulseekTransfers() {
       revealRelease,
       verifyRelease,
       verifyCompleted,
+      soundcheckRelease,
       retryReleaseIssues,
       switchReleaseSource,
       relayReleaseSource,
       setMaxConcurrentDownloads,
       setRelaySuggestionMinutes,
+      setSoundcheckEnabled,
       prepareForRestart,
       cancelRestartPreparation,
       completionNotice,

@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.45` is the release-pipeline hotfix for
-> **Arrival Desk**, retaining the 0.0.44 post-download workflow while making
-> its Windows release validation deterministic.
+> **Status:** pre-alpha. Version `0.0.46`, **Soundcheck**, adds a read-only
+> audio quality gate to completed album downloads before they leave the
+> Arrival Desk.
 
-If `0.0.16` is installed, download and run the latest `0.0.45` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.46` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -62,6 +62,18 @@ configuration and transfers.
   **Ready to file**, **Filed away**, **Moved**, and **Needs attention** lanes,
   with manual filing confirmation, undo, reveal, verification, per-release
   history removal, and a bulk clear for filed history that never deletes files
+- **Soundcheck** automatically performs a quick, read-only inspection of newly
+  completed audio and persists codec, container, duration, bitrate, sample rate,
+  bit depth, channel count, track number, and any review notes per file
+- Expandable Arrival Desk evidence summarizes **Passed**, **Review**, **Failed**,
+  and pending releases, checks album audio count and numbering against the
+  expected source track count, and offers a full decoder-based **Deep Scan**
+- Quick inspection supports MP3, FLAC, AAC/M4A, OGG/Vorbis, WAV, AIFF, ALAC,
+  and CAF; Opus receives safe header inspection where available, while other
+  recognized formats remain visible as unsupported instead of being hidden
+- Automatic Soundcheck is enabled by default and configurable in Settings.
+  A failed file can launch Signal Relay for a replacement; Forever preserves
+  the rejected copy beside the album before the selected replacement begins
 - Completed downloads are reconciled with the read-only Music Library when
   their state changes and every five minutes while Forever is open, so albums
   move to **Filed away** after the external collection recognizes them

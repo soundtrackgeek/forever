@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Trash,
   UserPlus,
+  Waveform,
 } from "@phosphor-icons/react";
 import type { UpdateCheckIntervalMinutes } from "../hooks/useAppUpdater";
 import { useEffect, useState, type FormEvent } from "react";
@@ -53,6 +54,8 @@ type ConnectionSettingsProps = {
   onSetMaxConcurrentDownloads: (maximum: number) => Promise<unknown>;
   relaySuggestionMinutes: number;
   onSetRelaySuggestionMinutes: (minutes: number) => Promise<unknown>;
+  soundcheckEnabled: boolean;
+  onSetSoundcheckEnabled: (enabled: boolean) => Promise<unknown>;
   messageNotificationsEnabled: boolean;
   onMessageNotificationsChange: (enabled: boolean) => void;
   roomNotificationsEnabled: boolean;
@@ -123,6 +126,8 @@ export function ConnectionSettings({
   onSetMaxConcurrentDownloads,
   relaySuggestionMinutes,
   onSetRelaySuggestionMinutes,
+  soundcheckEnabled,
+  onSetSoundcheckEnabled,
   messageNotificationsEnabled,
   onMessageNotificationsChange,
   roomNotificationsEnabled,
@@ -405,6 +410,11 @@ export function ConnectionSettings({
                 {[0, 5, 10, 20, 30, 60].map((minutes) => <option value={minutes} key={minutes}>{minutes === 0 ? "Off" : `${minutes} min`}</option>)}
               </select>
             </label>
+            <label className="download-lanes-field soundcheck-setting">
+              <span><strong><Waveform size={14} /> Automatic Soundcheck</strong><small>Inspect completed audio headers, duration, and track sequence without changing the files.</small></span>
+              <input className="soundcheck-checkbox" type="checkbox" checked={soundcheckEnabled} onChange={(event) => void onSetSoundcheckEnabled(event.target.checked)} />
+              <span className="toggle-visual" aria-hidden="true"><i /></span>
+            </label>
           </div>
         </section>
 
@@ -514,7 +524,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.45</h2>
+              <h2>Forever 0.0.46</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="update-interval-field">
                 <span>Automatic update checks</span>

@@ -35,18 +35,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.44",
-  version: "0.0.45",
-  body: `## What’s new in Forever 0.0.45
+  currentVersion: "0.0.45",
+  version: "0.0.46",
+  body: `## What’s new in Forever 0.0.46
 
-### Fixed
+### Added
 
-- Wanted cadence integration coverage now waits for React’s committed state, preventing slower Windows release runners from reading the previous value.
+- Soundcheck automatically inspects completed audio headers, duration, codec details, and track sequence without modifying the files.
+- Arrival Desk now expands into per-track evidence and offers a full decoder-based Deep Scan.
 
 ### Changed
 
-- Arrival Desk and all 0.0.44 application behavior remain unchanged.`,
-  date: "2026-07-27",
+- Album downloads carry their expected track count into Soundcheck, and failed checks can hand off to Signal Relay for a replacement.`,
+  date: "2026-07-28",
 };
 
 const wait = (duration: number) =>

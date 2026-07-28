@@ -405,6 +405,7 @@ function App() {
       username: source.owner,
       remoteFolder: inspection.requestedFolder,
       files: inspection.files,
+      expectedTrackCount: source.tracks.length || null,
       alternatives: availableSources
         .filter((candidate) => candidate.id !== source.id)
         .slice(0, 12)
@@ -476,6 +477,7 @@ function App() {
       username: reviewInspection.username,
       remoteFolder: reviewInspection.requestedFolder,
       files: reviewInspection.files,
+      expectedTrackCount: reviewAlbum.bestSource?.trackCount ?? null,
     });
   };
 
@@ -824,6 +826,9 @@ function App() {
             archiveOwnedReleaseIds={archiveOwnedReleaseIds}
             onRevealRelease={transfers.revealRelease}
             onVerifyRelease={transfers.verifyRelease}
+            onSoundcheckRelease={transfers.soundcheckRelease}
+            onFindAlternatives={findRelaySources}
+            soundcheckEnabled={transfers.snapshot.soundcheckEnabled}
             onSetReleaseFiled={transfers.setReleaseFiled}
             onClearReleaseHistory={transfers.clearReleaseHistory}
             onOpenMissing={() => void missingShelf.activate().catch(() => undefined)}
@@ -1073,6 +1078,8 @@ function App() {
             onSetMaxConcurrentDownloads={transfers.setMaxConcurrentDownloads}
             relaySuggestionMinutes={transfers.snapshot.relaySuggestionMinutes}
             onSetRelaySuggestionMinutes={transfers.setRelaySuggestionMinutes}
+            soundcheckEnabled={transfers.snapshot.soundcheckEnabled}
+            onSetSoundcheckEnabled={transfers.setSoundcheckEnabled}
             messageNotificationsEnabled={messages.notificationsEnabled}
             onMessageNotificationsChange={messages.setNotificationsEnabled}
             roomNotificationsEnabled={rooms.notificationsEnabled}

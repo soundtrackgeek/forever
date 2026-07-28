@@ -51,6 +51,9 @@ type ArchiveWorkspaceProps = {
   archiveOwnedReleaseIds: ReadonlySet<string>;
   onRevealRelease: (releaseId: string) => Promise<unknown>;
   onVerifyRelease: (releaseId: string) => Promise<unknown>;
+  onSoundcheckRelease: (releaseId: string, deep: boolean) => Promise<unknown>;
+  onFindAlternatives: (releaseId: string, title: string) => Promise<unknown>;
+  soundcheckEnabled: boolean;
   onSetReleaseFiled: (releaseId: string, filed: boolean) => Promise<unknown>;
   onClearReleaseHistory: (releaseIds: string[]) => Promise<unknown>;
   missingShelf: ReactNode;
@@ -133,6 +136,9 @@ export function ArchiveWorkspace({
   archiveOwnedReleaseIds,
   onRevealRelease,
   onVerifyRelease,
+  onSoundcheckRelease,
+  onFindAlternatives,
+  soundcheckEnabled,
   onSetReleaseFiled,
   onClearReleaseHistory,
   missingShelf,
@@ -260,6 +266,9 @@ export function ArchiveWorkspace({
           onRefreshArchive={onRefresh}
           onRevealRelease={onRevealRelease}
           onVerifyRelease={onVerifyRelease}
+          onSoundcheckRelease={onSoundcheckRelease}
+          onFindAlternatives={onFindAlternatives}
+          soundcheckEnabled={soundcheckEnabled}
           onSetReleaseFiled={onSetReleaseFiled}
           onClearReleaseHistory={onClearReleaseHistory}
           onOpenTransfer={onOpenTransfer}

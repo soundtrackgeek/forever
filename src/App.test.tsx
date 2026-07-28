@@ -845,6 +845,12 @@ describe("Forever shell", () => {
     expect(relayDelay).toHaveValue("10");
     fireEvent.change(relayDelay, { target: { value: "20" } });
     expect(relayDelay).toHaveValue("20");
+    const soundcheck = screen.getByRole("checkbox", {
+      name: /Automatic Soundcheck/,
+    });
+    expect(soundcheck).toBeChecked();
+    fireEvent.click(soundcheck);
+    expect(soundcheck).not.toBeChecked();
 
     view.unmount();
     render(<App />);
@@ -862,17 +868,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.45 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.46 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Wanted cadence integration coverage now waits for React’s committed state, preventing slower Windows release runners from reading the previous value.",
+        "Soundcheck automatically inspects completed audio headers, duration, codec details, and track sequence without modifying the files.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Arrival Desk and all 0.0.44 application behavior remain unchanged.",
+        "Album downloads carry their expected track count into Soundcheck, and failed checks can hand off to Signal Relay for a replacement.",
       ),
     ).toBeInTheDocument();
     expect(

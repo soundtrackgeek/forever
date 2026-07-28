@@ -5,6 +5,34 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.46] - 2026-07-28
+
+### Added
+
+- **Soundcheck** automatically performs a persisted, read-only quick scan when
+  a completed audio file passes the existing on-disk size verification.
+- MP3, FLAC, AAC/M4A, OGG/Vorbis, WAV, AIFF, ALAC, and CAF checks report codec,
+  container, duration, bitrate, sample rate, bit depth, channels, track number,
+  and actionable parsing issues; recognized unsupported audio stays visible for
+  review, and Opus receives safe header inspection when decoding is unavailable.
+- Arrival Desk shows a release-level Soundcheck verdict and expandable
+  per-track evidence, including expected audio count, duplicate or missing track
+  numbers, quick/deep scan provenance, and a full decoder-based **Deep Scan**.
+- Settings can disable automatic checks while keeping manual Quick and Deep
+  scans available.
+- Failed checks can start Signal Relay replacement discovery. When a replacement
+  is explicitly selected, the suspect file is preserved with a
+  `.soundcheck-rejected` suffix before the new download starts.
+- Native and frontend regression coverage protects valid, corrupt, unsupported,
+  incomplete, and complete Soundcheck states.
+
+### Changed
+
+- Album-source and Smart Match downloads now persist their expected track count
+  so completed releases can be checked against the selected source.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.46`.
+
 ## [0.0.45] - 2026-07-27
 
 ### Changed

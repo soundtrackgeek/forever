@@ -316,6 +316,7 @@ export type Transfer = {
   releaseFolder?: string | null;
   fileIndex?: number | null;
   fileCount?: number | null;
+  expectedTrackCount?: number | null;
   title: string;
   username: string;
   remoteFilename: string;
@@ -343,9 +344,28 @@ export type Transfer = {
   verificationMessage?: string | null;
   verifiedAtMs?: number | null;
   filedAtMs?: number | null;
+  soundcheck?: SoundcheckResult | null;
   alternativeSources?: ReleaseAlternativeSource[];
   createdAtMs: number;
   updatedAtMs: number;
+};
+
+export type SoundcheckStatus = "pending" | "passed" | "review" | "failed" | "unsupported";
+
+export type SoundcheckResult = {
+  status: SoundcheckStatus;
+  checkedAtMs: number;
+  deep: boolean;
+  codec: string | null;
+  container: string | null;
+  durationSeconds: number | null;
+  bitrateKbps: number | null;
+  sampleRate: number | null;
+  bitsPerSample: number | null;
+  channels: number | null;
+  trackNumber: number | null;
+  trackTotal: number | null;
+  issues: string[];
 };
 
 export type ReleaseAlternativeFile = {
@@ -501,6 +521,7 @@ export type TransferQueueSnapshot = {
   activeCount: number;
   maxConcurrentDownloads: number;
   relaySuggestionMinutes: number;
+  soundcheckEnabled: boolean;
   safetyState: "running" | "draining" | "pausedForRestart";
 };
 
