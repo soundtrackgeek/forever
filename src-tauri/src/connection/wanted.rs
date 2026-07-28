@@ -340,6 +340,46 @@ impl WantedHub {
         Ok(self.snapshot())
     }
 
+    pub fn retire_downloaded(&self, album_ids: Vec<String>) -> Result<WantedSnapshot, WantedError> {
+        if album_ids.len() > MAX_WANTED_ALBUMS {
+            return Err(WantedError::TooManyAlbums);
+        }
+        let album_ids = album_ids
+            .iter()
+            .map(|album_id| valid_album_id(album_id).map(str::to_ascii_lowercase))
+            .collect::<Result<HashSet<_>, _>>()?;
+        if album_ids.is_empty() {
+            return Ok(self.snapshot());
+        }
+
+        let changed = {
+            let mut store = self
+                .store
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            retire_downloaded_from_store(&mut store, &album_ids) > 0
+        };
+        if !changed {
+            return Ok(self.snapshot());
+        }
+
+        let mut runtime = self
+            .runtime
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if runtime
+            .active
+            .as_ref()
+            .is_some_and(|active| album_ids.contains(&active.album_id.to_ascii_lowercase()))
+        {
+            runtime.active = None;
+        }
+        drop(runtime);
+        self.persist()?;
+        self.publish();
+        Ok(self.snapshot())
+    }
+
     pub fn set_paused(&self, album_id: &str, paused: bool) -> Result<WantedSnapshot, WantedError> {
         let album_id = valid_album_id(album_id)?;
         let mut store = self
@@ -896,6 +936,14 @@ fn parent_folder(filename: &str) -> &str {
         .unwrap_or("")
 }
 
+fn retire_downloaded_from_store(store: &mut WantedStore, album_ids: &HashSet<String>) -> usize {
+    let previous = store.albums.len();
+    store
+        .albums
+        .retain(|album| !album_ids.contains(&album.album_id.to_ascii_lowercase()));
+    previous - store.albums.len()
+}
+
 fn next_check_at(store: &WantedStore, now: u64) -> Option<u64> {
     if store.interval_minutes == 0 {
         return None;
@@ -1269,6 +1317,28 @@ mod tests {
             .iter()
             .all(|album| album.preferences == profile));
         assert!(store.albums.iter().all(|album| !album.paused));
+    }
+
+    #[test]
+    fn verified_download_retirement_is_atomic_and_idempotent() {
+        let mut store = WantedStore::default();
+        let profile = WantedPreferences::default();
+        merge_bulk_requests(
+            &mut store,
+            vec![
+                validate_request(request("album-1")).unwrap(),
+                validate_request(request("album-2")).unwrap(),
+            ],
+            &profile,
+            1,
+        )
+        .unwrap();
+        let retired = HashSet::from(["album-1".to_owned(), "not-present".to_owned()]);
+
+        assert_eq!(retire_downloaded_from_store(&mut store, &retired), 1);
+        assert_eq!(store.albums.len(), 1);
+        assert_eq!(store.albums[0].album_id, "album-2");
+        assert_eq!(retire_downloaded_from_store(&mut store, &retired), 0);
     }
 
     #[test]

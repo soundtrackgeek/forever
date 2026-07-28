@@ -650,6 +650,13 @@ impl ConnectionManager {
         Ok(self.wanted.remove(album_id)?)
     }
 
+    pub fn retire_downloaded_wanted(
+        &self,
+        album_ids: Vec<String>,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.retire_downloaded(album_ids)?)
+    }
+
     pub fn set_wanted_paused(
         &self,
         album_id: &str,

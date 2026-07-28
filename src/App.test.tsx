@@ -868,17 +868,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.47 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.48 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Patch Bay repairs one missing, corrupt, or mismatched album track without replacing verified files.",
+        "A Wanted album is retired automatically after its matching download completes and every expected audio track verifies.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Repairs remain visible through queued, downloading, deep-checking, and repaired states, survive restarts, and preserve the rejected original.",
+        "Re-adding an album starts a fresh watch; older verified download history cannot immediately retire it again.",
       ),
     ).toBeInTheDocument();
     expect(

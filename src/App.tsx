@@ -56,6 +56,7 @@ import type {
 import { groupAlbumSources } from "./utils/albumSources";
 import { albumDownloadStatesByTitle, type AlbumDownloadState } from "./utils/albumDownloadState";
 import { groupTransfers } from "./utils/transfers";
+import { verifiedDownloadedWantedAlbumIds, wantedAlbumDownloadTitle } from "./utils/wantedFulfillment";
 
 const emptyAlbumCatalog: AlbumReleaseGroup[] = [];
 const relaySessionId = (releaseId: string) => `signal-relay:${releaseId}`;
@@ -66,8 +67,7 @@ const albumDownloadTitle = (
   fallback: string,
 ) => {
   if (!context) return fallback;
-  const year = context.firstReleaseDate?.match(/^\d{4}/)?.[0];
-  return `${context.artist} - ${context.title}${year ? ` (${year})` : ""}`;
+  return wantedAlbumDownloadTitle(context);
 };
 
 const viewDetails = {
@@ -208,6 +208,7 @@ function App() {
   const relaysNotified = useRef(new Set<string>());
   const transferVerificationActive = useRef(false);
   const lastFulfillmentSync = useRef("");
+  const lastWantedRetirement = useRef("");
   const needsOnboarding = !connection.profile || !connection.hasPassword;
   const onboardingOpen =
     connection.ready &&
@@ -364,6 +365,30 @@ function App() {
       lastFulfillmentSync.current = "";
     });
   }, [fulfillmentRequests, fulfillmentSignature, wanted]);
+
+  const downloadedWantedAlbumIds = useMemo(
+    () => verifiedDownloadedWantedAlbumIds(
+      wanted.snapshot.albums,
+      transfers.snapshot.transfers,
+    ),
+    [transfers.snapshot.transfers, wanted.snapshot.albums],
+  );
+  const wantedRetirementSignature = downloadedWantedAlbumIds
+    .map((albumId) => albumId.toLocaleLowerCase())
+    .sort()
+    .join("|");
+
+  useEffect(() => {
+    if (!wantedRetirementSignature) {
+      lastWantedRetirement.current = "";
+      return;
+    }
+    if (!wanted.ready || lastWantedRetirement.current === wantedRetirementSignature) return;
+    lastWantedRetirement.current = wantedRetirementSignature;
+    void wanted.retireDownloaded(downloadedWantedAlbumIds).catch(() => {
+      lastWantedRetirement.current = "";
+    });
+  }, [downloadedWantedAlbumIds, wanted, wanted.ready, wantedRetirementSignature]);
 
   const wantedDownloadStateByAlbumId = useMemo(() => {
     const stateByTitle = albumDownloadStatesByTitle(transfers.snapshot.transfers);

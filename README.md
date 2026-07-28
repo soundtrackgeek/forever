@@ -3,11 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.47`, **Patch Bay**, repairs individual
-> missing or damaged album tracks without touching the files that already
-> passed Soundcheck.
+> **Status:** pre-alpha. Version `0.0.48`, **Wanted Fulfillment**, automatically
+> retires a watch after its matching album download completes and verifies.
 
-If `0.0.16` is installed, download and run the latest `0.0.47` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.48` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -115,6 +114,9 @@ configuration and transfers.
   pause/check/remove controls, in-app and Windows availability alerts, and
   configurable **Smart Match** profiles for format, minimum bitrate, and track
   count, including MP3-only matching and a reusable default for new watches
+- Matching album downloads automatically leave Wanted after every expected
+  audio track verifies and Soundcheck passes when enabled, preventing redundant
+  Smart Match checks and notifications; incomplete releases remain watched
 - Ranked Smart Match recommendations based on completeness, format, upload-slot
   readiness, speed, and queue length, with a remote-folder review that preserves
   artwork, cue sheets, lyrics, logs, and other companion files when explicitly
@@ -392,11 +394,15 @@ Use **Download best** to inspect the recommended folder before anything is
 queued. The review shows the listener, remote path, format, tracks, aggregate
 size, source speed, and the audio/companion-file split. **Queue complete album**
 preserves cover art, cue sheets, lyrics, logs, and other files beside the audio
-and leaves Archive open so another album can be queued. **Compare** opens the
-full grouped source report with the recommendation highlighted. Forever never
-auto-downloads a Smart Match. When the read-only Music Library Archive later
-reports that album as owned, the watch moves to **Fulfilled** and stops checking;
-it returns to the active list if the external source no longer reports it.
+and leaves Archive open so another album can be queued. After every expected
+audio track completes and verifies, Forever removes that album from Wanted and
+stops its Smart Match alerts. A failed or incomplete release stays watched. You
+can add the album again later: only a verification newer than the new watch can
+retire it. **Compare** opens the full grouped source report with the
+recommendation highlighted. Forever never auto-downloads a Smart Match. When
+the read-only Music Library Archive reports another watched album as owned, its
+watch moves to **Fulfilled** and stops checking; it returns to the active list
+if the external source no longer reports it.
 
 Open **Browse** for a dedicated exact-username entry point plus recent and
 favorite listeners. Browsing from Search, People, or Transfers opens the same
@@ -491,7 +497,9 @@ last ranked source summary, fulfillment state, and source identity fingerprints
 are stored in Forever's `wanted.json`. These fingerprints contain normalized
 Soulseek usernames and remote folder names so Forever can recognize newly
 appearing qualifying sources; they never contain local Music Library rows and
-are not written to the external Archive database.
+are not written to the external Archive database. Successful verified downloads
+remove their matching entries from this separate Wanted store only; they never
+write to or import files into Music Library.
 
 Archive reads the external Music Library database at
 `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`. Forever uses the

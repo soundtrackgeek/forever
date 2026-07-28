@@ -35,20 +35,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.46",
-  version: "0.0.47",
-  body: `## What’s new in Forever 0.0.47
+  currentVersion: "0.0.47",
+  version: "0.0.48",
+  body: `## What’s new in Forever 0.0.48
 
-### Added
+### Fixed
 
-- Patch Bay repairs one missing, corrupt, or mismatched album track without replacing verified files.
-- Live candidates are ranked by track identity, format, duration, sample rate, bit depth, source readiness, and confidence.
-- MusicBrainz’s earliest official tracklist can identify and name a missing position when the album identity is known.
+- A Wanted album is retired automatically after its matching download completes and every expected audio track verifies.
+- Retired albums stop background Smart Match checks, in-app alerts, and Windows availability notifications.
 
 ### Changed
 
-- Repairs remain visible through queued, downloading, deep-checking, and repaired states, survive restarts, and preserve the rejected original.
-- Format or audio-detail changes require an explicit compatibility confirmation before queueing.`,
+- Incomplete, missing, mismatched, or failed-Soundcheck downloads remain in Wanted.
+- Re-adding an album starts a fresh watch; older verified download history cannot immediately retire it again.`,
   date: "2026-07-28",
 };
 

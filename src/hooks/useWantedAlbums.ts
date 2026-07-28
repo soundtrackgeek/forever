@@ -196,6 +196,7 @@ export function useWantedAlbums() {
       const available = next.albums.find((album) => {
         const previous = knownChecks.current.get(album.albumId) ?? 0;
         return Boolean(
+          !album.fulfilled &&
           album.newSourceCount > 0 &&
           album.lastCheckedAtMs &&
           album.lastCheckedAtMs > previous,
@@ -206,6 +207,9 @@ export function useWantedAlbums() {
         if (native) void notify(available).catch(() => undefined);
       }
     }
+    setAlert((current) => current && next.albums.some(
+      (album) => album.albumId === current.albumId && !album.fulfilled,
+    ) ? current : null);
     for (const album of next.albums) {
       if (album.lastCheckedAtMs) knownChecks.current.set(album.albumId, album.lastCheckedAtMs);
     }
@@ -356,6 +360,20 @@ export function useWantedAlbums() {
       updatedAtMs: Date.now(),
     })), [invokeOrPreview]);
 
+  const retireDownloaded = useCallback(async (albumIds: string[]) => {
+    const retiring = new Set(albumIds.map((albumId) => albumId.toLocaleLowerCase()));
+    return await invokeOrPreview("wanted_retire_downloaded", { albumIds }, (current) => ({
+      ...current,
+      albums: current.albums.filter(
+        (album) => !retiring.has(album.albumId.toLocaleLowerCase()),
+      ),
+      activeAlbumId: current.activeAlbumId && retiring.has(current.activeAlbumId.toLocaleLowerCase())
+        ? null
+        : current.activeAlbumId,
+      updatedAtMs: Date.now(),
+    }));
+  }, [invokeOrPreview]);
+
   const setPaused = useCallback(async (albumId: string, paused: boolean) =>
     await invokeOrPreview("wanted_set_paused", { albumId, paused }, (current) => ({
       ...current,
@@ -474,6 +492,7 @@ export function useWantedAlbums() {
     add,
     addMany,
     remove,
+    retireDownloaded,
     setPaused,
     setIntervalMinutes,
     setPreferences,
@@ -482,5 +501,5 @@ export function useWantedAlbums() {
     check,
     dismissAlert: () => setAlert(null),
     clearError: () => setError(null),
-  }), [add, addMany, alert, byAlbumId, check, error, ready, remove, setDefaultPreferences, setIntervalMinutes, setPaused, setPreferences, snapshot, syncFulfilled]);
+  }), [add, addMany, alert, byAlbumId, check, error, ready, remove, retireDownloaded, setDefaultPreferences, setIntervalMinutes, setPaused, setPreferences, snapshot, syncFulfilled]);
 }

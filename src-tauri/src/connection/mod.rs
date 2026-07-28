@@ -205,6 +205,16 @@ pub async fn wanted_sync_fulfilled(
 }
 
 #[tauri::command]
+pub async fn wanted_retire_downloaded(
+    manager: State<'_, ConnectionManager>,
+    album_ids: Vec<String>,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .retire_downloaded_wanted(album_ids)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn wanted_check(
     manager: State<'_, ConnectionManager>,
     album_id: String,

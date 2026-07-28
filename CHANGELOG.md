@@ -5,6 +5,29 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.48] - 2026-07-28
+
+### Fixed
+
+- A Wanted album now retires automatically after its matching Forever download
+  completes and every expected audio track verifies, stopping redundant Smart
+  Match checks, in-app alerts, and Windows availability notifications.
+- Incomplete, missing, size-mismatched, queued, failed, or failed-Soundcheck
+  releases remain in Wanted instead of being treated as fulfilled.
+- Re-adding a previously downloaded album creates a fresh watch. Only a newer
+  successful verification can retire it, so stale transfer history cannot
+  immediately remove the new entry.
+
+### Changed
+
+- Verified downloads prefer their persisted MusicBrainz release-group identity
+  when matching Wanted and safely fall back to the canonical artist, album, and
+  year title for older transfer history.
+- Downloaded Wanted entries are retired in one atomic native-store update, and
+  any matching visible Smart Match alert closes with the fulfilled watch.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.48`.
+
 ## [0.0.47] - 2026-07-28
 
 ### Added

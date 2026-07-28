@@ -32,6 +32,7 @@ pub fn run() {
             connection::wanted_set_preferences,
             connection::wanted_set_default_preferences,
             connection::wanted_sync_fulfilled,
+            connection::wanted_retire_downloaded,
             connection::wanted_check,
             connection::radar_snapshot,
             connection::radar_start,
