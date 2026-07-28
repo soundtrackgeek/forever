@@ -362,14 +362,24 @@ describe("Forever shell", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Bulk format preference" }), {
       target: { value: "losslessOnly" },
     });
+    const trackMode = screen.getByRole("combobox", { name: "Bulk track count mode" });
+    expect(trackMode).toHaveValue("any");
+    fireEvent.change(trackMode, { target: { value: "custom" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Bulk custom track count" }), {
+      target: { value: "9" },
+    });
+    fireEvent.change(trackMode, { target: { value: "musicbrainz" } });
+    expect(screen.queryByRole("spinbutton", { name: "Bulk custom track count" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add 2 to Wanted" }));
     expect(await screen.findByText("2 added to Wanted")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Live" }));
     expect(screen.getByText("Viva! Hysteria")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Wanted 5" }));
-    expect(screen.getByText("Adrenalize")).toBeInTheDocument();
-    expect(screen.getByText("Slang")).toBeInTheDocument();
+    const adrenalize = screen.getByText("Adrenalize").closest("article") as HTMLElement;
+    const slang = screen.getByText("Slang").closest("article") as HTMLElement;
+    expect(within(adrenalize).getByText("Lossless only · 10+ tracks")).toBeInTheDocument();
+    expect(within(slang).getByText("Lossless only · 11+ tracks")).toBeInTheDocument();
   });
 
   it("scans one missing album, previews sources, downloads the best copy, and starts a watch", async () => {
@@ -869,17 +879,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.49 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.50 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "The Fulfilled Shelf keeps a receipt with the actual listener, format, audio-track count, size, Soundcheck result, and completion time.",
+        "Missing Shelf track matching now offers Any, a custom minimum, or the official MusicBrainz count.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Add back starts a fresh watch even when Music Library already recognizes the album.",
+        "The Windows title-bar X closes Forever again while preserving Safe Passage when transfers are active.",
       ),
     ).toBeInTheDocument();
     expect(

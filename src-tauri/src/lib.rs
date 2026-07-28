@@ -117,3 +117,23 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn main_window_can_finish_close_requests() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json"))
+                .expect("main-window capability should be valid JSON");
+        let permissions = capability["permissions"]
+            .as_array()
+            .expect("main-window capability should list permissions");
+
+        assert!(permissions
+            .iter()
+            .any(|permission| { permission.as_str() == Some("core:window:allow-close") }));
+        assert!(permissions
+            .iter()
+            .any(|permission| { permission.as_str() == Some("core:window:allow-destroy") }));
+    }
+}

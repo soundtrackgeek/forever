@@ -35,19 +35,18 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.48",
-  version: "0.0.49",
-  body: `## What’s new in Forever 0.0.49
+  currentVersion: "0.0.49",
+  version: "0.0.50",
+  body: `## What’s new in Forever 0.0.50
 
 ### Added
 
-- The Fulfilled Shelf keeps a receipt with the actual listener, format, audio-track count, size, Soundcheck result, and completion time.
-- Completed watches can open their Arrival, reveal the downloaded folder, be removed from history, or be added back.
+- Missing Shelf track matching now offers Any, a custom minimum, or the official MusicBrainz count.
+- MusicBrainz mode applies the appropriate official track count to each album in a batch.
 
-### Changed
+### Fixed
 
-- Verified downloads leave active monitoring and stop redundant Smart Match checks and alerts without losing their history.
-- Add back starts a fresh watch even when Music Library already recognizes the album.`,
+- The Windows title-bar X closes Forever again while preserving Safe Passage when transfers are active.`,
   date: "2026-07-28",
 };
 

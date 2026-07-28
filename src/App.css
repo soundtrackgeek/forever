@@ -11178,6 +11178,28 @@ form.settings-panel {
   opacity: 0.45;
 }
 
+.missing-track-count > .missing-track-count-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.missing-track-count > .missing-track-count-control.is-custom {
+  grid-template-columns: minmax(74px, 1fr) 48px;
+}
+
+.missing-track-count-error {
+  grid-column: 1 / -1;
+  margin: -4px 0 0;
+  color: #ef9a8c;
+  font-size: 7px;
+}
+
 .missing-add-wanted {
   display: inline-flex;
   min-height: 34px;
@@ -12256,7 +12278,7 @@ form.settings-panel {
 }
 
 .missing-bulk-bar:not(.is-complete) {
-  grid-template-columns: minmax(170px, 1fr) 105px 84px 68px auto auto;
+  grid-template-columns: minmax(170px, 1fr) 105px 84px 150px auto auto;
 }
 
 .missing-scan-selected {
@@ -12564,11 +12586,11 @@ form.settings-panel {
   }
 
   .missing-bulk-bar:not(.is-complete) {
-    grid-template-columns: minmax(150px, 1fr) 96px 74px auto auto;
+    grid-template-columns: minmax(140px, 1fr) 96px 74px 135px auto auto;
   }
 
   .missing-bulk-bar > label:nth-of-type(3) {
-    display: none;
+    display: grid;
   }
 
   .shelf-radar-drawer {
@@ -12586,7 +12608,11 @@ form.settings-panel {
   }
 
   .missing-bulk-bar:not(.is-complete) {
-    grid-template-columns: 1fr 90px 78px;
+    grid-template-columns: 90px 78px minmax(128px, 1fr) auto auto;
+  }
+
+  .missing-bulk-bar:not(.is-complete) > span {
+    grid-column: 1 / -1;
   }
 
   .missing-scan-selected,

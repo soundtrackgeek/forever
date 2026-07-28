@@ -29,6 +29,8 @@ pub struct WantedAlbumRequest {
     pub title: String,
     pub first_release_date: String,
     pub cover_art_url: Option<String>,
+    #[serde(default)]
+    pub minimum_track_count: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -1101,6 +1103,12 @@ fn validate_request(mut request: WantedAlbumRequest) -> Result<WantedAlbumReques
         .cover_art_url
         .map(|value| value.trim().chars().take(2_048).collect())
         .filter(|value: &String| value.starts_with("https://"));
+    if request
+        .minimum_track_count
+        .is_some_and(|tracks| !(1..=250).contains(&tracks))
+    {
+        return Err(WantedError::InvalidPreferences);
+    }
     Ok(request)
 }
 
@@ -1177,6 +1185,10 @@ fn merge_bulk_requests(
         return Err(WantedError::TooManyAlbums);
     }
     for request in requests {
+        let mut album_preferences = preferences.clone();
+        if let Some(minimum_track_count) = request.minimum_track_count {
+            album_preferences.minimum_track_count = Some(minimum_track_count);
+        }
         if let Some(album) = store
             .albums
             .iter_mut()
@@ -1188,7 +1200,7 @@ fn merge_bulk_requests(
             album.first_release_date = request.first_release_date;
             album.cover_art_url = request.cover_art_url;
             album.paused = false;
-            album.preferences = preferences.clone();
+            album.preferences = album_preferences;
             if was_fulfilled {
                 reset_for_watch(album, added_at_ms);
             }
@@ -1206,7 +1218,7 @@ fn merge_bulk_requests(
                 download_receipt: None,
                 owned_track_count: None,
                 watch_despite_ownership: false,
-                preferences: preferences.clone(),
+                preferences: album_preferences,
                 added_at_ms,
                 last_checked_at_ms: None,
                 source_count: 0,
@@ -1314,6 +1326,7 @@ mod tests {
             title: "High 'n' Dry".to_owned(),
             first_release_date: "1981-07-11".to_owned(),
             cover_art_url: Some("https://coverartarchive.org/cover.jpg".to_owned()),
+            minimum_track_count: None,
         }
     }
 
@@ -1483,15 +1496,19 @@ mod tests {
             .expect("seed watch");
         store.albums[0].paused = true;
         let existing = validate_request(request("ALBUM-1")).expect("valid duplicate album");
-        let second = validate_request(request("album-2")).expect("valid second album");
+        let mut second_request = request("album-2");
+        second_request.minimum_track_count = Some(12);
+        let second = validate_request(second_request).expect("valid second album");
         merge_bulk_requests(&mut store, vec![existing, second], &profile, 2)
             .expect("merge bulk watches");
 
         assert_eq!(store.albums.len(), 2);
-        assert!(store
-            .albums
-            .iter()
-            .all(|album| album.preferences == profile));
+        assert_eq!(store.albums[0].preferences, profile);
+        assert_eq!(store.albums[1].preferences.minimum_track_count, Some(12));
+        assert_eq!(
+            store.albums[1].preferences.format_preference,
+            profile.format_preference
+        );
         assert!(store.albums.iter().all(|album| !album.paused));
     }
 

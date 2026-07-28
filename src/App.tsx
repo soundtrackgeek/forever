@@ -441,6 +441,20 @@ function App() {
     }
   };
 
+  const officialTrackCountFor = async (album: AlbumReleaseGroup) => {
+    if (!native) {
+      return new Map<string, number>([
+        ["5b930454-b937-3d49-b26c-e82c4eded9bc", 10],
+        ["d58266a8-e00c-3a64-b7e1-549e28f772ee", 11],
+        ["2dca8523-24e2-3a51-8bb4-038e979e689b", 13],
+        ["233dec0f-611d-36c6-8675-90fb53707adb", 14],
+      ]).get(album.id) ?? 10;
+    }
+    return await invoke<number | null>("album_official_track_count", {
+      releaseGroupId: album.id,
+    });
+  };
+
   const queueAlbumSourceFor = async (
     context: AlbumSearchContext | null,
     source: AlbumSource,
@@ -915,6 +929,7 @@ function App() {
                 onSelectArtist={missingShelf.loadCatalog}
                 onSelectIdentity={missingShelf.selectIdentity}
                 onAddMany={wanted.addMany}
+                onResolveOfficialTrackCount={officialTrackCountFor}
                 onScan={radar.start}
                 onStopScan={radar.stop}
                 onQueueSource={(album, source, sources) => queueAlbumSourceFor({

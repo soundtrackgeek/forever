@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.49`, **Fulfilled Shelf**, keeps a quiet,
-> reversible completion receipt after a matching Wanted download verifies.
+> **Status:** pre-alpha. Version `0.0.50` adds per-album MusicBrainz track
+> targets to Missing Shelf and restores the Windows title-bar close action.
 
-If `0.0.16` is installed, download and run the latest `0.0.49` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.50` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -92,7 +92,9 @@ configuration and transfers.
   completion plus **Own**, **Wanted**, and **Missing** states
 - Studio, Live, Compilation, EP, and decade filters, selection of visible
   collection gaps, and an atomic bulk handoff of up to 100 missing releases to
-  Wanted using one shared Smart Match profile without duplicate watches
+  Wanted using one shared Smart Match profile without duplicate watches;
+  track matching can accept any count, use a custom minimum, or resolve each
+  album's official MusicBrainz count
 - **Shelf Radar** scans one missing album, up to 12 selected albums, or up to 12
   visible gaps without replacing the main Search workspace; scans are explicit,
   sequential, cancellable, and held only for the current app session
@@ -333,10 +335,13 @@ artist comparisons are reused for the current app session and cleared by
 
 The shelf reports studio-album completion and labels each release **Own**,
 **Wanted**, or **Missing**. Filter the catalog by Studio, Live, Compilation, EP,
-or decade, select one or more visible gaps, choose a shared Smart Match format,
-bitrate, and optional track minimum, then use **Add to Wanted**. The bulk action
-deduplicates existing watches and writes once to Forever's separate
-`wanted.json`; the Music Library database remains untouched.
+or decade, select one or more visible gaps, and choose a shared Smart Match
+format and bitrate. **Tracks** can accept **Any** count, use one **Custom**
+minimum for the batch, or read the earliest official edition from
+**MusicBrainz** and assign its count separately to each selected album. Then use
+**Add to Wanted**. The bulk action deduplicates existing watches and writes once
+to Forever's separate `wanted.json`; the Music Library database remains
+untouched.
 
 Use **Scan visible** to check up to the first 12 visible missing albums, or
 select specific gaps and use **Scan selected**. Shelf Radar sends one search at

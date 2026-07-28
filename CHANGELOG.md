@@ -5,6 +5,30 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.50] - 2026-07-28
+
+### Added
+
+- Missing Shelf's **Tracks** control now offers **Any**, **Custom**, and
+  **MusicBrainz** modes when adding one or more collection gaps to Wanted.
+- MusicBrainz mode resolves the earliest official edition for every selected
+  album and stores its canonical count as that album's minimum, so one atomic
+  batch can carry different track targets without changing the shared format
+  and bitrate profile.
+- Native, frontend, and rendered interaction coverage protects per-album track
+  targets, custom-count validation, and the three-mode handoff.
+
+### Changed
+
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.50`.
+
+### Fixed
+
+- The Windows title-bar **X** closes Forever again. The main window capability
+  now permits the destroy step Tauri performs after the existing close-request
+  listener finishes, while Safe Passage can still intercept active transfers.
+
 ## [0.0.49] - 2026-07-28
 
 ### Added

@@ -186,12 +186,26 @@ const notify = async (album: WantedAlbum) => {
   });
 };
 
-const requestFor = (artist: string, album: AlbumReleaseGroup) => ({
+type WantedAlbumRequest = {
+  albumId: string;
+  artist: string;
+  title: string;
+  firstReleaseDate: string;
+  coverArtUrl: string | null;
+  minimumTrackCount?: number;
+};
+
+const requestFor = (
+  artist: string,
+  album: AlbumReleaseGroup,
+  minimumTrackCount?: number,
+): WantedAlbumRequest => ({
   albumId: album.id,
   artist,
   title: album.title,
   firstReleaseDate: album.firstReleaseDate,
   coverArtUrl: album.coverArtUrl || null,
+  ...(minimumTrackCount === undefined ? {} : { minimumTrackCount }),
 });
 
 export function useWantedAlbums() {
@@ -351,18 +365,27 @@ export function useWantedAlbums() {
     artist: string,
     albums: AlbumReleaseGroup[],
     preferences: WantedPreferences,
+    minimumTrackCounts: Record<string, number> = {},
   ) => {
-    const requests = albums.map((album) => requestFor(artist, album));
+    const requests = albums.map((album) => requestFor(
+      artist,
+      album,
+      minimumTrackCounts[album.id],
+    ));
     return await invokeOrPreview("wanted_add_many", { requests, preferences }, (current) => {
       const byId = new Map(current.albums.map((album) => [album.albumId.toLowerCase(), album]));
       for (const request of requests) {
+        const { minimumTrackCount, ...albumRequest } = request;
+        const albumPreferences = minimumTrackCount === undefined
+          ? preferences
+          : { ...preferences, minimumTrackCount };
         const existing = byId.get(request.albumId.toLowerCase());
         if (existing) {
           byId.set(request.albumId.toLowerCase(), {
             ...existing,
-            ...request,
+            ...albumRequest,
             paused: false,
-            preferences,
+            preferences: albumPreferences,
             ...(existing.fulfilled ? {
               fulfilled: false,
               fulfilledAtMs: null,
@@ -387,7 +410,7 @@ export function useWantedAlbums() {
           });
         } else {
           byId.set(request.albumId.toLowerCase(), {
-            ...request,
+            ...albumRequest,
             paused: false,
             fulfilled: false,
             fulfilledAtMs: null,
@@ -395,7 +418,7 @@ export function useWantedAlbums() {
             downloadReceipt: null,
             ownedTrackCount: null,
             watchDespiteOwnership: false,
-            preferences,
+            preferences: albumPreferences,
             addedAtMs: Date.now(),
             lastCheckedAtMs: null,
             sourceCount: 0,
