@@ -711,6 +711,16 @@ pub async fn transfer_relay_release_source(
 }
 
 #[tauri::command]
+pub async fn transfer_patch_release_file(
+    manager: State<'_, ConnectionManager>,
+    request: downloads::PatchReleaseFileRequest,
+) -> Result<downloads::TransferQueueSnapshot, String> {
+    manager
+        .patch_release_file(request)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn transfer_reveal_release_path(
     manager: State<'_, ConnectionManager>,
     release_id: String,

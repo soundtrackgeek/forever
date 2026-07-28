@@ -107,6 +107,37 @@ pub struct ReleaseAlternativeSource {
     pub files: Vec<ReleaseAlternativeFile>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchRepairSnapshot {
+    pub reason: String,
+    pub original_username: Option<String>,
+    pub original_remote_filename: Option<String>,
+    pub requested_at_ms: u64,
+    #[serde(default)]
+    pub repaired_at_ms: Option<u64>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchReleaseFileRequest {
+    pub release_id: String,
+    #[serde(default)]
+    pub target_transfer_id: Option<String>,
+    #[serde(default)]
+    pub target_track_number: Option<u32>,
+    pub title: String,
+    pub username: String,
+    pub remote_filename: String,
+    pub size_bytes: u64,
+    #[serde(default)]
+    pub allow_incompatible: bool,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
 impl TransferStatus {
     fn occupies_slot(self) -> bool {
         matches!(
@@ -132,6 +163,8 @@ pub struct TransferSnapshot {
     pub file_count: Option<u32>,
     #[serde(default)]
     pub expected_track_count: Option<u32>,
+    #[serde(default)]
+    pub release_group_id: Option<String>,
     pub title: String,
     pub username: String,
     pub remote_filename: String,
@@ -159,6 +192,8 @@ pub struct TransferSnapshot {
     pub filed_at_ms: Option<u64>,
     #[serde(default)]
     pub soundcheck: Option<SoundcheckResult>,
+    #[serde(default)]
+    pub patch_repair: Option<PatchRepairSnapshot>,
     #[serde(default)]
     pub alternative_sources: Vec<ReleaseAlternativeSource>,
     pub created_at_ms: u64,
@@ -206,6 +241,8 @@ pub struct EnqueueReleaseRequest {
     pub files: Vec<EnqueueReleaseFileRequest>,
     #[serde(default)]
     pub expected_track_count: Option<u32>,
+    #[serde(default)]
+    pub release_group_id: Option<String>,
     #[serde(default)]
     pub alternatives: Vec<ReleaseAlternativeSource>,
 }
@@ -452,6 +489,7 @@ impl TransferHub {
             file_index: None,
             file_count: None,
             expected_track_count: None,
+            release_group_id: None,
             title: request.title.trim().to_owned(),
             username: request.username,
             remote_filename: normalize_remote_filename(&request.remote_filename),
@@ -471,6 +509,7 @@ impl TransferHub {
             verified_at_ms: None,
             filed_at_ms: None,
             soundcheck: None,
+            patch_repair: None,
             alternative_sources: Vec::new(),
             created_at_ms: now,
             updated_at_ms: now,
@@ -527,6 +566,7 @@ impl TransferHub {
                 file_index: Some(u32::try_from(index + 1).unwrap_or(u32::MAX)),
                 file_count: Some(file_count),
                 expected_track_count: request.expected_track_count,
+                release_group_id: request.release_group_id.clone(),
                 title: file.title.trim().to_owned(),
                 username: request.username.clone(),
                 remote_filename: normalize_remote_filename(&file.remote_filename),
@@ -546,6 +586,7 @@ impl TransferHub {
                 verified_at_ms: None,
                 filed_at_ms: None,
                 soundcheck: None,
+                patch_repair: None,
                 alternative_sources: alternatives.clone(),
                 created_at_ms: now.saturating_add(index as u64),
                 updated_at_ms: now,
@@ -1031,6 +1072,213 @@ impl TransferHub {
         self.switch_release_source(release_id, &username, &remote_folder)
     }
 
+    pub fn patch_release_file(
+        &self,
+        request: PatchReleaseFileRequest,
+    ) -> Result<TransferQueueSnapshot, TransferError> {
+        validate_patch_request(&request)?;
+
+        let mut transfers = self
+            .transfers
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let release_indices = transfers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, transfer)| {
+                (transfer.release_id.as_deref() == Some(request.release_id.as_str()))
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        if release_indices.is_empty() {
+            return Err(TransferError::ReleaseNotFound);
+        }
+        if release_indices.iter().any(|index| {
+            let transfer = &transfers[*index];
+            request.target_transfer_id.as_deref() != Some(transfer.id.as_str())
+                && transfer.username.eq_ignore_ascii_case(&request.username)
+                && transfer
+                    .remote_filename
+                    .eq_ignore_ascii_case(&normalize_remote_filename(&request.remote_filename))
+        }) {
+            return Err(TransferError::PatchCandidateAlreadyQueued);
+        }
+
+        let now = timestamp_ms();
+        let normalized_remote = normalize_remote_filename(&request.remote_filename);
+        let candidate_extension =
+            audio_extension(&normalized_remote).ok_or(TransferError::InvalidPatchCandidate)?;
+        let warnings = normalized_patch_warnings(&request.warnings);
+
+        if let Some(target_id) = request.target_transfer_id.as_deref() {
+            let target_index = release_indices
+                .iter()
+                .copied()
+                .find(|index| transfers[*index].id == target_id)
+                .ok_or(TransferError::NotFound)?;
+            let reason =
+                patch_issue_reason(&transfers[target_index]).ok_or(TransferError::NoPatchIssue)?;
+            let current_extension = audio_extension(&transfers[target_index].remote_filename)
+                .ok_or(TransferError::InvalidPatchTarget)?;
+            if !current_extension.eq_ignore_ascii_case(candidate_extension)
+                && !request.allow_incompatible
+            {
+                return Err(TransferError::IncompatiblePatchCandidate);
+            }
+
+            let replacement_path = if current_extension.eq_ignore_ascii_case(candidate_extension) {
+                PathBuf::from(&transfers[target_index].local_path)
+            } else {
+                let directory = Path::new(&transfers[target_index].local_path)
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .or_else(|| {
+                        transfers[target_index]
+                            .release_folder
+                            .as_deref()
+                            .map(PathBuf::from)
+                    })
+                    .ok_or(TransferError::InvalidPatchTarget)?;
+                unique_target_path(&directory, &normalized_remote, &transfers)
+            };
+            preserve_rejected_file(Path::new(&transfers[target_index].local_path))?;
+            let old_partial = partial_path(Path::new(&transfers[target_index].local_path));
+            if old_partial.exists() {
+                fs::remove_file(old_partial)?;
+            }
+
+            for index in &release_indices {
+                transfers[*index].filed_at_ms = None;
+            }
+
+            let transfer = &mut transfers[target_index];
+            let original_username = transfer.username.clone();
+            let original_remote_filename = transfer.remote_filename.clone();
+            transfer.username = request.username.trim().to_owned();
+            transfer.remote_filename = normalized_remote;
+            transfer.title = request.title.trim().to_owned();
+            transfer.size_bytes = request.size_bytes;
+            transfer.transferred_bytes = 0;
+            transfer.status = TransferStatus::Queued;
+            transfer.local_path = replacement_path.to_string_lossy().into_owned();
+            transfer.error = None;
+            transfer.retry_count = 0;
+            transfer.retry_at_ms = None;
+            transfer.verification_status = VerificationStatus::Pending;
+            transfer.verification_message = None;
+            transfer.verified_at_ms = None;
+            transfer.filed_at_ms = None;
+            transfer.soundcheck = None;
+            transfer.patch_repair = Some(PatchRepairSnapshot {
+                reason,
+                original_username: Some(original_username),
+                original_remote_filename: Some(original_remote_filename),
+                requested_at_ms: now,
+                repaired_at_ms: None,
+                warnings,
+            });
+            reset_runtime_state(transfer);
+            transfer.updated_at_ms = now;
+        } else {
+            let track_number = request
+                .target_track_number
+                .filter(|number| (1..=300).contains(number))
+                .ok_or(TransferError::InvalidPatchTarget)?;
+            let mut format_counts = HashMap::<String, usize>::new();
+            for index in &release_indices {
+                if let Some(extension) = audio_extension(&transfers[*index].remote_filename) {
+                    *format_counts
+                        .entry(extension.to_ascii_lowercase())
+                        .or_default() += 1;
+                }
+            }
+            if format_counts
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+                .is_some_and(|(format, _)| {
+                    !format.eq_ignore_ascii_case(candidate_extension) && !request.allow_incompatible
+                })
+            {
+                return Err(TransferError::IncompatiblePatchCandidate);
+            }
+            if release_indices.iter().any(|index| {
+                let transfer = &transfers[*index];
+                audio_extension(&transfer.remote_filename).is_some()
+                    && transfer_track_number(transfer) == Some(track_number)
+            }) {
+                return Err(TransferError::NoPatchIssue);
+            }
+            let first = transfers[release_indices[0]].clone();
+            if first
+                .expected_track_count
+                .is_some_and(|expected| track_number > expected)
+            {
+                return Err(TransferError::InvalidPatchTarget);
+            }
+            let release_directory = first
+                .release_folder
+                .as_deref()
+                .map(PathBuf::from)
+                .or_else(|| Path::new(&first.local_path).parent().map(Path::to_path_buf))
+                .ok_or(TransferError::InvalidPatchTarget)?;
+            fs::create_dir_all(&release_directory)?;
+            let local_path = unique_target_path(&release_directory, &normalized_remote, &transfers);
+            let file_count =
+                u32::try_from(release_indices.len().saturating_add(1)).unwrap_or(u32::MAX);
+            for index in &release_indices {
+                transfers[*index].file_count = Some(file_count);
+                transfers[*index].filed_at_ms = None;
+            }
+            let file_id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            transfers.push(TransferSnapshot {
+                id: format!("download-{now}-{file_id}"),
+                release_id: Some(request.release_id),
+                release_title: first.release_title,
+                release_folder: Some(release_directory.to_string_lossy().into_owned()),
+                file_index: Some(track_number),
+                file_count: Some(file_count),
+                expected_track_count: first.expected_track_count,
+                release_group_id: first.release_group_id,
+                title: request.title.trim().to_owned(),
+                username: request.username.trim().to_owned(),
+                remote_filename: normalized_remote,
+                size_bytes: request.size_bytes,
+                transferred_bytes: 0,
+                speed_bytes_per_second: 0,
+                eta_seconds: None,
+                status: TransferStatus::Queued,
+                queue_position: None,
+                local_path: local_path.to_string_lossy().into_owned(),
+                error: None,
+                retry_count: 0,
+                retry_at_ms: None,
+                waiting_since_ms: None,
+                verification_status: VerificationStatus::Pending,
+                verification_message: None,
+                verified_at_ms: None,
+                filed_at_ms: None,
+                soundcheck: None,
+                patch_repair: Some(PatchRepairSnapshot {
+                    reason: format!("Track {track_number} was missing from the completed release."),
+                    original_username: None,
+                    original_remote_filename: None,
+                    requested_at_ms: now,
+                    repaired_at_ms: None,
+                    warnings,
+                }),
+                alternative_sources: first.alternative_sources,
+                created_at_ms: now,
+                updated_at_ms: now,
+                connection_token: None,
+                transfer_token: None,
+            });
+        }
+
+        drop(transfers);
+        self.persist_and_publish()?;
+        Ok(self.snapshot())
+    }
+
     pub fn clear_completed(&self) -> Result<TransferQueueSnapshot, TransferError> {
         self.mutate(|transfers| {
             let completed_release_ids: Vec<String> = transfers
@@ -1357,8 +1605,12 @@ impl TransferHub {
                 transfer.transfer_token = None;
                 transfer.updated_at_ms = timestamp_ms();
                 refresh_verification(transfer);
-                if self.soundcheck_enabled.load(Ordering::SeqCst) {
-                    refresh_soundcheck(transfer, false);
+                let patch_repair = transfer.patch_repair.is_some();
+                if patch_repair || self.soundcheck_enabled.load(Ordering::SeqCst) {
+                    refresh_soundcheck(transfer, patch_repair);
+                }
+                if let Some(repair) = transfer.patch_repair.as_mut() {
+                    repair.repaired_at_ms = Some(timestamp_ms());
                 }
             }
         })?;
@@ -1715,6 +1967,16 @@ fn validate_release_request(request: &EnqueueReleaseRequest) -> Result<(), Trans
         || request
             .expected_track_count
             .is_some_and(|count| count == 0 || count > 5_000)
+        || request.release_group_id.as_deref().is_some_and(|id| {
+            id.len() != 36
+                || id
+                    .chars()
+                    .enumerate()
+                    .any(|(index, character)| match index {
+                        8 | 13 | 18 | 23 => character != '-',
+                        _ => !character.is_ascii_hexdigit(),
+                    })
+        })
         || request.files.iter().any(|file| {
             file.title.trim().is_empty()
                 || file.remote_filename.trim().is_empty()
@@ -1960,6 +2222,99 @@ fn refresh_soundcheck(transfer: &mut TransferSnapshot, deep: bool) {
     } else {
         None
     };
+}
+
+fn audio_extension(filename: &str) -> Option<&str> {
+    let extension = Path::new(filename).extension()?.to_str()?;
+    [
+        "aac", "aif", "aiff", "alac", "ape", "caf", "flac", "m4a", "mp4", "mp3", "oga", "ogg",
+        "opus", "wav", "wma", "wv",
+    ]
+    .iter()
+    .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+    .then_some(extension)
+}
+
+fn transfer_track_number(transfer: &TransferSnapshot) -> Option<u32> {
+    transfer
+        .soundcheck
+        .as_ref()
+        .and_then(|result| result.track_number)
+        .or_else(|| {
+            safe_basename(&transfer.remote_filename)
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u32>()
+                .ok()
+                .filter(|number| *number > 0)
+        })
+}
+
+fn patch_issue_reason(transfer: &TransferSnapshot) -> Option<String> {
+    if transfer.status == TransferStatus::Failed {
+        return Some(
+            transfer
+                .error
+                .clone()
+                .unwrap_or_else(|| "The original transfer failed.".to_owned()),
+        );
+    }
+    match transfer.verification_status {
+        VerificationStatus::Missing => {
+            return Some("The completed file is missing from the release folder.".to_owned())
+        }
+        VerificationStatus::SizeMismatch => {
+            return Some(
+                transfer
+                    .verification_message
+                    .clone()
+                    .unwrap_or_else(|| "The completed file has an unexpected size.".to_owned()),
+            )
+        }
+        VerificationStatus::Pending | VerificationStatus::Verified => {}
+    }
+    transfer.soundcheck.as_ref().and_then(|result| {
+        (result.status == SoundcheckStatus::Failed).then(|| {
+            result
+                .issues
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "Soundcheck could not read the original audio.".to_owned())
+        })
+    })
+}
+
+fn normalized_patch_warnings(warnings: &[String]) -> Vec<String> {
+    warnings
+        .iter()
+        .map(|warning| warning.trim())
+        .filter(|warning| !warning.is_empty())
+        .map(|warning| warning.chars().take(180).collect::<String>())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .take(6)
+        .collect()
+}
+
+fn validate_patch_request(request: &PatchReleaseFileRequest) -> Result<(), TransferError> {
+    if request.release_id.trim().is_empty()
+        || request.release_id.len() > 256
+        || request.username.trim().is_empty()
+        || request.username.len() > 256
+        || request.title.trim().is_empty()
+        || request.title.len() > 1_024
+        || request.remote_filename.trim().is_empty()
+        || request.remote_filename.len() > 4_096
+        || request.size_bytes == 0
+        || request.target_transfer_id.is_some() == request.target_track_number.is_some()
+    {
+        return Err(TransferError::InvalidPatchCandidate);
+    }
+    if audio_extension(&request.remote_filename).is_none() {
+        return Err(TransferError::InvalidPatchCandidate);
+    }
+    Ok(())
 }
 
 fn automatic_retry_delay_ms(attempt: u32) -> u64 {
@@ -2215,6 +2570,16 @@ pub enum TransferError {
     AlternativeSourceMismatch,
     #[error("Choose a complete, valid folder before relaying this release to another source.")]
     InvalidAlternativeSource,
+    #[error("Choose one valid audio file from a live Patch Bay result.")]
+    InvalidPatchCandidate,
+    #[error("That file is not a repairable track in this completed release.")]
+    InvalidPatchTarget,
+    #[error("Soundcheck does not report a repairable issue for that track.")]
+    NoPatchIssue,
+    #[error("That replacement is already part of this release.")]
+    PatchCandidateAlreadyQueued,
+    #[error("That replacement changes the audio format. Review and accept the compatibility warning first.")]
+    IncompatiblePatchCandidate,
     #[error("That exact listener and folder are already in the release queue.")]
     DuplicateReleaseSource,
     #[error("Only a queued release can be reordered.")]
@@ -2261,6 +2626,7 @@ mod tests {
             file_index: Some(file_index),
             file_count: Some(2),
             expected_track_count: Some(2),
+            release_group_id: None,
             title: remote_filename.to_owned(),
             username: username.to_owned(),
             remote_filename: remote_filename.to_owned(),
@@ -2280,6 +2646,7 @@ mod tests {
             verified_at_ms: None,
             filed_at_ms: None,
             soundcheck: None,
+            patch_repair: None,
             alternative_sources: Vec::new(),
             created_at_ms: u64::from(file_index),
             updated_at_ms: u64::from(file_index),
@@ -2308,6 +2675,7 @@ mod tests {
             file_index: None,
             file_count: None,
             expected_track_count: None,
+            release_group_id: None,
             title: "Track".to_owned(),
             username: "peer".to_owned(),
             remote_filename: "Track.flac".to_owned(),
@@ -2331,6 +2699,7 @@ mod tests {
             verified_at_ms: None,
             filed_at_ms: None,
             soundcheck: None,
+            patch_repair: None,
             alternative_sources: Vec::new(),
             created_at_ms: 0,
             updated_at_ms: 0,
@@ -2364,6 +2733,58 @@ mod tests {
     }
 
     #[test]
+    fn patch_requests_require_one_repair_target_and_live_audio() {
+        let valid = PatchReleaseFileRequest {
+            release_id: "release-one".to_owned(),
+            target_transfer_id: Some("track-two".to_owned()),
+            target_track_number: None,
+            title: "02 - Repaired.flac".to_owned(),
+            username: "repair-source".to_owned(),
+            remote_filename: "Music\\Album\\02 - Repaired.flac".to_owned(),
+            size_bytes: 42,
+            allow_incompatible: false,
+            warnings: Vec::new(),
+        };
+        assert!(validate_patch_request(&valid).is_ok());
+
+        let mut ambiguous = valid;
+        ambiguous.target_track_number = Some(2);
+        assert!(matches!(
+            validate_patch_request(&ambiguous),
+            Err(TransferError::InvalidPatchCandidate)
+        ));
+        ambiguous.target_transfer_id = None;
+        ambiguous.remote_filename = "Music\\Album\\cover.jpg".to_owned();
+        assert!(matches!(
+            validate_patch_request(&ambiguous),
+            Err(TransferError::InvalidPatchCandidate)
+        ));
+    }
+
+    #[test]
+    fn patch_reason_preserves_the_original_soundcheck_failure() {
+        let mut transfer = release_transfer(
+            "track-two",
+            "release-one",
+            "original-source",
+            "Music\\Album\\02 - Broken.flac",
+            TransferStatus::Completed,
+            2,
+        );
+        transfer.verification_status = VerificationStatus::Verified;
+        transfer.soundcheck = Some(SoundcheckResult {
+            status: SoundcheckStatus::Failed,
+            issues: vec!["Decoder stopped before the final frame.".to_owned()],
+            ..SoundcheckResult::default()
+        });
+
+        assert_eq!(
+            patch_issue_reason(&transfer).as_deref(),
+            Some("Decoder stopped before the final frame.")
+        );
+    }
+
+    #[test]
     fn persisted_transfers_keep_resume_progress_without_runtime_tokens() {
         let directory = tempfile::tempdir().unwrap();
         let final_path = directory.path().join("Track.flac");
@@ -2376,6 +2797,7 @@ mod tests {
             file_index: None,
             file_count: None,
             expected_track_count: None,
+            release_group_id: None,
             title: "Track.flac".to_owned(),
             username: "peer".to_owned(),
             remote_filename: "Music\\Track.flac".to_owned(),
@@ -2395,6 +2817,7 @@ mod tests {
             verified_at_ms: None,
             filed_at_ms: None,
             soundcheck: None,
+            patch_repair: None,
             alternative_sources: Vec::new(),
             created_at_ms: 1,
             updated_at_ms: 2,
@@ -2527,6 +2950,7 @@ mod tests {
                 size_bytes: 112_400_000,
             }],
             expected_track_count: Some(1),
+            release_group_id: None,
             alternatives: Vec::new(),
         };
         assert!(validate_release_request(&request).is_ok());
@@ -2551,6 +2975,7 @@ mod tests {
                 size_bytes: 100,
             }],
             expected_track_count: Some(1),
+            release_group_id: None,
             alternatives: Vec::new(),
         };
         let queued = release_transfer(

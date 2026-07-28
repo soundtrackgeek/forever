@@ -5,6 +5,32 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.47] - 2026-07-28
+
+### Added
+
+- **Patch Bay** inside Arrival Desk finds targeted replacements for missing,
+  failed, size-mismatched, or corrupt album tracks while leaving verified files
+  untouched.
+- Live candidates are ranked by track number, normalized title, format,
+  duration, sample rate, bit depth, upload-slot readiness, and confidence, with
+  an explicit compatibility confirmation for risky changes.
+- Album downloads persist their MusicBrainz release-group identity. Patch Bay
+  can load the earliest official tracklist to name missing sequence positions,
+  while safely falling back to the selected Soulseek source count offline.
+- Native and frontend regression coverage protects repair targeting, candidate
+  ranking, official sequence parsing, and the Arrival Desk repair handoff.
+
+### Changed
+
+- Repair transfers remain visible at Arrival Desk through queued, downloading,
+  deep-checking, repaired, and needs-attention states, including across restarts.
+- A selected replacement preserves the rejected original, resets only the
+  target track, follows the configurable one-file-per-user transfer lanes, and
+  receives an automatic Deep Soundcheck after arrival.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.47`.
+
 ## [0.0.46] - 2026-07-28
 
 ### Added

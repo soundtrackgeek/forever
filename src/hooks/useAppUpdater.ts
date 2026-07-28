@@ -35,18 +35,20 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.45",
-  version: "0.0.46",
-  body: `## What’s new in Forever 0.0.46
+  currentVersion: "0.0.46",
+  version: "0.0.47",
+  body: `## What’s new in Forever 0.0.47
 
 ### Added
 
-- Soundcheck automatically inspects completed audio headers, duration, codec details, and track sequence without modifying the files.
-- Arrival Desk now expands into per-track evidence and offers a full decoder-based Deep Scan.
+- Patch Bay repairs one missing, corrupt, or mismatched album track without replacing verified files.
+- Live candidates are ranked by track identity, format, duration, sample rate, bit depth, source readiness, and confidence.
+- MusicBrainz’s earliest official tracklist can identify and name a missing position when the album identity is known.
 
 ### Changed
 
-- Album downloads carry their expected track count into Soundcheck, and failed checks can hand off to Signal Relay for a replacement.`,
+- Repairs remain visible through queued, downloading, deep-checking, and repaired states, survive restarts, and preserve the rejected original.
+- Format or audio-detail changes require an explicit compatibility confirmation before queueing.`,
   date: "2026-07-28",
 };
 

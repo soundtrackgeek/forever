@@ -868,17 +868,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.46 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.47 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Soundcheck automatically inspects completed audio headers, duration, codec details, and track sequence without modifying the files.",
+        "Patch Bay repairs one missing, corrupt, or mismatched album track without replacing verified files.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Album downloads carry their expected track count into Soundcheck, and failed checks can hand off to Signal Relay for a replacement.",
+        "Repairs remain visible through queued, downloading, deep-checking, and repaired states, survive restarts, and preserve the rejected original.",
       ),
     ).toBeInTheDocument();
     expect(

@@ -8,7 +8,7 @@ use tauri::State;
 use tokio::sync::{Mutex, RwLock};
 
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "Forever/0.0.46 (https://github.com/soundtrackgeek/forever)";
+const USER_AGENT: &str = "Forever/0.0.47 (https://github.com/soundtrackgeek/forever)";
 const REQUEST_INTERVAL: Duration = Duration::from_millis(1_050);
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const MAX_CATALOG_PAGES: usize = 3;
@@ -68,6 +68,8 @@ struct ReleaseGroupResponse {
 #[derive(Clone, Debug, Deserialize)]
 struct OfficialRelease {
     #[serde(default)]
+    id: String,
+    #[serde(default)]
     date: String,
     #[serde(rename = "track-count")]
     track_count: Option<u32>,
@@ -76,6 +78,39 @@ struct OfficialRelease {
 #[derive(Clone, Debug, Deserialize)]
 struct OfficialReleaseResponse {
     releases: Vec<OfficialRelease>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct OfficialTracklistResponse {
+    #[serde(default)]
+    media: Vec<OfficialMedium>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct OfficialMedium {
+    #[serde(default)]
+    position: u32,
+    #[serde(default)]
+    tracks: Vec<OfficialTrack>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct OfficialTrack {
+    #[serde(default)]
+    position: u32,
+    title: String,
+    #[serde(default)]
+    length: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumTrack {
+    pub position: u32,
+    pub disc_number: u32,
+    pub disc_position: u32,
+    pub title: String,
+    pub duration_ms: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -98,6 +133,7 @@ pub struct MusicBrainzClient {
     artist_cache: RwLock<HashMap<String, CacheEntry<Vec<AlbumArtist>>>>,
     catalog_cache: RwLock<HashMap<String, CacheEntry<AlbumCatalog>>>,
     track_count_cache: RwLock<HashMap<String, CacheEntry<Option<u32>>>>,
+    tracklist_cache: RwLock<HashMap<String, CacheEntry<Vec<AlbumTrack>>>>,
 }
 
 impl MusicBrainzClient {
@@ -122,6 +158,7 @@ impl MusicBrainzClient {
             artist_cache: RwLock::new(HashMap::new()),
             catalog_cache: RwLock::new(HashMap::new()),
             track_count_cache: RwLock::new(HashMap::new()),
+            tracklist_cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -304,6 +341,88 @@ impl MusicBrainzClient {
         );
         Ok(track_count)
     }
+
+    pub async fn official_tracklist(
+        &self,
+        release_group_id: &str,
+    ) -> Result<Vec<AlbumTrack>, String> {
+        let release_group_id = release_group_id.trim();
+        if !is_musicbrainz_id(release_group_id) {
+            return Err(
+                "Choose a valid MusicBrainz album before loading its tracklist.".to_owned(),
+            );
+        }
+        if let Some(cached) = self.tracklist_cache.read().await.get(release_group_id) {
+            if cached.stored_at.elapsed() <= CACHE_TTL {
+                return Ok(cached.value.clone());
+            }
+        }
+
+        self.wait_for_request_slot().await;
+        let releases = self
+            .client()?
+            .get(format!("{MUSICBRAINZ_API}/release"))
+            .query(&[
+                ("release-group", release_group_id.to_owned()),
+                ("status", "official".to_owned()),
+                ("fmt", "json".to_owned()),
+                ("limit", "100".to_owned()),
+            ])
+            .send()
+            .await
+            .map_err(request_error)?
+            .error_for_status()
+            .map_err(request_error)?
+            .json::<OfficialReleaseResponse>()
+            .await
+            .map_err(request_error)?
+            .releases;
+        let canonical_count = canonical_track_count(&releases);
+        let release = releases
+            .iter()
+            .filter(|release| !release.id.is_empty())
+            .filter(|release| canonical_count.is_none() || release.track_count == canonical_count)
+            .min_by(|left, right| {
+                left.date
+                    .is_empty()
+                    .cmp(&right.date.is_empty())
+                    .then_with(|| left.date.cmp(&right.date))
+                    .then_with(|| left.id.cmp(&right.id))
+            })
+            .ok_or_else(|| {
+                "MusicBrainz has no official tracklist for this album yet.".to_owned()
+            })?;
+
+        self.wait_for_request_slot().await;
+        let response = self
+            .client()?
+            .get(format!("{MUSICBRAINZ_API}/release/{}", release.id))
+            .query(&[("inc", "recordings"), ("fmt", "json")])
+            .send()
+            .await
+            .map_err(request_error)?
+            .error_for_status()
+            .map_err(request_error)?
+            .json::<OfficialTracklistResponse>()
+            .await
+            .map_err(request_error)?;
+        let tracks = flatten_official_tracklist(response);
+        if tracks.is_empty() {
+            return Err(
+                "MusicBrainz returned an empty official tracklist for this album.".to_owned(),
+            );
+        }
+        let mut cache = self.tracklist_cache.write().await;
+        trim_cache(&mut cache, release_group_id, MAX_TRACK_COUNT_CACHE_ENTRIES);
+        cache.insert(
+            release_group_id.to_owned(),
+            CacheEntry {
+                stored_at: Instant::now(),
+                value: tracks.clone(),
+            },
+        );
+        Ok(tracks)
+    }
 }
 
 fn canonical_track_count(releases: &[OfficialRelease]) -> Option<u32> {
@@ -331,6 +450,28 @@ fn canonical_track_count(releases: &[OfficialRelease]) -> Option<u32> {
             },
         )
         .map(|(count, _)| count)
+}
+
+fn flatten_official_tracklist(mut response: OfficialTracklistResponse) -> Vec<AlbumTrack> {
+    response.media.sort_by_key(|medium| medium.position);
+    let mut position = 0_u32;
+    let mut tracks = Vec::new();
+    for medium in response.media {
+        let disc_number = medium.position.max(1);
+        let mut medium_tracks = medium.tracks;
+        medium_tracks.sort_by_key(|track| track.position);
+        for track in medium_tracks {
+            position = position.saturating_add(1);
+            tracks.push(AlbumTrack {
+                position,
+                disc_number,
+                disc_position: track.position.max(1),
+                title: track.title,
+                duration_ms: track.length,
+            });
+        }
+    }
+    tracks
 }
 
 fn trim_cache<T>(cache: &mut HashMap<String, CacheEntry<T>>, incoming: &str, limit: usize) {
@@ -394,6 +535,14 @@ pub async fn album_official_track_count(
     client.official_track_count(&release_group_id).await
 }
 
+#[tauri::command]
+pub async fn album_official_tracklist(
+    client: State<'_, MusicBrainzClient>,
+    release_group_id: String,
+) -> Result<Vec<AlbumTrack>, String> {
+    client.official_tracklist(&release_group_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,18 +601,55 @@ mod tests {
     fn chooses_the_common_track_count_from_the_earliest_official_year() {
         let releases = vec![
             OfficialRelease {
+                id: "release-one".to_owned(),
                 date: "1987-08-03".to_owned(),
                 track_count: Some(12),
             },
             OfficialRelease {
+                id: "release-two".to_owned(),
                 date: "1987-09-01".to_owned(),
                 track_count: Some(12),
             },
             OfficialRelease {
+                id: "release-three".to_owned(),
                 date: "2006-01-01".to_owned(),
                 track_count: Some(16),
             },
         ];
         assert_eq!(canonical_track_count(&releases), Some(12));
+    }
+
+    #[test]
+    fn flattens_official_multidisc_tracklists_in_play_order() {
+        let response = serde_json::from_str::<OfficialTracklistResponse>(
+            r#"{
+              "media": [
+                {"position": 2, "tracks": [{"position": 1, "title": "Second disc", "length": 230000}]},
+                {"position": 1, "tracks": [
+                  {"position": 2, "title": "Track two", "length": 220000},
+                  {"position": 1, "title": "Track one", "length": 210000}
+                ]}
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let tracks = flatten_official_tracklist(response);
+        assert_eq!(
+            tracks
+                .iter()
+                .map(|track| (
+                    track.position,
+                    track.disc_number,
+                    track.disc_position,
+                    track.title.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, 1, 1, "Track one"),
+                (2, 1, 2, "Track two"),
+                (3, 2, 1, "Second disc"),
+            ]
+        );
     }
 }

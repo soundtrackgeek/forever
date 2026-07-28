@@ -13,6 +13,7 @@ export type Arrival = {
   verifiedCount: number;
   missingCount: number;
   issueCount: number;
+  repairing: boolean;
   soundcheck: ReleaseSoundcheck;
 };
 
@@ -20,7 +21,11 @@ export function arrivalForGroup(
   group: TransferGroup,
   archiveOwned: boolean,
 ): Arrival | null {
-  if (group.status !== "completed" || !group.releaseId) return null;
+  if (!group.releaseId) return null;
+  const repairing = group.status !== "completed" && group.transfers.some(
+    (transfer) => Boolean(transfer.patchRepair) && transfer.status !== "completed",
+  );
+  if (group.status !== "completed" && !repairing) return null;
   const audio = group.transfers.filter(isAudioTransfer);
   if (audio.length === 0) return null;
 
@@ -45,7 +50,8 @@ export function arrivalForGroup(
   const soundcheck = summarizeSoundcheck(group.transfers);
 
   let state: ArrivalState = "ready";
-  if (archiveOwned || manuallyFiled) state = "filed";
+  if (repairing) state = "attention";
+  else if (archiveOwned || manuallyFiled) state = "filed";
   else if (allAudioMissing && mismatchCount === 0 && failedCount === 0) state = "moved";
   else if (missingCount || mismatchCount || failedCount || soundcheck.state === "failed") state = "attention";
 
@@ -59,6 +65,7 @@ export function arrivalForGroup(
     verifiedCount,
     missingCount,
     issueCount: missingCount + mismatchCount + failedCount,
+    repairing,
     soundcheck,
   };
 }

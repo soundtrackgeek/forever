@@ -79,6 +79,7 @@ pub fn run() {
             connection::transfer_retry_release_issues,
             connection::transfer_switch_release_source,
             connection::transfer_relay_release_source,
+            connection::transfer_patch_release_file,
             connection::transfer_reveal_release_path,
             connection::folder_inspect,
             connection::shares_browse,
@@ -109,6 +110,7 @@ pub fn run() {
             musicbrainz::album_artists_search,
             musicbrainz::album_catalog,
             musicbrainz::album_official_track_count,
+            musicbrainz::album_official_tracklist,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

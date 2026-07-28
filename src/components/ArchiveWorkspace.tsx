@@ -19,7 +19,9 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { type ReactNode, useMemo, useState } from "react";
-import type { ArchiveStatus, WantedAlbum, WantedSnapshot } from "../types";
+import type { PatchReleaseFileInput } from "../hooks/useSoulseekTransfers";
+import type { SearchSessionRecord } from "../hooks/useSoulseekSearch";
+import type { AlbumTrack, ArchiveStatus, WantedAlbum, WantedSnapshot } from "../types";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { buildArrivals } from "../utils/arrivals";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
@@ -53,6 +55,9 @@ type ArchiveWorkspaceProps = {
   onVerifyRelease: (releaseId: string) => Promise<unknown>;
   onSoundcheckRelease: (releaseId: string, deep: boolean) => Promise<unknown>;
   onFindAlternatives: (releaseId: string, title: string) => Promise<unknown>;
+  onPatchReleaseFile: (request: PatchReleaseFileInput) => Promise<unknown>;
+  relayRecords: Record<string, SearchSessionRecord>;
+  onLoadOfficialTracklist: (releaseGroupId: string) => Promise<AlbumTrack[]>;
   soundcheckEnabled: boolean;
   onSetReleaseFiled: (releaseId: string, filed: boolean) => Promise<unknown>;
   onClearReleaseHistory: (releaseIds: string[]) => Promise<unknown>;
@@ -138,6 +143,9 @@ export function ArchiveWorkspace({
   onVerifyRelease,
   onSoundcheckRelease,
   onFindAlternatives,
+  onPatchReleaseFile,
+  relayRecords,
+  onLoadOfficialTracklist,
   soundcheckEnabled,
   onSetReleaseFiled,
   onClearReleaseHistory,
@@ -268,6 +276,10 @@ export function ArchiveWorkspace({
           onVerifyRelease={onVerifyRelease}
           onSoundcheckRelease={onSoundcheckRelease}
           onFindAlternatives={onFindAlternatives}
+          onPatchReleaseFile={onPatchReleaseFile}
+          relayRecords={relayRecords}
+          online={online}
+          onLoadOfficialTracklist={onLoadOfficialTracklist}
           soundcheckEnabled={soundcheckEnabled}
           onSetReleaseFiled={onSetReleaseFiled}
           onClearReleaseHistory={onClearReleaseHistory}

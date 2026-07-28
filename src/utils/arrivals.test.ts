@@ -61,4 +61,22 @@ describe("Arrival Desk lifecycle", () => {
     expect(result?.manuallyFiled).toBe(true);
     expect(result?.filedAtMs).toBe(42);
   });
+
+  it("keeps an in-flight Patch Bay repair visible at the Arrival Desk", () => {
+    const repairing = transfer("2", "pending");
+    repairing.status = "queued";
+    repairing.transferredBytes = 0;
+    repairing.patchRepair = {
+      reason: "The original decoder failed.",
+      originalUsername: "listener",
+      originalRemoteFilename: repairing.remoteFilename,
+      requestedAtMs: 3,
+      repairedAtMs: null,
+      warnings: [],
+    };
+
+    const result = arrival([transfer("1", "verified"), repairing]);
+    expect(result?.state).toBe("attention");
+    expect(result?.repairing).toBe(true);
+  });
 });

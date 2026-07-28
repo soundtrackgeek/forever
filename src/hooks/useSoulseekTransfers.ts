@@ -260,7 +260,17 @@ export type EnqueueReleaseInput = {
   remoteFolder: string;
   files: FolderFile[];
   expectedTrackCount?: number | null;
+  releaseGroupId?: string | null;
   alternatives?: ReleaseAlternativeSource[];
+};
+
+export type PatchReleaseFileInput = {
+  releaseId: string;
+  targetTransferId: string | null;
+  targetTrackNumber: number | null;
+  result: SearchResult;
+  warnings: string[];
+  allowIncompatible: boolean;
 };
 
 export type TransferCompletionNotice = {
@@ -556,6 +566,7 @@ export function useSoulseekTransfers() {
                   sizeBytes: file.sizeBytes,
                 })),
                 expectedTrackCount: release.expectedTrackCount ?? null,
+                releaseGroupId: release.releaseGroupId ?? null,
                 alternatives: release.alternatives ?? [],
               },
             },
@@ -592,6 +603,7 @@ export function useSoulseekTransfers() {
             fileIndex: index + 1,
             fileCount: release.files.length,
             expectedTrackCount: release.expectedTrackCount ?? null,
+            releaseGroupId: release.releaseGroupId ?? null,
             title: file.filename,
             username: release.username,
             remoteFilename: file.remoteFilename,
@@ -1128,6 +1140,122 @@ export function useSoulseekTransfers() {
     }
   }, [native, snapshot, switchReleaseSource]);
 
+  const patchReleaseFile = useCallback(async ({
+    releaseId,
+    targetTransferId,
+    targetTrackNumber,
+    result,
+    warnings,
+    allowIncompatible,
+  }: PatchReleaseFileInput) => {
+    setError(null);
+    if (result.source !== "live" || !result.filename || !result.sizeBytes) {
+      const message = "Choose one live Soulseek audio file for this repair.";
+      setError(message);
+      throw new Error(message);
+    }
+    const candidateFilename = result.filename;
+    const candidateSizeBytes = result.sizeBytes;
+    try {
+      if (native) {
+        const next = await invoke<TransferQueueSnapshot>("transfer_patch_release_file", {
+          request: {
+            releaseId,
+            targetTransferId,
+            targetTrackNumber,
+            title: basename(result.filename),
+            username: result.owner,
+            remoteFilename: result.filename,
+            sizeBytes: result.sizeBytes,
+            allowIncompatible,
+            warnings,
+          },
+        });
+        setSnapshot(next);
+        return next;
+      }
+
+      let nextSnapshot = emptySnapshot;
+      setSnapshot((current) => {
+        const requestedAtMs = Date.now();
+        const release = current.transfers.filter((transfer) => transfer.releaseId === releaseId);
+        if (!release.length) return current;
+        if (targetTransferId) {
+          nextSnapshot = withCount(current.transfers.map((transfer) => transfer.id !== targetTransferId ? transfer : {
+            ...transfer,
+            title: basename(candidateFilename),
+            username: result.owner,
+            remoteFilename: candidateFilename,
+            sizeBytes: candidateSizeBytes,
+            transferredBytes: 0,
+            speedBytesPerSecond: 0,
+            etaSeconds: null,
+            status: "queued" as const,
+            queuePosition: null,
+            error: null,
+            verificationStatus: "pending" as const,
+            verificationMessage: null,
+            verifiedAtMs: null,
+            soundcheck: null,
+            patchRepair: {
+              reason: transfer.soundcheck?.issues[0] ?? transfer.verificationMessage ?? transfer.error ?? "The original file needed repair.",
+              originalUsername: transfer.username,
+              originalRemoteFilename: transfer.remoteFilename,
+              requestedAtMs,
+              repairedAtMs: null,
+              warnings,
+            },
+            updatedAtMs: requestedAtMs,
+          }), current);
+          return nextSnapshot;
+        }
+        if (!targetTrackNumber) return current;
+        const first = release[0];
+        const fileCount = release.length + 1;
+        const created: Transfer = {
+          id: `preview-patch-${requestedAtMs}`,
+          releaseId,
+          releaseTitle: first.releaseTitle,
+          releaseFolder: first.releaseFolder,
+          fileIndex: targetTrackNumber,
+          fileCount,
+          expectedTrackCount: first.expectedTrackCount,
+          title: basename(candidateFilename),
+          username: result.owner,
+          remoteFilename: candidateFilename,
+          sizeBytes: candidateSizeBytes,
+          transferredBytes: 0,
+          speedBytesPerSecond: 0,
+          etaSeconds: null,
+          status: "queued",
+          queuePosition: null,
+          localPath: `${first.releaseFolder ?? "C:\\Users\\Music\\Forever"}\\${basename(candidateFilename)}`,
+          error: null,
+          verificationStatus: "pending",
+          patchRepair: {
+            reason: `Track ${targetTrackNumber} was missing from the completed release.`,
+            originalUsername: null,
+            originalRemoteFilename: null,
+            requestedAtMs,
+            repairedAtMs: null,
+            warnings,
+          },
+          createdAtMs: requestedAtMs,
+          updatedAtMs: requestedAtMs,
+        };
+        nextSnapshot = withCount([
+          ...current.transfers.map((transfer) => transfer.releaseId === releaseId ? { ...transfer, fileCount } : transfer),
+          created,
+        ], current);
+        return nextSnapshot;
+      });
+      return nextSnapshot;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      throw cause;
+    }
+  }, [native]);
+
   const clearCompletionNotice = useCallback(() => setCompletionNotice(null), []);
   const clearActivityNotice = useCallback(() => setActivityNotice(null), []);
   const clearError = useCallback(() => setError(null), []);
@@ -1262,6 +1390,7 @@ export function useSoulseekTransfers() {
       retryReleaseIssues,
       switchReleaseSource,
       relayReleaseSource,
+      patchReleaseFile,
       setMaxConcurrentDownloads,
       setRelaySuggestionMinutes,
       setSoundcheckEnabled,
@@ -1299,6 +1428,7 @@ export function useSoulseekTransfers() {
       retryReleaseIssues,
       switchReleaseSource,
       relayReleaseSource,
+      patchReleaseFile,
       setMaxConcurrentDownloads,
       setRelaySuggestionMinutes,
       setSoundcheckEnabled,

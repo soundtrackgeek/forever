@@ -52,6 +52,14 @@ export type AlbumSource = {
   representative: SearchResult;
 };
 
+export type AlbumTrack = {
+  position: number;
+  discNumber: number;
+  discPosition: number;
+  title: string;
+  durationMs: number | null;
+};
+
 export type WantedFormatPreference = "any" | "preferLossless" | "losslessOnly" | "mp3Only";
 
 export type WantedPreferences = {
@@ -317,6 +325,7 @@ export type Transfer = {
   fileIndex?: number | null;
   fileCount?: number | null;
   expectedTrackCount?: number | null;
+  releaseGroupId?: string | null;
   title: string;
   username: string;
   remoteFilename: string;
@@ -345,9 +354,19 @@ export type Transfer = {
   verifiedAtMs?: number | null;
   filedAtMs?: number | null;
   soundcheck?: SoundcheckResult | null;
+  patchRepair?: PatchRepairSnapshot | null;
   alternativeSources?: ReleaseAlternativeSource[];
   createdAtMs: number;
   updatedAtMs: number;
+};
+
+export type PatchRepairSnapshot = {
+  reason: string;
+  originalUsername: string | null;
+  originalRemoteFilename: string | null;
+  requestedAtMs: number;
+  repairedAtMs: number | null;
+  warnings: string[];
 };
 
 export type SoundcheckStatus = "pending" | "passed" | "review" | "failed" | "unsupported";

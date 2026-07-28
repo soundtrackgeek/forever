@@ -3,8 +3,9 @@ use super::{
     diagnostics::{DiagnosticEntry, Diagnostics},
     distributed::{DistributedHub, DistributedSnapshot, RequestAdmission},
     downloads::{
-        DownloadPlan, EnqueueReleaseRequest, EnqueueTransferRequest, ReleaseAlternativeSource,
-        TransferError, TransferHub, TransferPreparationMode, TransferQueueSnapshot, TransferTicket,
+        DownloadPlan, EnqueueReleaseRequest, EnqueueTransferRequest, PatchReleaseFileRequest,
+        ReleaseAlternativeSource, TransferError, TransferHub, TransferPreparationMode,
+        TransferQueueSnapshot, TransferTicket,
     },
     folders::{FolderError, FolderHub, FolderInspection, FolderTicket},
     local_shares::{
@@ -1269,6 +1270,16 @@ impl ConnectionManager {
     ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
         self.people.remember(&source.username)?;
         let snapshot = self.transfers.relay_release_source(release_id, source)?;
+        self.schedule_downloads();
+        Ok(snapshot)
+    }
+
+    pub fn patch_release_file(
+        &self,
+        request: PatchReleaseFileRequest,
+    ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
+        self.people.remember(&request.username)?;
+        let snapshot = self.transfers.patch_release_file(request)?;
         self.schedule_downloads();
         Ok(snapshot)
     }

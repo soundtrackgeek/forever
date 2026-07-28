@@ -1,5 +1,5 @@
 import { CheckCircle, DownloadSimple, MagnifyingGlass, Radio, Sliders, WarningCircle, X } from "@phosphor-icons/react";
-import { isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
@@ -47,6 +47,7 @@ import type {
   AlbumReleaseGroup,
   AlbumSearchContext,
   AlbumSource,
+  AlbumTrack,
   FolderInspection,
   ReleaseAlternativeSource,
   SearchResult,
@@ -318,6 +319,10 @@ function App() {
     return search.startSearch(sessionId, title);
   };
 
+  const loadOfficialTracklist = (releaseGroupId: string) => native
+    ? invoke<AlbumTrack[]>("album_official_tracklist", { releaseGroupId })
+    : Promise.resolve([]);
+
   const relayReleaseSource = async (releaseId: string, source: AlbumSource) => {
     const inspection = await folders.inspect(source.representative);
     const alternative: ReleaseAlternativeSource = {
@@ -394,18 +399,30 @@ function App() {
     void transfers.enqueue(result).catch(() => undefined);
   };
 
+  const expectedTrackCountFor = async (releaseGroupId: string | null, sourceCount: number) => {
+    if (!native || !releaseGroupId) return sourceCount || null;
+    try {
+      const official = await invoke<number | null>("album_official_track_count", { releaseGroupId });
+      return Math.max(sourceCount, official ?? 0) || null;
+    } catch {
+      return sourceCount || null;
+    }
+  };
+
   const queueAlbumSourceFor = async (
     context: AlbumSearchContext | null,
     source: AlbumSource,
     availableSources: AlbumSource[] = [],
   ) => {
     const inspection = await folders.inspect(source.representative);
+    const expectedTrackCount = await expectedTrackCountFor(context?.albumId ?? null, source.tracks.length);
     await transfers.enqueueRelease({
       title: albumDownloadTitle(context, source.folderName),
       username: source.owner,
       remoteFolder: inspection.requestedFolder,
       files: inspection.files,
-      expectedTrackCount: source.tracks.length || null,
+      expectedTrackCount,
+      releaseGroupId: context?.albumId ?? null,
       alternatives: availableSources
         .filter((candidate) => candidate.id !== source.id)
         .slice(0, 12)
@@ -466,6 +483,10 @@ function App() {
 
   const queueReviewedSmartMatch = async () => {
     if (!reviewAlbum || !reviewInspection) return;
+    const inspectedAudioCount = reviewInspection.files.filter((file) => [
+      "aac", "aiff", "alac", "ape", "flac", "m4a", "mp3", "ogg", "opus", "wav", "wma", "wv",
+    ].includes(file.extension.toLocaleLowerCase())).length;
+    const expectedTrackCount = await expectedTrackCountFor(reviewAlbum.albumId, inspectedAudioCount);
     await transfers.enqueueRelease({
       title: albumDownloadTitle({
         albumId: reviewAlbum.albumId,
@@ -477,7 +498,8 @@ function App() {
       username: reviewInspection.username,
       remoteFolder: reviewInspection.requestedFolder,
       files: reviewInspection.files,
-      expectedTrackCount: reviewAlbum.bestSource?.trackCount ?? null,
+      expectedTrackCount,
+      releaseGroupId: reviewAlbum.albumId,
     });
   };
 
@@ -828,6 +850,9 @@ function App() {
             onVerifyRelease={transfers.verifyRelease}
             onSoundcheckRelease={transfers.soundcheckRelease}
             onFindAlternatives={findRelaySources}
+            onPatchReleaseFile={transfers.patchReleaseFile}
+            relayRecords={search.records}
+            onLoadOfficialTracklist={loadOfficialTracklist}
             soundcheckEnabled={transfers.snapshot.soundcheckEnabled}
             onSetReleaseFiled={transfers.setReleaseFiled}
             onClearReleaseHistory={transfers.clearReleaseHistory}

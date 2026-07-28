@@ -13,9 +13,14 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
+import type { PatchReleaseFileInput } from "../hooks/useSoulseekTransfers";
+import type { SearchSessionRecord } from "../hooks/useSoulseekSearch";
+import type { AlbumTrack } from "../types";
 import { buildArrivals, type Arrival, type ArrivalState } from "../utils/arrivals";
 import { formatAlbumBytes } from "../utils/albumSources";
+import { buildPatchBayIssues } from "../utils/patchBay";
 import type { TransferGroup } from "../utils/transfers";
+import { PatchBayPanel } from "./PatchBayPanel";
 
 type ArrivalDeskProps = {
   groups: TransferGroup[];
@@ -26,6 +31,10 @@ type ArrivalDeskProps = {
   onVerifyRelease: (releaseId: string) => Promise<unknown>;
   onSoundcheckRelease: (releaseId: string, deep: boolean) => Promise<unknown>;
   onFindAlternatives: (releaseId: string, title: string) => Promise<unknown>;
+  onPatchReleaseFile: (request: PatchReleaseFileInput) => Promise<unknown>;
+  relayRecords: Record<string, SearchSessionRecord>;
+  online: boolean;
+  onLoadOfficialTracklist: (releaseGroupId: string) => Promise<AlbumTrack[]>;
   soundcheckEnabled: boolean;
   onSetReleaseFiled: (releaseId: string, filed: boolean) => Promise<unknown>;
   onClearReleaseHistory: (releaseIds: string[]) => Promise<unknown>;
@@ -35,6 +44,7 @@ type ArrivalDeskProps = {
 type ArrivalFilter = "all" | ArrivalState;
 
 const states: ArrivalFilter[] = ["all", "ready", "filed", "moved", "attention"];
+const relaySessionId = (releaseId: string) => `signal-relay:${releaseId}`;
 
 const stateCopy: Record<ArrivalState, { label: string; detail: string }> = {
   ready: { label: "Ready to file", detail: "Verified in Forever’s download folder" },
@@ -84,6 +94,10 @@ export function ArrivalDesk({
   onVerifyRelease,
   onSoundcheckRelease,
   onFindAlternatives,
+  onPatchReleaseFile,
+  relayRecords,
+  online,
+  onLoadOfficialTracklist,
   soundcheckEnabled,
   onSetReleaseFiled,
   onClearReleaseHistory,
@@ -91,6 +105,9 @@ export function ArrivalDesk({
 }: ArrivalDeskProps) {
   const [filter, setFilter] = useState<ArrivalFilter>("all");
   const [busy, setBusy] = useState<string | null>(null);
+  const [openPatchIds, setOpenPatchIds] = useState<Set<string>>(() => new Set());
+  const [patchBusyIssueId, setPatchBusyIssueId] = useState<string | null>(null);
+  const [officialTracksByReleaseId, setOfficialTracksByReleaseId] = useState<Record<string, AlbumTrack[]>>({});
   const arrivals = useMemo(
     () => buildArrivals(groups, archiveOwnedReleaseIds),
     [archiveOwnedReleaseIds, groups],
@@ -175,13 +192,19 @@ export function ArrivalDesk({
           const actionBusy = Boolean(busy && busy.startsWith(arrival.group.id));
           const copy = stateCopy[arrival.state];
           const signal = soundcheckCopy[arrival.soundcheck.state];
+          const relayRecord = releaseId ? relayRecords[relaySessionId(releaseId)] ?? null : null;
+          const officialTracks = releaseId ? officialTracksByReleaseId[releaseId] ?? [] : [];
+          const releaseGroupId = arrival.group.transfers.find((transfer) => transfer.releaseGroupId)?.releaseGroupId ?? null;
+          const patchIssues = buildPatchBayIssues(arrival.group.transfers, relayRecord?.results ?? [], officialTracks);
+          const patchOpen = releaseId ? openPatchIds.has(releaseId) : false;
+          const patchAvailable = Boolean(releaseId && patchIssues.length);
           return (
             <article className={`arrival-row is-${arrival.state}`} key={arrival.group.id}>
               <div className="arrival-row-art"><Record size={28} weight="thin" /><i /></div>
               <div className="arrival-row-identity">
                 <small>{release.year ?? "YEAR UNKNOWN"} · {release.artist}</small>
                 <strong>{release.album}</strong>
-                <p>from {arrival.group.username} · completed {relativeTime(arrival.group.updatedAtMs)}</p>
+                <p>from {arrival.group.username} · {arrival.repairing ? "repair in progress" : `completed ${relativeTime(arrival.group.updatedAtMs)}`}</p>
               </div>
               <div className={`arrival-row-files is-${arrival.soundcheck.state}`}>
                 <small>SOUND CHECK</small>
@@ -191,7 +214,7 @@ export function ArrivalDesk({
               <div className="arrival-row-state">
                 <small>JOURNEY STATE</small>
                 <strong>{arrival.state === "filed" ? <CheckCircle size={14} weight="fill" /> : arrival.state === "attention" ? <WarningCircle size={14} weight="fill" /> : <span aria-hidden="true" />}{copy.label}</strong>
-                <p>{arrival.archiveOwned ? "Matched in Music Library" : arrival.manuallyFiled ? "Confirmed by you" : copy.detail}</p>
+                <p>{arrival.repairing ? "A selected track is moving through Patch Bay" : arrival.archiveOwned ? "Matched in Music Library" : arrival.manuallyFiled ? "Confirmed by you" : copy.detail}</p>
               </div>
               <div className="arrival-row-actions">
                 {arrival.state === "ready" && releaseId ? (
@@ -204,9 +227,9 @@ export function ArrivalDesk({
                   <button type="button" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-undo`, () => onSetReleaseFiled(releaseId, false))}><ArrowsClockwise size={15} /> {actionBusy ? "Reopening…" : "Undo filed"}</button>
                 ) : null}
                 {arrival.state === "ready" && releaseId ? <button type="button" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-reveal`, () => onRevealRelease(releaseId))}><FolderOpen size={15} /> Reveal</button> : null}
-                {arrival.state === "attention" && releaseId ? <button type="button" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-verify`, () => onVerifyRelease(releaseId))}><ShieldCheck size={15} /> Verify</button> : null}
+                {arrival.state === "attention" && arrival.group.status === "completed" && releaseId ? <button type="button" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-verify`, () => onVerifyRelease(releaseId))}><ShieldCheck size={15} /> Verify</button> : null}
                 <button type="button" onClick={() => onOpenTransfer(arrival.group.id)}><ArrowSquareOut size={15} /> Details</button>
-                {releaseId ? <button type="button" className="is-icon" aria-label={`Remove ${release.album} from Arrival Desk history`} title="Remove completed transfer history" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-remove`, () => onClearReleaseHistory([releaseId]))}><Trash size={15} /></button> : null}
+                {releaseId && arrival.group.status === "completed" ? <button type="button" className="is-icon" aria-label={`Remove ${release.album} from Arrival Desk history`} title="Remove completed transfer history" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-remove`, () => onClearReleaseHistory([releaseId]))}><Trash size={15} /></button> : null}
               </div>
               <details className={`arrival-soundcheck is-${arrival.soundcheck.state}`}>
                 <summary>
@@ -232,13 +255,52 @@ export function ArrivalDesk({
                   </div>
                   {releaseId ? (
                     <div className="arrival-soundcheck-actions">
-                      <button type="button" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-quick`, () => onSoundcheckRelease(releaseId, false))}><Waveform size={14} /> {actionBusy ? "Scanning…" : "Quick scan"}</button>
-                      <button type="button" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-deep`, () => onSoundcheckRelease(releaseId, true))}><ShieldCheck size={14} /> {actionBusy ? "Scanning…" : "Deep scan"}</button>
-                      {arrival.soundcheck.state === "failed" ? <button type="button" className="is-replacement" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-find`, async () => { await onFindAlternatives(releaseId, arrival.group.title); onOpenTransfer(arrival.group.id); })}><MagnifyingGlass size={14} /> Find replacement</button> : null}
+                      {arrival.group.status === "completed" ? <>
+                        <button type="button" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-quick`, () => onSoundcheckRelease(releaseId, false))}><Waveform size={14} /> {actionBusy ? "Scanning…" : "Quick scan"}</button>
+                        <button type="button" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-deep`, () => onSoundcheckRelease(releaseId, true))}><ShieldCheck size={14} /> {actionBusy ? "Scanning…" : "Deep scan"}</button>
+                      </> : null}
+                      {releaseId && patchAvailable ? <button type="button" className="is-replacement" aria-expanded={patchOpen} disabled={Boolean(busy)} onClick={() => {
+                        setOpenPatchIds((current) => {
+                          const next = new Set(current);
+                          if (next.has(releaseId)) next.delete(releaseId);
+                          else next.add(releaseId);
+                          return next;
+                        });
+                        if (!patchOpen && !relayRecord && online) void onFindAlternatives(releaseId, arrival.group.title).catch(() => undefined);
+                        if (!patchOpen && releaseGroupId && !officialTracksByReleaseId[releaseId]) {
+                          void onLoadOfficialTracklist(releaseGroupId)
+                            .then((tracks) => setOfficialTracksByReleaseId((current) => ({ ...current, [releaseId]: tracks })))
+                            .catch(() => undefined);
+                        }
+                      }}><MagnifyingGlass size={14} /> {patchOpen ? "Close Patch Bay" : "Repair release"}</button> : null}
                     </div>
                   ) : null}
                 </div>
               </details>
+              {patchOpen && releaseId ? <PatchBayPanel
+                title={arrival.group.title}
+                online={online}
+                record={relayRecord}
+                issues={patchIssues}
+                officialTrackCount={officialTracks.length || null}
+                busyIssueId={patchBusyIssueId}
+                onSearch={() => onFindAlternatives(releaseId, arrival.group.title)}
+                onPatch={async (issue, candidate, allowIncompatible) => {
+                  setPatchBusyIssueId(issue.id);
+                  try {
+                    await onPatchReleaseFile({
+                      releaseId,
+                      targetTransferId: issue.transferId,
+                      targetTrackNumber: issue.transferId ? null : issue.trackNumber,
+                      result: candidate.result,
+                      warnings: candidate.warnings,
+                      allowIncompatible,
+                    });
+                  } finally {
+                    setPatchBusyIssueId(null);
+                  }
+                }}
+              /> : null}
             </article>
           );
         })}
