@@ -10,14 +10,17 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { useState } from "react";
-import type { FolderInspection, WantedAlbum } from "../types";
+import { useMemo, useState } from "react";
+import type { AlbumTrack, FolderInspection, WantedAlbum } from "../types";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
+import { tracklistConfidenceForInspection } from "../utils/tracklistConfidence";
 
 type SmartMatchReviewDialogProps = {
   album: WantedAlbum;
   inspection: FolderInspection | null;
+  officialTracks: AlbumTrack[];
+  tracklistState: "idle" | "loading" | "ready" | "unavailable";
   loading: boolean;
   error: string | null;
   queued: boolean;
@@ -36,6 +39,8 @@ const speed = (value: number) => value > 0 ? `${formatAlbumBytes(value)}/s` : "U
 export function SmartMatchReviewDialog({
   album,
   inspection,
+  officialTracks,
+  tracklistState,
   loading,
   error,
   queued,
@@ -50,6 +55,11 @@ export function SmartMatchReviewDialog({
   const audioCount = inspection?.files.filter((file) => AUDIO_EXTENSIONS.has(file.extension.toLowerCase())).length ?? source?.trackCount ?? 0;
   const companionCount = inspection ? inspection.files.length - audioCount : 0;
   const inspectedSize = inspection?.files.reduce((total, file) => total + file.sizeBytes, 0) ?? source?.sizeBytes ?? 0;
+  const tracklistConfidence = useMemo(
+    () => inspection ? tracklistConfidenceForInspection(inspection, officialTracks, album.artist) : null,
+    [album.artist, inspection, officialTracks],
+  );
+  const tracklistBlocked = tracklistState === "ready" && Boolean(tracklistConfidence && !tracklistConfidence.safeToRecommend);
 
   const queueAlbum = async () => {
     setQueueing(true);
@@ -71,8 +81,8 @@ export function SmartMatchReviewDialog({
         <header>
           <span className="smart-dialog-mark is-match"><Gauge size={23} weight="light" /></span>
           <span>
-            <small>Recommended source</small>
-            <h2 id="smart-review-title">Review the best transmission.</h2>
+            <small>{tracklistBlocked ? "Questionable source" : "Recommended source"}</small>
+            <h2 id="smart-review-title">{tracklistBlocked ? "This transmission needs a closer look." : "Review the best transmission."}</h2>
             <p>{album.artist} · {album.title}</p>
           </span>
           <button type="button" aria-label="Close Smart Match review" onClick={onClose}><X size={17} /></button>
@@ -109,6 +119,22 @@ export function SmartMatchReviewDialog({
           ) : null}
         </div>
 
+        <div className={`smart-tracklist-check ${tracklistState === "ready" && tracklistConfidence ? `is-${tracklistConfidence.state}` : "is-fallback"}`}>
+          {tracklistState === "loading" ? (
+            <><CircleNotch className="search-spinner" size={20} /><span><strong>Checking official titles</strong><small>Comparing the folder filenames with MusicBrainz.</small></span></>
+          ) : tracklistState === "ready" && tracklistConfidence ? (
+            <>
+              {tracklistConfidence.safeToRecommend ? <CheckCircle size={20} weight="fill" /> : <WarningCircle size={20} weight="fill" />}
+              <span>
+                <strong>{tracklistConfidence.label}</strong>
+                <small>{tracklistConfidence.summary}{tracklistConfidence.missingTracks.length ? ` · Missing: ${tracklistConfidence.missingTracks.slice(0, 3).map((track) => track.title).join(", ")}` : ""}</small>
+              </span>
+            </>
+          ) : (
+            <><MusicNotes size={20} /><span><strong>Track-count fallback</strong><small>MusicBrainz has no official title list for this edition, so your existing profile rules remain in charge.</small></span></>
+          )}
+        </div>
+
         <div className="smart-review-policy">
           <small>Your match profile</small>
           <strong>{wantedPreferencesLabel(album.preferences)}</strong>
@@ -121,14 +147,17 @@ export function SmartMatchReviewDialog({
           <button
             type="button"
             className={`primary-action ${queued ? "is-queued" : ""}`}
-            disabled={!inspection || loading || Boolean(error) || queued || queueing}
+            disabled={!inspection || loading || Boolean(error) || queued || queueing || tracklistState === "loading" || tracklistBlocked}
+            title={tracklistBlocked ? "Compare alternatives: this folder does not match the official tracklist" : undefined}
             onClick={() => void queueAlbum()}
           >
             {queued
               ? <><CheckCircle size={16} weight="fill" /> Queued</>
               : queueing
                 ? <><CircleNotch className="search-spinner" size={16} /> Queueing…</>
-                : <><DownloadSimple size={16} weight="bold" /> Queue complete album</>}
+                : tracklistBlocked
+                  ? <><WarningCircle size={16} weight="fill" /> Compare alternatives</>
+                  : <><DownloadSimple size={16} weight="bold" /> Queue complete album</>}
           </button>
         </footer>
       </section>

@@ -1,4 +1,6 @@
 import {
+  CaretDown,
+  CaretUp,
   CheckCircle,
   CircleNotch,
   DownloadSimple,
@@ -10,7 +12,7 @@ import {
 } from "@phosphor-icons/react";
 import { useId, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import type { AlbumSource, PersonProfile, Transfer, WantedPreferences } from "../types";
+import type { AlbumSource, AlbumTrack, PersonProfile, Transfer, WantedPreferences } from "../types";
 import {
   albumDownloadLabel,
   albumDownloadStates,
@@ -18,6 +20,7 @@ import {
 } from "../utils/albumDownloadState";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { rankAlbumSources } from "../utils/smartMatches";
+import { tracklistConfidenceForSource } from "../utils/tracklistConfidence";
 import { CountryFlag } from "./CountryFlag";
 
 type AlbumSourceResultsProps = {
@@ -31,6 +34,9 @@ type AlbumSourceResultsProps = {
   onOpenPerson: (username: string) => void;
   smartPreferences?: WantedPreferences;
   minimumTrackCount?: number | null;
+  officialTracks: AlbumTrack[];
+  tracklistState: "idle" | "loading" | "ready" | "unavailable";
+  artist: string;
 };
 
 function DownloadStateIcon({ state }: { state: AlbumDownloadStatus }) {
@@ -151,16 +157,25 @@ export function AlbumSourceResults({
   onOpenPerson,
   smartPreferences,
   minimumTrackCount,
+  officialTracks,
+  tracklistState,
+  artist,
 }: AlbumSourceResultsProps) {
   const [preparingSourceId, setPreparingSourceId] = useState<string | null>(null);
+  const [openConfidenceSourceId, setOpenConfidenceSourceId] = useState<string | null>(null);
+  const [confirmingSourceId, setConfirmingSourceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sourceDownloadStates = useMemo(
     () => albumDownloadStates(sources, transfers),
     [sources, transfers],
   );
   const rankedSources = useMemo(
-    () => smartPreferences ? rankAlbumSources(sources, smartPreferences) : [],
-    [smartPreferences, sources],
+    () => smartPreferences ? rankAlbumSources(sources, smartPreferences, officialTracks, artist) : [],
+    [artist, officialTracks, smartPreferences, sources],
+  );
+  const confidenceBySourceId = useMemo(
+    () => new Map(sources.map((source) => [source.id, tracklistConfidenceForSource(source, officialTracks, artist)])),
+    [artist, officialTracks, sources],
   );
   const rankBySourceId = useMemo(
     () => new Map(rankedSources.map((match) => [match.source.id, match])),
@@ -168,8 +183,14 @@ export function AlbumSourceResults({
   );
   const recommendedSourceId = rankedSources.find((match) => match.eligible)?.source.id;
 
-  const queueAlbum = async (source: AlbumSource) => {
+  const queueAlbum = async (source: AlbumSource, confirmed = false) => {
+    const confidence = confidenceBySourceId.get(source.id);
+    if (!confirmed && officialTracks.length > 0 && confidence && !confidence.safeToRecommend) {
+      setConfirmingSourceId(source.id);
+      return;
+    }
     setPreparingSourceId(source.id);
+    setConfirmingSourceId(null);
     setError(null);
     try {
       await onQueueAlbumSource(source);
@@ -188,11 +209,26 @@ export function AlbumSourceResults({
           <button type="button" onClick={() => setError(null)}>Dismiss</button>
         </div>
       ) : null}
+      {confirmingSourceId ? (() => {
+        const source = sources.find((candidate) => candidate.id === confirmingSourceId);
+        const confidence = source ? confidenceBySourceId.get(source.id) : null;
+        return source && confidence ? (
+          <div className="album-source-confidence-warning" role="alert">
+            <WarningCircle size={21} weight="fill" />
+            <span>
+              <strong>Tracklist needs a closer look.</strong>
+              <small>{confidence.summary}. Download only if you recognize this edition.</small>
+            </span>
+            <button type="button" onClick={() => setConfirmingSourceId(null)}>Cancel</button>
+            <button type="button" className="is-confirm" onClick={() => void queueAlbum(source, true)}>Download anyway from {source.owner}</button>
+          </div>
+        ) : null;
+      })() : null}
       <div className="album-source-table">
         <div className="album-source-header" aria-hidden="true">
           <span>User</span>
           <span>Folder</span>
-          <span>Tracks</span>
+          <span>Tracklist</span>
           <span>Format</span>
           <span>Album size</span>
           <span>Availability</span>
@@ -222,14 +258,19 @@ export function AlbumSourceResults({
               const person = personByUsername(source.owner);
               const preparing = preparingSourceId === source.id;
               const queuedState = sourceDownloadStates.get(source.id);
+              const confidence = confidenceBySourceId.get(source.id);
+              const confidenceOpen = openConfidenceSourceId === source.id;
+              const checkingTracklist = tracklistState === "loading";
               const downloadable = Boolean(source.representative.folder);
               const buttonLabel = queuedState
                 ? albumDownloadLabel(queuedState)
                 : preparing
                   ? "Preparing…"
+                  : checkingTracklist
+                    ? "Checking titles…"
                   : "Download album";
               return (
-                <article className={`album-source-row ${recommended ? "is-smart-match" : ""}`} key={source.id}>
+                <article className={`album-source-row ${recommended ? "is-smart-match" : ""} ${confidence ? `is-confidence-${confidence.state}` : ""} ${confidenceOpen ? "is-confidence-open" : ""}`} key={source.id}>
                   <button
                     type="button"
                     className="album-source-user"
@@ -244,10 +285,23 @@ export function AlbumSourceResults({
                     <strong>{source.folderName}</strong>
                     <small title={source.folder}>{source.folder.replace(/[\\/]/g, " / ")}</small>
                   </span>
-                  <span className="album-source-tracks">
-                    <strong>{source.tracks.length}</strong>
-                    <small>{source.tracks.length === 1 ? "track" : "tracks"}</small>
-                  </span>
+                  {tracklistState === "ready" && confidence ? (
+                    <button
+                      type="button"
+                      className={`album-source-confidence-trigger is-${confidence.state}`}
+                      aria-expanded={confidenceOpen}
+                      aria-label={`Show tracklist confidence for ${source.folderName} from ${source.owner}`}
+                      onClick={() => setOpenConfidenceSourceId(confidenceOpen ? null : source.id)}
+                    >
+                      <span><strong>{confidence.matchedCount} / {confidence.officialCount}</strong><small>{confidence.label}</small></span>
+                      {confidenceOpen ? <CaretUp size={13} /> : <CaretDown size={13} />}
+                    </button>
+                  ) : (
+                    <span className="album-source-tracks">
+                      <strong>{source.tracks.length}</strong>
+                      <small>{tracklistState === "loading" ? "checking titles" : source.tracks.length === 1 ? "track" : "tracks"}</small>
+                    </span>
+                  )}
                   <span className="album-source-formats">
                     {source.formats.slice(0, 3).map((format) => <b key={format}>{format}</b>)}
                     <small>{source.qualities.slice(0, 1).join("") || "Details unknown"}</small>
@@ -274,14 +328,36 @@ export function AlbumSourceResults({
                     <button
                       type="button"
                       className={`album-source-download${queuedState ? ` is-${queuedState.status}` : ""}`}
-                      disabled={!downloadable || (preparingSourceId !== null && !queuedState)}
-                      title={queuedState ? `${buttonLabel}. Open this album in Transfers.` : downloadable ? "Inspect the folder and download every file" : "This result has no source folder"}
+                      disabled={!downloadable || checkingTracklist || (preparingSourceId !== null && !queuedState)}
+                      title={queuedState ? `${buttonLabel}. Open this album in Transfers.` : checkingTracklist ? "Waiting for the official tracklist check" : downloadable ? "Inspect the folder and download every file" : "This result has no source folder"}
                       onClick={() => queuedState ? onOpenTransfer(queuedState.groupId) : void queueAlbum(source)}
                     >
-                      {queuedState ? <DownloadStateIcon state={queuedState.status} /> : preparing ? <CircleNotch className="search-spinner" size={16} /> : <DownloadSimple size={16} weight="bold" />}
+                      {queuedState ? <DownloadStateIcon state={queuedState.status} /> : preparing || checkingTracklist ? <CircleNotch className="search-spinner" size={16} /> : <DownloadSimple size={16} weight="bold" />}
                       {buttonLabel}
                     </button>
                   </span>
+                  {confidenceOpen && confidence ? (
+                    <section className="album-tracklist-detail" aria-label={`Tracklist comparison for ${source.folderName}`}>
+                      <header>
+                        <span><small>Official-title comparison</small><strong>{confidence.label}</strong></span>
+                        <p>{confidence.summary}. Filenames are normalized before matching.</p>
+                      </header>
+                      <div className="album-tracklist-columns">
+                        <div>
+                          <strong>Matched · {confidence.matches.length}</strong>
+                          {confidence.matches.length ? <ol>{confidence.matches.map((match) => <li key={match.official.position}><b>{match.official.position}</b><span>{match.official.title}<small>{match.sourceName}</small></span></li>)}</ol> : <p>No reliable title matches.</p>}
+                        </div>
+                        <div>
+                          <strong>Missing · {confidence.missingTracks.length}</strong>
+                          {confidence.missingTracks.length ? <ol>{confidence.missingTracks.map((track) => <li key={track.position}><b>{track.position}</b><span>{track.title}</span></li>)}</ol> : <p>Nothing missing.</p>}
+                        </div>
+                        <div>
+                          <strong>Extras · {confidence.extraSourceNames.length}</strong>
+                          {confidence.extraSourceNames.length ? <ul>{confidence.extraSourceNames.map((name) => <li key={name}>{name}</li>)}</ul> : <p>No unexpected audio files.</p>}
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
                 </article>
               );
             })

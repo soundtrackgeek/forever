@@ -3,10 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.52` makes Wanted comparisons honor their
-> minimum track count and lets you choose MusicBrainz's fallback count.
+> **Status:** pre-alpha. Version `0.0.53` adds MusicBrainz-backed Tracklist
+> Confidence so complete-looking but mislabeled album folders cannot become the
+> recommended source.
 
-If `0.0.16` is installed, download and run the latest `0.0.52` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.53` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -54,7 +55,10 @@ configuration and transfers.
   **Downloading** or numbered **Queued #1**, **Queued #2** actions that stay
   synchronized as releases are reordered, paused, completed, failed, or removed;
   Wanted comparisons hide folders below that album's track minimum and compute
-  their file, source, and listener totals from qualifying folders only
+  their file, source, and listener totals from qualifying folders only;
+  **Tracklist Confidence** compares normalized filenames with official
+  MusicBrainz titles, ranks exact editions first, and expands into matched,
+  missing, and unexpected-track evidence
 - A dedicated Archive workspace that opens Music Library's
   `music-library.sqlite3` database with SQLite read-only and query-only
   enforcement, reports its latest import and inventory totals, and never adds
@@ -298,7 +302,14 @@ identifies the release; it does not claim that a specific rip or edition is
 available. Soulseek results remain the source of truth for actual files. The
 search opens in **Album sources**, grouping returned files by listener and
 folder. Hover or focus the eye control to preview that source's tracks; switch
-to **Individual files** for the original file-by-file results. **Download
+to **Individual files** for the original file-by-file results. When an official
+tracklist is available, each album source reports its title match as **Exact**,
+**Complete with extras**, **Missing**, or **Unclear**. Expand that signal to see
+the matched filenames, missing official titles, and unexpected audio files.
+The default **Best match** sort puts complete title matches ahead of faster but
+mislabeled folders.
+Questionable sources remain available, but require an explicit **Download
+anyway** confirmation. **Download
 album** inspects the chosen folder and queues every file in it, including cover
 art, lyrics, cue sheets, and other companion files. Search stays open so more
 albums can be added: the active source turns green and reads **Downloading**,
@@ -408,7 +419,11 @@ upload slot, speed, and queue length.
 
 Use **Download best** to inspect the recommended folder before anything is
 queued. The review shows the listener, remote path, format, tracks, aggregate
-size, source speed, and the audio/companion-file split. **Queue complete album**
+size, source speed, the audio/companion-file split, and Tracklist Confidence.
+An exact title match outranks format and speed; a missing or unclear tracklist
+cannot be queued as the recommended source and sends you to **Compare** instead.
+When MusicBrainz has no official title list, Forever keeps using the existing
+track-count and Smart Match profile rules. **Queue complete album**
 preserves cover art, cue sheets, lyrics, logs, and other files beside the audio
 and leaves Archive open so another album can be queued. After every expected
 audio track completes and verifies, Forever moves that album out of active

@@ -213,6 +213,20 @@ const sonicHolidayTracks = [
   "A Sonic Holiday",
 ];
 
+const sonicHolidayWrongTracks = [
+  "Thresholds",
+  "Hollow Planes",
+  "Vector Dreams",
+  "Night Geometry",
+  "Static Bloom",
+  "Liminal Structures",
+  "Phase Rotate",
+  "Afterglow",
+  "Silent Constellations",
+  "Return Vector",
+  "Signal Fade",
+];
+
 const previewNetworkResults = [
   ...previewAlbumSource({ id: "night-flac", username: "audiophile92", folder: "Music\\Liminal Structures\\Night Geometry [FLAC]", tracks: nightGeometryTracks, format: "flac", slotFree: true, averageSpeed: 8_200_000, queueLength: 0 }),
   ...previewAlbumSource({ id: "night-mp3", username: "soulseeker7", folder: "Music\\Liminal Structures\\Night Geometry (2019) [320]", tracks: nightGeometryTracks, format: "mp3", slotFree: false, averageSpeed: 5_100_000, queueLength: 3 }),
@@ -220,6 +234,7 @@ const previewNetworkResults = [
   ...previewAlbumSource({ id: "hysteria-mp3", username: "rockarchive", folder: "Music\\Def Leppard\\Hysteria (1987) [320]", tracks: hysteriaTracks, format: "mp3", slotFree: true, averageSpeed: 6_800_000, queueLength: 0 }),
   ...previewAlbumSource({ id: "hysteria-mfsl", username: "vinylrips", folder: "Music\\Rock\\Def Leppard\\Hysteria MFSL", tracks: hysteriaTracks, format: "flac", slotFree: false, averageSpeed: 3_700_000, queueLength: 4 }),
   ...previewAlbumSource({ id: "sonic-holiday-complete", username: "holidayarchive", folder: "Music\\Engine Alley\\1992 - A Sonic Holiday [FLAC]", tracks: sonicHolidayTracks, format: "flac", slotFree: true, averageSpeed: 7_100_000, queueLength: 0 }),
+  ...previewAlbumSource({ id: "sonic-holiday-wrong", username: "signalnoise", folder: "Music\\Engine Alley\\A Sonic Holiday [Mislabeled]", tracks: sonicHolidayWrongTracks, format: "mp3", slotFree: true, averageSpeed: 20_000_000, queueLength: 0 }),
   ...previewAlbumSource({ id: "sonic-holiday-partial", username: "singleshelf", folder: "Music\\Engine Alley\\A Sonic Holiday - Sampler", tracks: ["A Sonic Holiday"], format: "mp3", slotFree: true, averageSpeed: 5_300_000, queueLength: 0 }),
 ];
 

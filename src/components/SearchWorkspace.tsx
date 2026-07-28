@@ -28,6 +28,7 @@ import {
 import type {
   AlbumSearchContext,
   AlbumSource,
+  AlbumTrack,
   ArchiveAlbumMatch,
   ConnectionSnapshot,
   SearchResult,
@@ -35,6 +36,7 @@ import type {
   PersonProfile,
   Transfer,
   WantedAlbum,
+  WantedPreferences,
 } from "../types";
 import {
   albumSourcesMeetingTrackMinimum,
@@ -45,6 +47,7 @@ import { ArchiveOwnershipBadge } from "./ArchiveOwnershipBadge";
 import { CountryFlag } from "./CountryFlag";
 import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
 import { WantedToggle } from "./WantedToggle";
+import { rankAlbumSources } from "../utils/smartMatches";
 
 export type SearchFilter = "all" | "lossless" | "compressed";
 export type SearchSort = "best" | "ready" | "fast" | "small";
@@ -87,9 +90,16 @@ type SearchWorkspaceProps = {
   onSearchModeChange: (mode: SearchMode) => void;
   onAlbumResultViewChange: (view: AlbumResultView) => void;
   onToggleWanted: () => Promise<unknown>;
+  onLoadOfficialTracklist: (releaseGroupId: string) => Promise<AlbumTrack[]>;
 };
 
 const losslessFormats = new Set(["FLAC", "ALAC", "WAV", "AIFF", "APE", "WV"]);
+const emptyOfficialTracks: AlbumTrack[] = [];
+const neutralAlbumPreferences: WantedPreferences = {
+  formatPreference: "any",
+  minimumBitrateKbps: null,
+  minimumTrackCount: null,
+};
 const compressedFormats = new Set(["MP3", "AAC", "M4A", "OGG", "OPUS", "WMA"]);
 
 function AvailabilityBars({ values }: { values: number[] }) {
@@ -183,11 +193,38 @@ export function SearchWorkspace({
   onSearchModeChange,
   onAlbumResultViewChange,
   onToggleWanted,
+  onLoadOfficialTracklist,
 }: SearchWorkspaceProps) {
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const resultListRef = useRef<HTMLDivElement>(null);
   const scrollBySession = useRef(new Map<string, number>());
+  const albumId = albumContext?.albumId ?? null;
+  const [loadedTracklist, setLoadedTracklist] = useState<{
+    albumId: string;
+    tracks: AlbumTrack[];
+    state: "ready" | "unavailable";
+  } | null>(null);
+  const currentTracklist = loadedTracklist?.albumId === albumId ? loadedTracklist : null;
+  const officialTracks = currentTracklist?.tracks ?? emptyOfficialTracks;
+  const tracklistState: "idle" | "loading" | "ready" | "unavailable" = !albumId
+    ? "idle"
+    : currentTracklist?.state ?? "loading";
+
+  useEffect(() => {
+    let active = true;
+    if (!albumId) return () => { active = false; };
+    void onLoadOfficialTracklist(albumId)
+      .then((tracks) => {
+        if (!active) return;
+        setLoadedTracklist({ albumId, tracks, state: tracks.length ? "ready" : "unavailable" });
+      })
+      .catch(() => {
+        if (!active) return;
+        setLoadedTracklist({ albumId, tracks: [], state: "unavailable" });
+      });
+    return () => { active = false; };
+  }, [albumId, onLoadOfficialTracklist]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -279,8 +316,16 @@ export function SearchWorkspace({
         (left, right) => left.totalSizeBytes - right.totalSizeBytes,
       );
     }
+    if (officialTracks.length > 0) {
+      return rankAlbumSources(
+        filtered,
+        wantedAlbum?.preferences ?? neutralAlbumPreferences,
+        officialTracks,
+        albumContext?.artist ?? "",
+      ).map((match) => match.source);
+    }
     return filtered;
-  }, [filter, qualifiedAlbumSources, sort]);
+  }, [albumContext?.artist, filter, officialTracks, qualifiedAlbumSources, sort, wantedAlbum]);
 
   const showingAlbumSources = Boolean(albumContext) && albumResultView === "sources";
   const visibleCount = showingAlbumSources
@@ -503,6 +548,13 @@ export function SearchWorkspace({
                     onToggle={onToggleWanted}
                   />
                 ) : null}
+                {tracklistState === "loading" ? (
+                  <span className="tracklist-signal is-loading"><CircleNotch className="search-spinner" size={12} /> Checking official titles</span>
+                ) : tracklistState === "ready" ? (
+                  <span className="tracklist-signal is-ready"><ShieldCheck size={12} weight="fill" /> {officialTracks.length}-track official list</span>
+                ) : tracklistState === "unavailable" ? (
+                  <span className="tracklist-signal">Track-count fallback</span>
+                ) : null}
               </span>
             ) : null}
           </div>
@@ -646,6 +698,9 @@ export function SearchWorkspace({
           onOpenPerson={onOpenPerson}
           smartPreferences={wantedAlbum?.preferences}
           minimumTrackCount={albumContext?.minimumTrackCount}
+          officialTracks={officialTracks}
+          tracklistState={tracklistState}
+          artist={albumContext?.artist ?? ""}
         />
       ) : <div className={`results-table ${layout === "grid" ? "is-grid" : ""}`}>
         <div className="result-header" aria-hidden="true">

@@ -5,6 +5,33 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.53] - 2026-07-28
+
+### Added
+
+- **Tracklist Confidence** compares normalized Soulseek audio filenames with the
+  earliest official MusicBrainz edition and labels every grouped source as
+  **Exact tracklist**, **Complete with extras**, **Missing**, or **Unclear**.
+- Album-source rows expand into a track-level comparison of matched filenames,
+  missing official titles, and unexpected audio files.
+- Smart Match review verifies the inspected remote folder against the official
+  titles before enabling **Queue complete album**.
+- Frontend, ranking, normalization, and rendered interaction coverage protects
+  exact, bonus-track, partial, unavailable, and mislabeled-folder behavior.
+
+### Changed
+
+- Exact and complete tracklists now outrank format, free-slot status, speed, and
+  queue length in Album Search and when Wanted alternatives are sorted by best
+  match.
+- A questionable source stays available for manual inspection but requires an
+  explicit **Download anyway** confirmation; it cannot be silently queued as
+  the recommended Smart Match.
+- Releases without an official MusicBrainz title list retain the existing
+  track-count and Smart Match preference fallback.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.53`.
+
 ## [0.0.52] - 2026-07-28
 
 ### Added

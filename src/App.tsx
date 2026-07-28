@@ -1,7 +1,7 @@
 import { CheckCircle, DownloadSimple, MagnifyingGlass, Radio, Sliders, WarningCircle, X } from "@phosphor-icons/react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { AppSidebar } from "./components/AppSidebar";
 import { AlbumSearchWorkspace } from "./components/AlbumSearchWorkspace";
@@ -60,6 +60,7 @@ import {
   saveMusicBrainzFallbackTrackCount,
 } from "./utils/musicbrainzFallback";
 import { groupTransfers } from "./utils/transfers";
+import { tracklistConfidenceForInspection } from "./utils/tracklistConfidence";
 import { verifiedDownloadedWantedFulfillments, wantedAlbumDownloadTitle } from "./utils/wantedFulfillment";
 
 const emptyAlbumCatalog: AlbumReleaseGroup[] = [];
@@ -202,6 +203,8 @@ function App() {
   const [preferencesAlbum, setPreferencesAlbum] = useState<WantedAlbum | null>(null);
   const [reviewAlbum, setReviewAlbum] = useState<WantedAlbum | null>(null);
   const [reviewInspection, setReviewInspection] = useState<FolderInspection | null>(null);
+  const [reviewOfficialTracks, setReviewOfficialTracks] = useState<AlbumTrack[]>([]);
+  const [reviewTracklistState, setReviewTracklistState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [relayClock, setRelayClock] = useState(appStartedAtMs);
@@ -326,9 +329,36 @@ function App() {
     return search.startSearch(sessionId, title);
   };
 
-  const loadOfficialTracklist = (releaseGroupId: string) => native
-    ? invoke<AlbumTrack[]>("album_official_tracklist", { releaseGroupId })
-    : Promise.resolve([]);
+  const loadOfficialTracklist = useCallback((releaseGroupId: string) => {
+    if (native) return invoke<AlbumTrack[]>("album_official_tracklist", { releaseGroupId });
+    const previewTitles = releaseGroupId === "preview-waiting"
+      ? [
+          "Infamy",
+          "Diamond Jill and Crazy Jane",
+          "Spare Me",
+          "Ballad of the Sinking Star",
+          "Photo Lens",
+          "Beautiful",
+          "Telescope Girl",
+          "Rollergirl",
+          "Dreams",
+          "The Last Night",
+          "A Sonic Holiday",
+        ]
+      : releaseGroupId === "12fa3845-7c62-36e5-a8da-8be137155a72"
+        ? [
+            "Women", "Rocket", "Animal", "Love Bites", "Pour Some Sugar on Me", "Armageddon It",
+            "Gods of War", "Don't Shoot Shotgun", "Run Riot", "Hysteria", "Excitable", "Love and Affection",
+          ]
+        : [];
+    return Promise.resolve(previewTitles.map((title, index) => ({
+      position: index + 1,
+      discNumber: 1,
+      discPosition: index + 1,
+      title,
+      durationMs: null,
+    })));
+  }, [native]);
 
   const relayReleaseSource = async (releaseId: string, source: AlbumSource) => {
     const inspection = await folders.inspect(source.representative);
@@ -500,6 +530,8 @@ function App() {
     if (!source) return;
     setReviewAlbum(album);
     setReviewInspection(null);
+    setReviewOfficialTracks([]);
+    setReviewTracklistState("loading");
     setReviewError(null);
     setReviewLoading(true);
     const result: SearchResult = {
@@ -524,17 +556,34 @@ function App() {
       queueLength: source.queueLength,
       isPrivate: false,
     };
-    try {
-      setReviewInspection(await folders.inspect(result));
-    } catch (cause) {
-      setReviewError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setReviewLoading(false);
+    const [inspectionResult, tracklistResult] = await Promise.allSettled([
+      folders.inspect(result),
+      loadOfficialTracklist(album.albumId),
+    ]);
+    if (inspectionResult.status === "fulfilled") setReviewInspection(inspectionResult.value);
+    else setReviewError(inspectionResult.reason instanceof Error ? inspectionResult.reason.message : String(inspectionResult.reason));
+    if (tracklistResult.status === "fulfilled" && tracklistResult.value.length > 0) {
+      setReviewOfficialTracks(tracklistResult.value);
+      setReviewTracklistState("ready");
+    } else {
+      setReviewOfficialTracks([]);
+      setReviewTracklistState("unavailable");
     }
+    setReviewLoading(false);
   };
 
   const queueReviewedSmartMatch = async () => {
     if (!reviewAlbum || !reviewInspection) return;
+    if (reviewOfficialTracks.length > 0) {
+      const confidence = tracklistConfidenceForInspection(
+        reviewInspection,
+        reviewOfficialTracks,
+        reviewAlbum.artist,
+      );
+      if (!confidence.safeToRecommend) {
+        throw new Error("This folder does not match the official tracklist closely enough to queue as the recommended source. Compare alternatives instead.");
+      }
+    }
     const inspectedAudioCount = reviewInspection.files.filter((file) => [
       "aac", "aiff", "alac", "ape", "flac", "m4a", "mp3", "ogg", "opus", "wav", "wma", "wv",
     ].includes(file.extension.toLocaleLowerCase())).length;
@@ -786,6 +835,7 @@ function App() {
               onOpenPerson={openPerson}
               onSearchModeChange={changeSearchMode}
               onAlbumResultViewChange={setAlbumResultView}
+              onLoadOfficialTracklist={loadOfficialTracklist}
               onToggleWanted={() => {
                 if (!albumContext) return Promise.resolve();
                 if (wanted.byAlbumId.has(albumContext.albumId)) {
@@ -1265,6 +1315,8 @@ function App() {
         <SmartMatchReviewDialog
           album={wanted.byAlbumId.get(reviewAlbum.albumId) ?? reviewAlbum}
           inspection={reviewInspection}
+          officialTracks={reviewOfficialTracks}
+          tracklistState={reviewTracklistState}
           loading={reviewLoading}
           error={reviewError}
           queued={wantedDownloadStateByAlbumId.has(reviewAlbum.albumId)}

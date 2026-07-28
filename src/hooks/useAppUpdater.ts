@@ -35,18 +35,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.51",
-  version: "0.0.52",
-  body: `## What’s new in Forever 0.0.52
+  currentVersion: "0.0.52",
+  version: "0.0.53",
+  body: `## What’s new in Forever 0.0.53
 
 ### Added
 
-- Settings now has a persistent MusicBrainz fallback track count for releases without official track data.
+- Tracklist Confidence compares Soulseek filenames with the official MusicBrainz titles.
+- Expand any source to see matched, missing, and unexpected tracks before downloading.
 
-### Fixed
+### Changed
 
-- Wanted Compare now hides partial folders below the album’s minimum-track rule and reports qualified totals.
-- Every raw Soulseek reply remains available under Individual files.`,
+- Exact tracklists outrank faster but mislabeled folders in Wanted Compare.
+- Questionable folders require an explicit Download anyway confirmation and cannot be queued as Smart Match recommendations.`,
   date: "2026-07-28",
 };
 

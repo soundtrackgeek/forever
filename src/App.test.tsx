@@ -240,7 +240,7 @@ describe("Forever shell", () => {
     expect(within(albumReport).getAllByText("3")).toHaveLength(2);
     expect(within(albumReport).getByText("Owned")).toBeInTheDocument();
     expect(screen.getByText("1987 - Hysteria [FLAC]")).toBeInTheDocument();
-    expect(screen.getAllByText("12").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("12 / 12").length).toBeGreaterThan(0);
 
     const previewTracks = screen.getAllByRole("button", {
       name: /Preview tracks in/,
@@ -264,7 +264,8 @@ describe("Forever shell", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Download album" })[0]);
+    const readyDownloadButtons = await screen.findAllByRole("button", { name: "Download album" });
+    fireEvent.click(readyDownloadButtons[0]);
     const downloading = await screen.findByRole(
       "button",
       { name: /Downloading · \d+%/ },
@@ -505,6 +506,8 @@ describe("Forever shell", () => {
     expect(screen.getByRole("heading", { name: "Review the best transmission." })).toBeInTheDocument();
     expect(await screen.findByText("Folder verified")).toBeInTheDocument();
     expect(screen.getByText("Companion")).toBeInTheDocument();
+    expect(screen.getByText("Exact tracklist")).toBeInTheDocument();
+    expect(screen.getByText("11/11 titles matched")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Compare alternatives" }));
     expect(
       screen.getByRole("heading", { name: "A Sonic Holiday — Engine Alley" }),
@@ -514,19 +517,33 @@ describe("Forever shell", () => {
       screen.getByRole("button", { name: "Remove A Sonic Holiday from Wanted" }),
     ).toHaveAttribute("aria-pressed", "true");
     await waitFor(
-      () => expect(screen.getByText("1 album source")).toBeInTheDocument(),
+      () => expect(screen.getByText("2 album sources")).toBeInTheDocument(),
       { timeout: 1_500 },
     );
-    expect(screen.getByText("1992 - A Sonic Holiday [FLAC]")).toBeInTheDocument();
+    const exactSource = screen.getByText("1992 - A Sonic Holiday [FLAC]").closest("article") as HTMLElement;
+    expect(within(exactSource).getByText("11 / 11")).toBeInTheDocument();
+    expect(within(exactSource).getByText("Exact tracklist")).toBeInTheDocument();
+    expect(within(exactSource).getByText("Smart Match")).toBeInTheDocument();
+    const unclearSource = screen.getByText("A Sonic Holiday [Mislabeled]").closest("article") as HTMLElement;
+    expect(within(unclearSource).getByText("1 / 11")).toBeInTheDocument();
+    expect(within(unclearSource).getByText("Unclear match")).toBeInTheDocument();
+    expect(within(unclearSource).queryByText("Smart Match")).not.toBeInTheDocument();
+    fireEvent.click(within(unclearSource).getByRole("button", { name: /Show tracklist confidence/ }));
+    expect(within(unclearSource).getByText("Infamy")).toBeInTheDocument();
+    expect(within(unclearSource).getByText(/Thresholds\.mp3/)).toBeInTheDocument();
+    fireEvent.click(within(unclearSource).getByRole("button", { name: "Download album" }));
+    expect(screen.getByText("Tracklist needs a closer look.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download anyway from signalnoise" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText("A Sonic Holiday - Sampler")).not.toBeInTheDocument();
     const sonicReport = screen
       .getByRole("heading", { name: "A Sonic Holiday — Engine Alley" })
       .closest("article") as HTMLElement;
-    expect(within(sonicReport).getByText("12")).toBeInTheDocument();
-    expect(within(sonicReport).getAllByText("1")).toHaveLength(2);
+    expect(within(sonicReport).getByText("24")).toBeInTheDocument();
+    expect(within(sonicReport).getAllByText("2")).toHaveLength(2);
 
     fireEvent.click(screen.getByRole("tab", { name: "Individual files" }));
-    expect(await screen.findByText("14 files")).toBeInTheDocument();
+    expect(await screen.findByText("26 files")).toBeInTheDocument();
     expect(screen.getAllByText(/A Sonic Holiday/).length).toBeGreaterThan(1);
   });
 
@@ -935,17 +952,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.52 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.53 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Settings now has a persistent MusicBrainz fallback track count for releases without official track data.",
+        "Tracklist Confidence compares Soulseek filenames with the official MusicBrainz titles.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Wanted Compare now hides partial folders below the album’s minimum-track rule and reports qualified totals.",
+        "Exact tracklists outrank faster but mislabeled folders in Wanted Compare.",
       ),
     ).toBeInTheDocument();
     expect(

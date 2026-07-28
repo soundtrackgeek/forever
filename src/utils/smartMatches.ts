@@ -1,4 +1,8 @@
-import type { AlbumSource, WantedPreferences } from "../types";
+import type { AlbumSource, AlbumTrack, WantedPreferences } from "../types";
+import {
+  tracklistConfidenceForSource,
+  type TracklistConfidence,
+} from "./tracklistConfidence";
 
 const LOSSLESS = new Set(["FLAC", "ALAC", "WAV", "AIFF", "APE", "WV"]);
 
@@ -41,14 +45,18 @@ export type RankedAlbumSource = {
   format: string;
   minimumBitrateKbps: number | null;
   reason: string;
+  tracklistConfidence: TracklistConfidence;
 };
 
 export function rankAlbumSources(
   sources: AlbumSource[],
   preferences: WantedPreferences,
+  officialTracks: AlbumTrack[] = [],
+  artist = "",
 ): RankedAlbumSource[] {
   return sources
     .map((source) => {
+      const tracklistConfidence = tracklistConfidenceForSource(source, officialTracks, artist);
       const lossless = hasLossless(source);
       const mp3Only = source.formats.length > 0
         && source.formats.every((format) => format.toUpperCase() === "MP3");
@@ -63,9 +71,13 @@ export function rankAlbumSources(
       const bitrateAllowed = lossless
         || preferences.minimumBitrateKbps == null
         || (minimumBitrateKbps != null && minimumBitrateKbps >= preferences.minimumBitrateKbps);
-      const eligible = enoughTracks && formatAllowed && bitrateAllowed;
+      const eligible = enoughTracks
+        && formatAllowed
+        && bitrateAllowed
+        && tracklistConfidence.safeToRecommend;
       const score = ((preferences.formatPreference !== "any" && lossless)
         || (preferences.formatPreference === "mp3Only" && mp3Only) ? 500 : 0)
+        + tracklistConfidence.score
         + formatRank(primaryFormat(source)) * 20
         + source.tracks.length * 30
         + (source.slotFree ? 180 : 0)
@@ -73,13 +85,17 @@ export function rankAlbumSources(
         + Math.max(0, 100 - Math.min(20, source.queueLength) * 5);
       const reason = !enoughTracks
         ? `Needs ${preferences.minimumTrackCount} tracks`
+        : !tracklistConfidence.safeToRecommend
+          ? tracklistConfidence.state === "partial"
+            ? `${tracklistConfidence.missingTracks.length} official tracks missing`
+            : "Track titles do not line up"
         : !formatAllowed
           ? preferences.formatPreference === "mp3Only" ? "MP3 required" : "Lossless required"
           : !bitrateAllowed
             ? `${preferences.minimumBitrateKbps} kbps minimum`
             : source.slotFree
-              ? "Matches · free slot"
-              : `Matches · ${source.queueLength} queued`;
+              ? `${tracklistConfidence.state === "unavailable" ? "Matches" : tracklistConfidence.label} · free slot`
+              : `${tracklistConfidence.state === "unavailable" ? "Matches" : tracklistConfidence.label} · ${source.queueLength} queued`;
       return {
         source,
         eligible,
@@ -87,6 +103,7 @@ export function rankAlbumSources(
         format: primaryFormat(source),
         minimumBitrateKbps,
         reason,
+        tracklistConfidence,
       };
     })
     .sort((left, right) => Number(right.eligible) - Number(left.eligible)

@@ -15,20 +15,35 @@ const previewTracks = [
   ["10 - Return Vector.flac", 102_600_000, 238],
 ] as const;
 
+const sonicHolidayPreviewTracks = [
+  ["01 - Infamy.flac", 7_220_000, 244],
+  ["02 - Diamond Jill and Crazy Jane.flac", 6_620_000, 231],
+  ["03 - Spare Me.flac", 8_060_000, 285],
+  ["04 - Ballad of the Sinking Star.flac", 8_060_000, 273],
+  ["05 - Photo Lens.flac", 7_920_000, 252],
+  ["06 - Beautiful.flac", 12_100_000, 302],
+  ["07 - Telescope Girl.flac", 6_170_000, 221],
+  ["08 - Rollergirl.flac", 9_240_000, 268],
+  ["09 - Dreams.flac", 7_540_000, 239],
+  ["10 - The Last Night.flac", 8_180_000, 249],
+  ["11 - A Sonic Holiday.flac", 7_830_000, 261],
+] as const;
+
 const errorMessage = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
 
 const previewInspection = (result: SearchResult): FolderInspection => {
   const folder = result.folder ?? "Music\\Liminal Structures\\Night Geometry";
+  const selectedTracks = result.title === "A Sonic Holiday" ? sonicHolidayPreviewTracks : previewTracks;
   const smartMatchTrackSize = result.id.startsWith("wanted-") && result.sizeBytes
-    ? Math.floor(result.sizeBytes / previewTracks.length)
+    ? Math.floor(result.sizeBytes / selectedTracks.length)
     : null;
   return {
     token: 1,
     username: result.owner,
     requestedFolder: folder,
     receivedAtMs: Date.now(),
-    files: [...previewTracks.map(([filename, sizeBytes, durationSeconds]): FolderFile => ({
+    files: [...selectedTracks.map(([filename, sizeBytes, durationSeconds]): FolderFile => ({
       remoteFilename: `${folder}\\${filename}`,
       directory: folder,
       filename,
