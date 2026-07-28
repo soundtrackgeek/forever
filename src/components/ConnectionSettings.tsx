@@ -43,6 +43,8 @@ type ConnectionSettingsProps = {
   onUpdateCheckIntervalChange: (
     interval: UpdateCheckIntervalMinutes,
   ) => void;
+  musicBrainzFallbackTrackCount: number;
+  onMusicBrainzFallbackTrackCountChange: (count: number) => void;
   localShares: LocalSharesSnapshot;
   sharingError: string | null;
   onAddShare: (path: string) => Promise<unknown>;
@@ -115,6 +117,8 @@ export function ConnectionSettings({
   onCheckForUpdates,
   updateCheckIntervalMinutes,
   onUpdateCheckIntervalChange,
+  musicBrainzFallbackTrackCount,
+  onMusicBrainzFallbackTrackCountChange,
   localShares,
   sharingError,
   onAddShare,
@@ -524,8 +528,31 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.51</h2>
+              <h2>Forever 0.0.52</h2>
               <p>Updates install from signed GitHub Releases.</p>
+              <label className="musicbrainz-fallback-field">
+                <span>MusicBrainz fallback tracks</span>
+                <span className="musicbrainz-fallback-input">
+                  <input
+                    aria-label="MusicBrainz fallback track count"
+                    type="number"
+                    min={1}
+                    max={250}
+                    step={1}
+                    value={musicBrainzFallbackTrackCount}
+                    onChange={(event) => {
+                      const count = Number(event.target.value);
+                      if (Number.isInteger(count) && count >= 1 && count <= 250) {
+                        onMusicBrainzFallbackTrackCountChange(count);
+                      }
+                    }}
+                  />
+                  <small>tracks</small>
+                </span>
+                <small>
+                  Used only when MusicBrainz has no official track count.
+                </small>
+              </label>
               <label className="update-interval-field">
                 <span>Automatic update checks</span>
                 <select

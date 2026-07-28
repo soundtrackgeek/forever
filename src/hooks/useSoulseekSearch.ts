@@ -199,12 +199,28 @@ const hysteriaTracks = [
   "Love and Affection",
 ];
 
+const sonicHolidayTracks = [
+  "Infamy",
+  "Diamond Jill and Crazy Jane",
+  "Spare Me",
+  "Ballad of the Sinking Star",
+  "Photo Lens",
+  "Beautiful",
+  "Telescope Girl",
+  "Rollergirl",
+  "Dreams",
+  "The Last Night",
+  "A Sonic Holiday",
+];
+
 const previewNetworkResults = [
   ...previewAlbumSource({ id: "night-flac", username: "audiophile92", folder: "Music\\Liminal Structures\\Night Geometry [FLAC]", tracks: nightGeometryTracks, format: "flac", slotFree: true, averageSpeed: 8_200_000, queueLength: 0 }),
   ...previewAlbumSource({ id: "night-mp3", username: "soulseeker7", folder: "Music\\Liminal Structures\\Night Geometry (2019) [320]", tracks: nightGeometryTracks, format: "mp3", slotFree: false, averageSpeed: 5_100_000, queueLength: 3 }),
   ...previewAlbumSource({ id: "hysteria-flac", username: "bleachjt", folder: "Music\\Def Leppard\\1987 - Hysteria [FLAC]", tracks: hysteriaTracks, format: "flac", slotFree: true, averageSpeed: 9_400_000, queueLength: 0 }),
   ...previewAlbumSource({ id: "hysteria-mp3", username: "rockarchive", folder: "Music\\Def Leppard\\Hysteria (1987) [320]", tracks: hysteriaTracks, format: "mp3", slotFree: true, averageSpeed: 6_800_000, queueLength: 0 }),
   ...previewAlbumSource({ id: "hysteria-mfsl", username: "vinylrips", folder: "Music\\Rock\\Def Leppard\\Hysteria MFSL", tracks: hysteriaTracks, format: "flac", slotFree: false, averageSpeed: 3_700_000, queueLength: 4 }),
+  ...previewAlbumSource({ id: "sonic-holiday-complete", username: "holidayarchive", folder: "Music\\Engine Alley\\1992 - A Sonic Holiday [FLAC]", tracks: sonicHolidayTracks, format: "flac", slotFree: true, averageSpeed: 7_100_000, queueLength: 0 }),
+  ...previewAlbumSource({ id: "sonic-holiday-partial", username: "singleshelf", folder: "Music\\Engine Alley\\A Sonic Holiday - Sampler", tracks: ["A Sonic Holiday"], format: "mp3", slotFree: true, averageSpeed: 5_300_000, queueLength: 0 }),
 ];
 
 const errorMessage = (cause: unknown) =>

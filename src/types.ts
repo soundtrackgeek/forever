@@ -33,6 +33,7 @@ export type AlbumSearchContext = {
   title: string;
   coverArtUrl: string;
   firstReleaseDate: string;
+  minimumTrackCount?: number | null;
 };
 
 export type AlbumSource = {

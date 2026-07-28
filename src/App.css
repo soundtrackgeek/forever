@@ -7789,6 +7789,56 @@ form.settings-panel {
   display: grid;
 }
 
+.musicbrainz-fallback-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.musicbrainz-fallback-field > span:first-child {
+  color: #a9abb9;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.musicbrainz-fallback-input {
+  display: grid;
+  height: 36px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  background: #111625;
+  border: 1px solid #343a4e;
+  border-radius: 6px;
+}
+
+.musicbrainz-fallback-input:focus-within,
+.musicbrainz-fallback-input:hover {
+  border-color: #4b5066;
+}
+
+.musicbrainz-fallback-input input {
+  min-width: 0;
+  color: #d7d7e0;
+  font: 600 10px inherit;
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.musicbrainz-fallback-input small,
+.musicbrainz-fallback-field > small {
+  color: #6f7488;
+  font-size: 8px;
+}
+
+.musicbrainz-fallback-field > small {
+  line-height: 1.4;
+}
+
 .update-interval-field {
   display: grid;
   gap: 6px;

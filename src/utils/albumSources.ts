@@ -105,3 +105,11 @@ export function groupAlbumSources(results: SearchResult[]): AlbumSource[] {
 
   return Array.from(sources.values());
 }
+
+export function albumSourcesMeetingTrackMinimum(
+  sources: AlbumSource[],
+  minimumTrackCount: number | null | undefined,
+) {
+  if (!minimumTrackCount || minimumTrackCount < 1) return sources;
+  return sources.filter((source) => source.tracks.length >= minimumTrackCount);
+}

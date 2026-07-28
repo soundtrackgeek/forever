@@ -30,6 +30,7 @@ type AlbumSourceResultsProps = {
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
   smartPreferences?: WantedPreferences;
+  minimumTrackCount?: number | null;
 };
 
 function DownloadStateIcon({ state }: { state: AlbumDownloadStatus }) {
@@ -149,6 +150,7 @@ export function AlbumSourceResults({
   personByUsername,
   onOpenPerson,
   smartPreferences,
+  minimumTrackCount,
 }: AlbumSourceResultsProps) {
   const [preparingSourceId, setPreparingSourceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -204,10 +206,12 @@ export function AlbumSourceResults({
               ) : (
                 <FolderOpen size={28} weight="light" />
               )}
-              <h3>{searching ? "Listening for album folders" : "No album folders found"}</h3>
+              <h3>{searching ? "Listening for album folders" : minimumTrackCount ? "No complete album folders yet" : "No album folders found"}</h3>
               <p>
                 {searching
                   ? "Sources will group here as people respond."
+                  : minimumTrackCount
+                    ? `Forever is hiding folders below your ${minimumTrackCount}-track minimum. Try Individual files if you want to inspect every reply.`
                   : "Try the individual file view or search for a broader release title."}
               </p>
             </div>

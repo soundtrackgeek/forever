@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.51` keeps Missing Shelf batches moving
-> when MusicBrainz cannot provide an official track count.
+> **Status:** pre-alpha. Version `0.0.52` makes Wanted comparisons honor their
+> minimum track count and lets you choose MusicBrainz's fallback count.
 
-If `0.0.16` is installed, download and run the latest `0.0.51` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.52` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -52,7 +52,9 @@ configuration and transfers.
   formats, aggregate search size, readiness and speed, hover/focus track-list
   previews, an individual-file fallback, complete-folder download, and live
   **Downloading** or numbered **Queued #1**, **Queued #2** actions that stay
-  synchronized as releases are reordered, paused, completed, failed, or removed
+  synchronized as releases are reordered, paused, completed, failed, or removed;
+  Wanted comparisons hide folders below that album's track minimum and compute
+  their file, source, and listener totals from qualifying folders only
 - A dedicated Archive workspace that opens Music Library's
   `music-library.sqlite3` database with SQLite read-only and query-only
   enforcement, reports its latest import and inventory totals, and never adds
@@ -94,8 +96,8 @@ configuration and transfers.
   collection gaps, and an atomic bulk handoff of up to 100 missing releases to
   Wanted using one shared Smart Match profile without duplicate watches;
   track matching can accept any count, use a custom minimum, or resolve each
-  album's official MusicBrainz count, with a visible saved-default or 10-track
-  fallback when that metadata is unavailable
+  album's official MusicBrainz count, with a visible, persistent fallback count
+  configured in Settings when that metadata is unavailable
 - **Shelf Radar** scans one missing album, up to 12 selected albums, or up to 12
   visible gaps without replacing the main Search workspace; scans are explicit,
   sequential, cancellable, and held only for the current app session
@@ -343,8 +345,9 @@ minimum for the batch, or read the earliest official edition from
 **Add to Wanted**. The bulk action deduplicates existing watches and writes once
 to Forever's separate `wanted.json`; the Music Library database remains
 untouched. If an album has no official tracklist or the lookup is unavailable,
-Forever still adds it using your saved default track minimum—or 10 tracks when
-the default accepts any count—and identifies the fallback in the completed bar.
+Forever still adds it using the dedicated **MusicBrainz fallback tracks** value
+from Settings (10 tracks until you change it) and identifies the fallback in
+the completed bar.
 
 Use **Scan visible** to check up to the first 12 visible missing albums, or
 select specific gaps and use **Scan selected**. Shelf Radar sends one search at
@@ -414,8 +417,10 @@ failed or incomplete release stays watched. The saved receipt records the
 actual source, format, track count, size, Soundcheck result, and completion time.
 Use **Add back** to start a fresh watch—even when Music Library already owns the
 album—and only a newer verification can fulfill it again. **Compare** opens the
-full grouped source report with the
-recommendation highlighted. Forever never auto-downloads a Smart Match. When
+grouped source report with the recommendation highlighted and hides partial
+folders below that album's minimum track count. Its totals describe only the
+qualifying folders; switch to **Individual files** to inspect every raw Soulseek
+reply. Forever never auto-downloads a Smart Match. When
 the read-only Music Library Archive reports another watched album as owned, its
 watch moves to **Fulfilled** and stops checking; it returns to the active list
 if the external source no longer reports it.
@@ -507,6 +512,10 @@ are excluded. Share lists stay in memory only for the current app session.
 Passwords are excluded from both. With “Remember
 password” enabled, Windows Credential Manager stores the password; otherwise it
 exists only for the current app session.
+
+The MusicBrainz fallback track count is stored in the local WebView profile and
+is used only when a Missing Shelf release has no official MusicBrainz track
+data. The initial fallback is 10 tracks and can be changed in Settings.
 
 Wanted albums, their configurable check rhythm, per-album Smart Match profiles,
 last ranked source summary, fulfillment state, download completion receipts,

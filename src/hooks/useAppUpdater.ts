@@ -35,18 +35,18 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.50",
-  version: "0.0.51",
-  body: `## What’s new in Forever 0.0.51
+  currentVersion: "0.0.51",
+  version: "0.0.52",
+  body: `## What’s new in Forever 0.0.52
+
+### Added
+
+- Settings now has a persistent MusicBrainz fallback track count for releases without official track data.
 
 ### Fixed
 
-- A missing or unavailable MusicBrainz track count no longer blocks a Missing Shelf batch.
-- Forever adds the affected album with the saved default track minimum, or 10 tracks when that default is Any, and explains the fallback in place.
-
-### Changed
-
-- MusicBrainz track-count lookup remains best-effort for every album while the Wanted write stays atomic.`,
+- Wanted Compare now hides partial folders below the album’s minimum-track rule and reports qualified totals.
+- Every raw Soulseek reply remains available under Individual files.`,
   date: "2026-07-28",
 };
 

@@ -5,6 +5,7 @@ import { UPDATE_CHECK_INTERVAL_STORAGE_KEY } from "./hooks/useAppUpdater";
 import { MESSAGE_NOTIFICATION_STORAGE_KEY } from "./hooks/usePrivateMessages";
 import { ROOM_NOTIFICATION_STORAGE_KEY } from "./hooks/useSoulseekRooms";
 import { MESSAGE_DRAFTS_STORAGE_KEY } from "./components/MessagesWorkspace";
+import { MUSICBRAINZ_FALLBACK_TRACK_COUNT_STORAGE_KEY } from "./utils/musicbrainzFallback";
 
 describe("Forever shell", () => {
   it("opens The Listening Post first and routes every live signal to its exact workspace", () => {
@@ -382,8 +383,25 @@ describe("Forever shell", () => {
     expect(within(slang).getByText("Lossless only · 11+ tracks")).toBeInTheDocument();
   });
 
-  it("adds a MusicBrainz batch with the default track minimum when a count is unavailable", async () => {
+  it("uses the persisted Settings fallback when a MusicBrainz count is unavailable", async () => {
+    const view = render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const fallback = screen.getByRole("spinbutton", {
+      name: "MusicBrainz fallback track count",
+    });
+    expect(fallback).toHaveValue(10);
+    fireEvent.change(fallback, { target: { value: "6" } });
+    expect(window.localStorage.getItem(
+      MUSICBRAINZ_FALLBACK_TRACK_COUNT_STORAGE_KEY,
+    )).toBe("6");
+
+    view.unmount();
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("spinbutton", {
+      name: "MusicBrainz fallback track count",
+    })).toHaveValue(6);
 
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     fireEvent.click(screen.getByRole("tab", { name: "Missing shelf" }));
@@ -396,13 +414,13 @@ describe("Forever shell", () => {
     expect(await screen.findByText("1 added to Wanted")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "MusicBrainz has no official track count for Songs From the Sparkle Lounge. Added it with the default 10-track minimum.",
+        "MusicBrainz has no official track count for Songs From the Sparkle Lounge. Added it with your 6-track fallback.",
       ),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Wanted 4" }));
     const fallbackAlbum = screen.getByText("Songs From the Sparkle Lounge").closest("article") as HTMLElement;
-    expect(within(fallbackAlbum).getByText("Prefer FLAC · 320+ kbps · 10+ tracks")).toBeInTheDocument();
+    expect(within(fallbackAlbum).getByText("Prefer FLAC · 320+ kbps · 6+ tracks")).toBeInTheDocument();
   });
 
   it("scans one missing album, previews sources, downloads the best copy, and starts a watch", async () => {
@@ -495,6 +513,21 @@ describe("Forever shell", () => {
     expect(
       screen.getByRole("button", { name: "Remove A Sonic Holiday from Wanted" }),
     ).toHaveAttribute("aria-pressed", "true");
+    await waitFor(
+      () => expect(screen.getByText("1 album source")).toBeInTheDocument(),
+      { timeout: 1_500 },
+    );
+    expect(screen.getByText("1992 - A Sonic Holiday [FLAC]")).toBeInTheDocument();
+    expect(screen.queryByText("A Sonic Holiday - Sampler")).not.toBeInTheDocument();
+    const sonicReport = screen
+      .getByRole("heading", { name: "A Sonic Holiday — Engine Alley" })
+      .closest("article") as HTMLElement;
+    expect(within(sonicReport).getByText("12")).toBeInTheDocument();
+    expect(within(sonicReport).getAllByText("1")).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Individual files" }));
+    expect(await screen.findByText("14 files")).toBeInTheDocument();
+    expect(screen.getAllByText(/A Sonic Holiday/).length).toBeGreaterThan(1);
   });
 
   it("reviews and queues the best matching source while preserving companion files", async () => {
@@ -902,17 +935,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.51 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.52 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "A missing or unavailable MusicBrainz track count no longer blocks a Missing Shelf batch.",
+        "Settings now has a persistent MusicBrainz fallback track count for releases without official track data.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Forever adds the affected album with the saved default track minimum, or 10 tracks when that default is Any, and explains the fallback in place.",
+        "Wanted Compare now hides partial folders below the album’s minimum-track rule and reports qualified totals.",
       ),
     ).toBeInTheDocument();
     expect(

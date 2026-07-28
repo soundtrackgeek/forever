@@ -36,7 +36,10 @@ import type {
   Transfer,
   WantedAlbum,
 } from "../types";
-import { groupAlbumSources } from "../utils/albumSources";
+import {
+  albumSourcesMeetingTrackMinimum,
+  groupAlbumSources,
+} from "../utils/albumSources";
 import { AlbumSourceResults } from "./AlbumSourceResults";
 import { ArchiveOwnershipBadge } from "./ArchiveOwnershipBadge";
 import { CountryFlag } from "./CountryFlag";
@@ -206,15 +209,22 @@ export function SearchWorkspace({
     () => groupAlbumSources(deferredResults),
     [deferredResults],
   );
+  const qualifiedAlbumSources = useMemo(
+    () => albumSourcesMeetingTrackMinimum(
+      albumSources,
+      albumContext?.minimumTrackCount,
+    ),
+    [albumContext?.minimumTrackCount, albumSources],
+  );
   const sourceCounts = useMemo(() => {
     let lossless = 0;
     let compressed = 0;
-    for (const source of albumSources) {
+    for (const source of qualifiedAlbumSources) {
       if (source.formats.some((format) => losslessFormats.has(format))) lossless += 1;
       if (source.formats.some((format) => compressedFormats.has(format))) compressed += 1;
     }
     return { lossless, compressed };
-  }, [albumSources]);
+  }, [qualifiedAlbumSources]);
 
   const visibleResults = useMemo(() => {
     const filtered = results.filter((result) => {
@@ -243,7 +253,7 @@ export function SearchWorkspace({
   }, [filter, results, sort]);
 
   const visibleAlbumSources = useMemo(() => {
-    const filtered = albumSources.filter((source) => {
+    const filtered = qualifiedAlbumSources.filter((source) => {
       if (filter === "lossless") {
         return source.formats.some((format) => losslessFormats.has(format));
       }
@@ -270,12 +280,20 @@ export function SearchWorkspace({
       );
     }
     return filtered;
-  }, [albumSources, filter, sort]);
+  }, [filter, qualifiedAlbumSources, sort]);
 
   const showingAlbumSources = Boolean(albumContext) && albumResultView === "sources";
   const visibleCount = showingAlbumSources
     ? visibleAlbumSources.length
     : visibleResults.length;
+  const qualifiedFileCount = useMemo(
+    () => qualifiedAlbumSources.reduce((count, source) => count + source.files.length, 0),
+    [qualifiedAlbumSources],
+  );
+  const qualifiedPeerCount = useMemo(
+    () => new Set(qualifiedAlbumSources.map((source) => source.owner.toLocaleLowerCase())).size,
+    [qualifiedAlbumSources],
+  );
 
   const connectionLabel =
     connection.state === "online"
@@ -374,7 +392,7 @@ export function SearchWorkspace({
             <div className="filter-popover" role="menu">
               {(
                 [
-                  ["all", showingAlbumSources ? albumSources.length : results.length],
+                  ["all", showingAlbumSources ? qualifiedAlbumSources.length : results.length],
                   ["lossless", showingAlbumSources ? sourceCounts.lossless : losslessCount],
                   ["compressed", showingAlbumSources ? sourceCounts.compressed : compressedCount],
                 ] as const
@@ -491,17 +509,17 @@ export function SearchWorkspace({
           <dl>
             <div>
               <dt>Files</dt>
-              <dd>{search.resultCount}</dd>
+              <dd>{showingAlbumSources ? qualifiedFileCount : search.resultCount}</dd>
             </div>
             {albumContext ? (
               <div>
                 <dt>Sources</dt>
-                <dd>{albumSources.length}</dd>
+                <dd>{showingAlbumSources ? qualifiedAlbumSources.length : albumSources.length}</dd>
               </div>
             ) : null}
             <div>
               <dt>People</dt>
-              <dd>{search.peerCount}</dd>
+              <dd>{showingAlbumSources ? qualifiedPeerCount : search.peerCount}</dd>
             </div>
           </dl>
           {searching && (
@@ -627,6 +645,7 @@ export function SearchWorkspace({
           personByUsername={personByUsername}
           onOpenPerson={onOpenPerson}
           smartPreferences={wantedAlbum?.preferences}
+          minimumTrackCount={albumContext?.minimumTrackCount}
         />
       ) : <div className={`results-table ${layout === "grid" ? "is-grid" : ""}`}>
         <div className="result-header" aria-hidden="true">

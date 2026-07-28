@@ -5,6 +5,32 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.52] - 2026-07-28
+
+### Added
+
+- Settings now includes a persistent **MusicBrainz fallback tracks** value,
+  initially 10 and configurable from 1 to 250, for releases without an official
+  track count.
+
+### Changed
+
+- Missing Shelf now uses the dedicated MusicBrainz fallback setting instead of
+  coupling missing catalog metadata to the default Smart Match profile.
+- Wanted **Compare** carries the album's minimum-track rule into Search, reports
+  file, source, and listener totals from qualifying folders, and keeps every raw
+  reply available under **Individual files**.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.52`.
+
+### Fixed
+
+- One-track singles, samplers, and other partial folders below a Wanted album's
+  minimum no longer appear as downloadable albums in its grouped comparison.
+- Frontend and rendered interaction coverage protects fallback persistence,
+  missing-MusicBrainz handoff, qualified comparison counts, and access to raw
+  individual-file replies.
+
 ## [0.0.51] - 2026-07-28
 
 ### Changed

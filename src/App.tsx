@@ -55,6 +55,10 @@ import type {
 } from "./types";
 import { groupAlbumSources } from "./utils/albumSources";
 import { albumDownloadStatesByTitle, type AlbumDownloadState } from "./utils/albumDownloadState";
+import {
+  readMusicBrainzFallbackTrackCount,
+  saveMusicBrainzFallbackTrackCount,
+} from "./utils/musicbrainzFallback";
 import { groupTransfers } from "./utils/transfers";
 import { verifiedDownloadedWantedFulfillments, wantedAlbumDownloadTitle } from "./utils/wantedFulfillment";
 
@@ -126,6 +130,8 @@ function App() {
   const safeExitPreview = import.meta.env.DEV
     && new URLSearchParams(window.location.search).get("safe-exit") === "1";
   const [activeView, setActiveView] = useState("home");
+  const [musicBrainzFallbackTrackCount, setMusicBrainzFallbackTrackCount] =
+    useState(readMusicBrainzFallbackTrackCount);
   const [transferShelfExpanded, setTransferShelfExpanded] = useState(false);
   const [transferFocus, setTransferFocus] = useState<{ groupId: string; requestId: number } | null>(null);
   const [archiveFocus, setArchiveFocus] = useState<{ tab: "arrivals" | "missing" | "wanted"; requestId: number } | null>(null);
@@ -889,6 +895,7 @@ function App() {
               title: album.title,
               coverArtUrl: album.coverArtUrl ?? "",
               firstReleaseDate: album.firstReleaseDate,
+              minimumTrackCount: album.preferences.minimumTrackCount,
             })}
             onDismissWantedError={wanted.clearError}
             transferGroups={transferGroups}
@@ -919,6 +926,7 @@ function App() {
                 matchByAlbumId={missingShelf.matchByAlbumId}
                 wantedAlbums={wanted.snapshot.albums}
                 defaultPreferences={wanted.snapshot.defaultPreferences}
+                musicBrainzFallbackTrackCount={musicBrainzFallbackTrackCount}
                 online={connection.snapshot.state === "online"}
                 radarReady={radar.ready}
                 radarSnapshot={radar.snapshot}
@@ -1140,6 +1148,12 @@ function App() {
             onUpdateCheckIntervalChange={
               updater.setUpdateCheckIntervalMinutes
             }
+            musicBrainzFallbackTrackCount={musicBrainzFallbackTrackCount}
+            onMusicBrainzFallbackTrackCountChange={(count) => {
+              setMusicBrainzFallbackTrackCount(
+                saveMusicBrainzFallbackTrackCount(count),
+              );
+            }}
             localShares={sharing.shares}
             sharingError={sharing.error}
             onAddShare={sharing.addRoot}
@@ -1264,6 +1278,7 @@ function App() {
               title: reviewAlbum.title,
               coverArtUrl: reviewAlbum.coverArtUrl ?? "",
               firstReleaseDate: reviewAlbum.firstReleaseDate,
+              minimumTrackCount: reviewAlbum.preferences.minimumTrackCount,
             });
           }}
           onClose={() => setReviewAlbum(null)}
@@ -1289,6 +1304,7 @@ function App() {
               title: album.title,
               coverArtUrl: album.coverArtUrl ?? "",
               firstReleaseDate: album.firstReleaseDate,
+              minimumTrackCount: album.preferences.minimumTrackCount,
             });
           }}
           onDismiss={wanted.dismissAlert}

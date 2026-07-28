@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { SearchResult } from "../types";
-import { formatAlbumBytes, groupAlbumSources } from "./albumSources";
+import {
+  albumSourcesMeetingTrackMinimum,
+  formatAlbumBytes,
+  groupAlbumSources,
+} from "./albumSources";
 
 const result = (
   id: string,
@@ -63,5 +67,24 @@ describe("groupAlbumSources", () => {
     expect(grouped[0].tracks).toHaveLength(1);
     expect(grouped[0].totalSizeBytes).toBe(42_000_000);
     expect(formatAlbumBytes(grouped[0].totalSizeBytes)).toBe("42.0 MB");
+  });
+
+  it("hides partial folders from a minimum-track album comparison", () => {
+    const grouped = groupAlbumSources([
+      result("partial", "archive", "Music\\Singles", "01 - Single.flac", "FLAC", 40_000_000),
+      ...Array.from({ length: 10 }, (_, index) => result(
+        `album-${index}`,
+        "complete",
+        "Music\\Original Sin",
+        `${String(index + 1).padStart(2, "0")} - Track.flac`,
+        "FLAC",
+        40_000_000,
+      )),
+    ]);
+
+    expect(albumSourcesMeetingTrackMinimum(grouped, 10)).toMatchObject([
+      { owner: "complete", tracks: { length: 10 } },
+    ]);
+    expect(albumSourcesMeetingTrackMinimum(grouped, null)).toHaveLength(2);
   });
 });

@@ -54,6 +54,7 @@ type MissingShelfWorkspaceProps = {
   matchByAlbumId: ReadonlyMap<string, ArchiveAlbumMatch>;
   wantedAlbums: WantedAlbum[];
   defaultPreferences: WantedPreferences;
+  musicBrainzFallbackTrackCount: number;
   online: boolean;
   radarReady: boolean;
   radarSnapshot: RadarSnapshot;
@@ -84,8 +85,6 @@ type MissingShelfWorkspaceProps = {
 type ReleaseFilter = "studio" | "live" | "compilation" | "ep" | "all";
 type ShelfState = "owned" | "wanted" | "missing";
 type TrackCountMode = "any" | "custom" | "musicbrainz";
-
-const DEFAULT_TRACK_COUNT_FALLBACK = 10;
 
 const trackCountModeFor = (preferences: WantedPreferences): TrackCountMode =>
   preferences.minimumTrackCount === null ? "any" : "custom";
@@ -216,6 +215,7 @@ export function MissingShelfWorkspace({
   matchByAlbumId,
   wantedAlbums,
   defaultPreferences,
+  musicBrainzFallbackTrackCount,
   online,
   radarReady,
   radarSnapshot,
@@ -336,21 +336,18 @@ export function MissingShelfWorkspace({
           const officialTrackCount = await onResolveOfficialTrackCount(album).catch(() => null);
           if (officialTrackCount === null) fallbackAlbums.push(album.title);
           minimumTrackCounts[album.id] = officialTrackCount
-            ?? defaultPreferences.minimumTrackCount
-            ?? DEFAULT_TRACK_COUNT_FALLBACK;
+            ?? musicBrainzFallbackTrackCount;
         }
       }
       await onAddMany(selectedArtist.name, selectedAlbums, preferences, minimumTrackCounts);
       setAddedCount(selectedAlbums.length);
       setSelectedIds(new Set());
       if (fallbackAlbums.length > 0) {
-        const fallbackTrackCount = defaultPreferences.minimumTrackCount
-          ?? DEFAULT_TRACK_COUNT_FALLBACK;
         const subject = fallbackAlbums.length === 1
           ? fallbackAlbums[0]
           : `${fallbackAlbums.length} selected albums`;
         setTrackCountNotice(
-          `MusicBrainz has no official track count for ${subject}. Added ${fallbackAlbums.length === 1 ? "it" : "them"} with the default ${fallbackTrackCount}-track minimum.`,
+          `MusicBrainz has no official track count for ${subject}. Added ${fallbackAlbums.length === 1 ? "it" : "them"} with your ${musicBrainzFallbackTrackCount}-track fallback.`,
         );
       }
     } catch (cause) {
