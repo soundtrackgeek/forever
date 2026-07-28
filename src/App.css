@@ -10548,6 +10548,23 @@ form.settings-panel {
   border-color: rgba(191, 83, 92, 0.44);
 }
 
+.wanted-actions .wanted-restore {
+  color: #cdb5ef;
+  background: rgba(116, 82, 165, 0.11);
+  border-color: rgba(144, 105, 199, 0.38);
+}
+
+.wanted-actions .wanted-restore:hover:not(:disabled) {
+  color: #eadcff;
+  background: rgba(116, 82, 165, 0.18);
+  border-color: rgba(173, 132, 228, 0.58);
+}
+
+.wanted-row.is-fulfilled .wanted-actions {
+  max-width: 260px;
+  flex-wrap: wrap;
+}
+
 .wanted-empty {
   display: grid;
   min-height: 220px;

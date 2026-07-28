@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.48`, **Wanted Fulfillment**, automatically
-> retires a watch after its matching album download completes and verifies.
+> **Status:** pre-alpha. Version `0.0.49`, **Fulfilled Shelf**, keeps a quiet,
+> reversible completion receipt after a matching Wanted download verifies.
 
-If `0.0.16` is installed, download and run the latest `0.0.48` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.49` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -114,9 +114,14 @@ configuration and transfers.
   pause/check/remove controls, in-app and Windows availability alerts, and
   configurable **Smart Match** profiles for format, minimum bitrate, and track
   count, including MP3-only matching and a reusable default for new watches
-- Matching album downloads automatically leave Wanted after every expected
-  audio track verifies and Soundcheck passes when enabled, preventing redundant
-  Smart Match checks and notifications; incomplete releases remain watched
+- Matching album downloads automatically leave active Wanted monitoring after
+  every expected audio track verifies and Soundcheck passes when enabled,
+  preventing redundant Smart Match checks and notifications; incomplete
+  releases remain watched
+- The **Fulfilled Shelf** keeps a compact completion receipt with the actual
+  listener, format, audio-track count, size, Soundcheck result, completion time,
+  and current Arrival Desk journey. Open the Arrival, reveal its folder, remove
+  the receipt, or use **Add back** to begin a genuinely fresh watch
 - Ranked Smart Match recommendations based on completeness, format, upload-slot
   readiness, speed, and queue length, with a remote-folder review that preserves
   artwork, cue sheets, lyrics, logs, and other companion files when explicitly
@@ -395,10 +400,13 @@ queued. The review shows the listener, remote path, format, tracks, aggregate
 size, source speed, and the audio/companion-file split. **Queue complete album**
 preserves cover art, cue sheets, lyrics, logs, and other files beside the audio
 and leaves Archive open so another album can be queued. After every expected
-audio track completes and verifies, Forever removes that album from Wanted and
-stops its Smart Match alerts. A failed or incomplete release stays watched. You
-can add the album again later: only a verification newer than the new watch can
-retire it. **Compare** opens the full grouped source report with the
+audio track completes and verifies, Forever moves that album out of active
+monitoring and into the **Fulfilled Shelf**, stopping its Smart Match alerts. A
+failed or incomplete release stays watched. The saved receipt records the
+actual source, format, track count, size, Soundcheck result, and completion time.
+Use **Add back** to start a fresh watch—even when Music Library already owns the
+album—and only a newer verification can fulfill it again. **Compare** opens the
+full grouped source report with the
 recommendation highlighted. Forever never auto-downloads a Smart Match. When
 the read-only Music Library Archive reports another watched album as owned, its
 watch moves to **Fulfilled** and stops checking; it returns to the active list
@@ -493,13 +501,15 @@ password” enabled, Windows Credential Manager stores the password; otherwise i
 exists only for the current app session.
 
 Wanted albums, their configurable check rhythm, per-album Smart Match profiles,
-last ranked source summary, fulfillment state, and source identity fingerprints
-are stored in Forever's `wanted.json`. These fingerprints contain normalized
-Soulseek usernames and remote folder names so Forever can recognize newly
-appearing qualifying sources; they never contain local Music Library rows and
-are not written to the external Archive database. Successful verified downloads
-remove their matching entries from this separate Wanted store only; they never
-write to or import files into Music Library.
+last ranked source summary, fulfillment state, download completion receipts,
+and source identity fingerprints are stored in Forever's `wanted.json`. A
+receipt contains the release ID, Soulseek username, format, verified audio count,
+download size, Soundcheck result, and completion time. These fingerprints
+contain normalized Soulseek usernames and remote folder names so Forever can
+recognize newly appearing qualifying sources; they never contain local Music
+Library rows and are not written to the external Archive database. Successful
+verified downloads remain only as quiet Fulfilled history until you remove or
+re-add them; they never write to or import files into Music Library.
 
 Archive reads the external Music Library database at
 `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`. Forever uses the

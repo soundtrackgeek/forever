@@ -81,6 +81,22 @@ export type WantedBestSource = {
   score: number;
 };
 
+export type WantedFulfillmentSource = "archive" | "download";
+
+export type WantedDownloadReceipt = {
+  releaseId: string;
+  username: string;
+  format: string;
+  trackCount: number;
+  sizeBytes: number;
+  soundcheck: "passed" | "notChecked";
+  completedAtMs: number;
+};
+
+export type WantedDownloadFulfillment = WantedDownloadReceipt & {
+  albumId: string;
+};
+
 export type WantedAlbum = {
   albumId: string;
   artist: string;
@@ -90,7 +106,10 @@ export type WantedAlbum = {
   paused: boolean;
   fulfilled: boolean;
   fulfilledAtMs: number | null;
+  fulfillmentSource: WantedFulfillmentSource | null;
+  downloadReceipt: WantedDownloadReceipt | null;
   ownedTrackCount: number | null;
+  watchDespiteOwnership?: boolean;
   preferences: WantedPreferences;
   addedAtMs: number;
   lastCheckedAtMs: number | null;

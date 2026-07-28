@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AlbumReleaseGroup,
   WantedAlbum,
+  WantedDownloadFulfillment,
   WantedPreferences,
   WantedSnapshot,
 } from "../types";
@@ -32,6 +33,8 @@ const previewSnapshot: WantedSnapshot = {
       paused: false,
       fulfilled: false,
       fulfilledAtMs: null,
+      fulfillmentSource: null,
+      downloadReceipt: null,
       ownedTrackCount: null,
       preferences: defaultWantedPreferences,
       addedAtMs: now - 86_400_000,
@@ -68,6 +71,8 @@ const previewSnapshot: WantedSnapshot = {
       paused: false,
       fulfilled: false,
       fulfilledAtMs: null,
+      fulfillmentSource: null,
+      downloadReceipt: null,
       ownedTrackCount: null,
       preferences: { ...defaultWantedPreferences, minimumTrackCount: 11 },
       addedAtMs: now - 43_200_000,
@@ -93,6 +98,8 @@ const previewSnapshot: WantedSnapshot = {
       paused: true,
       fulfilled: false,
       fulfilledAtMs: null,
+      fulfillmentSource: null,
+      downloadReceipt: null,
       ownedTrackCount: null,
       preferences: { formatPreference: "any", minimumBitrateKbps: 256, minimumTrackCount: 10 },
       addedAtMs: now - 172_800_000,
@@ -129,7 +136,17 @@ const previewSnapshot: WantedSnapshot = {
       paused: false,
       fulfilled: true,
       fulfilledAtMs: now - 3_600_000,
-      ownedTrackCount: 12,
+      fulfillmentSource: "download",
+      downloadReceipt: {
+        releaseId: "preview-unveiled",
+        username: "signalsource",
+        format: "MP3",
+        trackCount: 12,
+        sizeBytes: 105_000_000,
+        soundcheck: "passed",
+        completedAtMs: now - 3_600_000,
+      },
+      ownedTrackCount: null,
       preferences: defaultWantedPreferences,
       addedAtMs: now - 259_200_000,
       lastCheckedAtMs: now - 90_000_000,
@@ -272,7 +289,30 @@ export function useWantedAlbums() {
       if (existing) {
         return {
           ...current,
-          albums: current.albums.map((item) => item.albumId === album.id ? { ...item, paused: false } : item),
+          albums: current.albums.map((item) => item.albumId === album.id ? item.fulfilled ? {
+            ...item,
+            ...request,
+            paused: false,
+            fulfilled: false,
+            fulfilledAtMs: null,
+            fulfillmentSource: null,
+            downloadReceipt: null,
+            ownedTrackCount: null,
+            watchDespiteOwnership: true,
+            addedAtMs: Date.now(),
+            lastCheckedAtMs: null,
+            sourceCount: 0,
+            matchingSourceCount: 0,
+            readySourceCount: 0,
+            completeSourceCount: 0,
+            newSourceCount: 0,
+            bestFormat: null,
+            bestTrackCount: null,
+            bestSizeBytes: null,
+            bestSpeedBytesPerSecond: null,
+            bestSource: null,
+            error: null,
+          } : { ...item, paused: false } : item),
           updatedAtMs: Date.now(),
         };
       }
@@ -283,7 +323,10 @@ export function useWantedAlbums() {
           paused: false,
           fulfilled: false,
           fulfilledAtMs: null,
+          fulfillmentSource: null,
+          downloadReceipt: null,
           ownedTrackCount: null,
+          watchDespiteOwnership: false,
           preferences: current.defaultPreferences,
           addedAtMs: Date.now(),
           lastCheckedAtMs: null,
@@ -320,6 +363,27 @@ export function useWantedAlbums() {
             ...request,
             paused: false,
             preferences,
+            ...(existing.fulfilled ? {
+              fulfilled: false,
+              fulfilledAtMs: null,
+              fulfillmentSource: null,
+              downloadReceipt: null,
+              ownedTrackCount: null,
+              watchDespiteOwnership: true,
+              addedAtMs: Date.now(),
+              lastCheckedAtMs: null,
+              sourceCount: 0,
+              matchingSourceCount: 0,
+              readySourceCount: 0,
+              completeSourceCount: 0,
+              newSourceCount: 0,
+              bestFormat: null,
+              bestTrackCount: null,
+              bestSizeBytes: null,
+              bestSpeedBytesPerSecond: null,
+              bestSource: null,
+              error: null,
+            } : {}),
           });
         } else {
           byId.set(request.albumId.toLowerCase(), {
@@ -327,7 +391,10 @@ export function useWantedAlbums() {
             paused: false,
             fulfilled: false,
             fulfilledAtMs: null,
+            fulfillmentSource: null,
+            downloadReceipt: null,
             ownedTrackCount: null,
+            watchDespiteOwnership: false,
             preferences,
             addedAtMs: Date.now(),
             lastCheckedAtMs: null,
@@ -360,19 +427,64 @@ export function useWantedAlbums() {
       updatedAtMs: Date.now(),
     })), [invokeOrPreview]);
 
-  const retireDownloaded = useCallback(async (albumIds: string[]) => {
-    const retiring = new Set(albumIds.map((albumId) => albumId.toLocaleLowerCase()));
-    return await invokeOrPreview("wanted_retire_downloaded", { albumIds }, (current) => ({
+  const fulfillDownloaded = useCallback(async (fulfillments: WantedDownloadFulfillment[]) => {
+    const byAlbumId = new Map(
+      fulfillments.map((fulfillment) => [fulfillment.albumId.toLocaleLowerCase(), fulfillment]),
+    );
+    return await invokeOrPreview("wanted_fulfill_downloaded", { fulfillments }, (current) => ({
       ...current,
-      albums: current.albums.filter(
-        (album) => !retiring.has(album.albumId.toLocaleLowerCase()),
-      ),
-      activeAlbumId: current.activeAlbumId && retiring.has(current.activeAlbumId.toLocaleLowerCase())
+      albums: current.albums.map((album) => {
+        const fulfillment = byAlbumId.get(album.albumId.toLocaleLowerCase());
+        if (!fulfillment) return album;
+        const { albumId: _albumId, ...downloadReceipt } = fulfillment;
+        void _albumId;
+        return {
+          ...album,
+          fulfilled: true,
+          fulfilledAtMs: fulfillment.completedAtMs,
+          fulfillmentSource: "download" as const,
+          downloadReceipt,
+          ownedTrackCount: null,
+          watchDespiteOwnership: false,
+          newSourceCount: 0,
+          error: null,
+        };
+      }),
+      activeAlbumId: current.activeAlbumId && byAlbumId.has(current.activeAlbumId.toLocaleLowerCase())
         ? null
         : current.activeAlbumId,
       updatedAtMs: Date.now(),
     }));
   }, [invokeOrPreview]);
+
+  const restore = useCallback(async (albumId: string) =>
+    await invokeOrPreview("wanted_restore", { albumId }, (current) => ({
+      ...current,
+      albums: current.albums.map((album) => album.albumId === albumId ? {
+        ...album,
+        paused: false,
+        fulfilled: false,
+        fulfilledAtMs: null,
+        fulfillmentSource: null,
+        downloadReceipt: null,
+        ownedTrackCount: null,
+        watchDespiteOwnership: true,
+        addedAtMs: Date.now(),
+        lastCheckedAtMs: null,
+        sourceCount: 0,
+        matchingSourceCount: 0,
+        readySourceCount: 0,
+        completeSourceCount: 0,
+        newSourceCount: 0,
+        bestFormat: null,
+        bestTrackCount: null,
+        bestSizeBytes: null,
+        bestSpeedBytesPerSecond: null,
+        bestSource: null,
+        error: null,
+      } : album),
+      updatedAtMs: Date.now(),
+    })), [invokeOrPreview]);
 
   const setPaused = useCallback(async (albumId: string, paused: boolean) =>
     await invokeOrPreview("wanted_set_paused", { albumId, paused }, (current) => ({
@@ -425,11 +537,16 @@ export function useWantedAlbums() {
     albums: current.albums.map((album) => {
       const fulfillment = fulfillments.find((item) => item.albumId === album.albumId);
       if (!fulfillment) return album;
+      if (album.fulfillmentSource === "download") return album;
+      if (album.watchDespiteOwnership) return album;
       return {
         ...album,
         fulfilled: fulfillment.owned,
         fulfilledAtMs: fulfillment.owned ? album.fulfilledAtMs ?? Date.now() : null,
+        fulfillmentSource: fulfillment.owned ? "archive" : null,
+        downloadReceipt: null,
         ownedTrackCount: fulfillment.owned ? fulfillment.trackCount : null,
+        watchDespiteOwnership: false,
         newSourceCount: fulfillment.owned ? 0 : album.newSourceCount,
       };
     }),
@@ -479,7 +596,7 @@ export function useWantedAlbums() {
   }, [invokeOrPreview, native, receive, snapshot]);
 
   const byAlbumId = useMemo(
-    () => new Map(snapshot.albums.map((album) => [album.albumId, album])),
+    () => new Map(snapshot.albums.filter((album) => !album.fulfilled).map((album) => [album.albumId, album])),
     [snapshot.albums],
   );
 
@@ -492,7 +609,8 @@ export function useWantedAlbums() {
     add,
     addMany,
     remove,
-    retireDownloaded,
+    fulfillDownloaded,
+    restore,
     setPaused,
     setIntervalMinutes,
     setPreferences,
@@ -501,5 +619,5 @@ export function useWantedAlbums() {
     check,
     dismissAlert: () => setAlert(null),
     clearError: () => setError(null),
-  }), [add, addMany, alert, byAlbumId, check, error, ready, remove, retireDownloaded, setDefaultPreferences, setIntervalMinutes, setPaused, setPreferences, snapshot, syncFulfilled]);
+  }), [add, addMany, alert, byAlbumId, check, error, fulfillDownloaded, ready, remove, restore, setDefaultPreferences, setIntervalMinutes, setPaused, setPreferences, snapshot, syncFulfilled]);
 }

@@ -1,5 +1,6 @@
 import {
   Archive,
+  ArrowCounterClockwise,
   ArrowsClockwise,
   BellRinging,
   CheckCircle,
@@ -8,6 +9,7 @@ import {
   Disc,
   DownloadSimple,
   Eye,
+  FolderOpen,
   Gauge,
   LockKey,
   MusicNotes,
@@ -43,6 +45,7 @@ type ArchiveWorkspaceProps = {
   onCheckWanted: (albumId: string) => Promise<unknown>;
   onSetWantedPaused: (albumId: string, paused: boolean) => Promise<unknown>;
   onRemoveWanted: (albumId: string) => Promise<unknown>;
+  onRestoreWanted: (albumId: string) => Promise<unknown>;
   onOpenWanted: (album: WantedAlbum) => void;
   onReviewBest: (album: WantedAlbum) => void;
   onEditPreferences: (album: WantedAlbum) => void;
@@ -93,6 +96,17 @@ const relativeCheck = (value: number | null) => {
   return `Checked ${Math.floor(hours / 24)}d ago`;
 };
 
+const relativeCompletion = (value: number | null) => {
+  if (!value) return "Completed recently";
+  const elapsed = Math.max(0, Date.now() - value);
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "Completed just now";
+  if (minutes < 60) return `Completed ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Completed ${hours}h ago`;
+  return `Completed ${Math.floor(hours / 24)}d ago`;
+};
+
 const speed = (value: number | null) =>
   value ? `${formatAlbumBytes(value)}/s` : "Speed unknown";
 
@@ -131,6 +145,7 @@ export function ArchiveWorkspace({
   onCheckWanted,
   onSetWantedPaused,
   onRemoveWanted,
+  onRestoreWanted,
   onOpenWanted,
   onReviewBest,
   onEditPreferences,
@@ -155,12 +170,20 @@ export function ArchiveWorkspace({
   const [tab, setTab] = useState<ArchiveTab>(initialTab);
   const [filter, setFilter] = useState<WantedFilter>("all");
   const connected = Boolean(status?.connected);
+  const activeWantedCount = wanted.albums.filter((album) => !album.fulfilled).length;
   const availableCount = wanted.albums.filter((album) => !album.fulfilled && album.matchingSourceCount > 0).length;
   const waitingCount = wanted.albums.filter((album) => !album.fulfilled && album.matchingSourceCount === 0).length;
   const fulfilledCount = wanted.albums.filter((album) => album.fulfilled).length;
-  const arrivalCount = useMemo(
-    () => buildArrivals(transferGroups, archiveOwnedReleaseIds).length,
+  const arrivals = useMemo(
+    () => buildArrivals(transferGroups, archiveOwnedReleaseIds),
     [archiveOwnedReleaseIds, transferGroups],
+  );
+  const arrivalCount = arrivals.length;
+  const arrivalByReleaseId = useMemo(
+    () => new Map(arrivals.flatMap((arrival) =>
+      arrival.group.releaseId ? [[arrival.group.releaseId, arrival] as const] : []
+    )),
+    [arrivals],
   );
   const visibleWanted = useMemo(
     () => wanted.albums.filter((album) => {
@@ -221,7 +244,7 @@ export function ArchiveWorkspace({
           <Record size={15} /> Missing shelf
         </button>
         <button type="button" role="tab" aria-selected={tab === "wanted"} className={tab === "wanted" ? "is-active" : ""} onClick={() => setTab("wanted")}>
-          <BellRinging size={15} /> Wanted <small>{wanted.albums.length}</small>
+          <BellRinging size={15} /> Wanted <small>{activeWantedCount}</small>
         </button>
       </div>
 
@@ -262,7 +285,7 @@ export function ArchiveWorkspace({
             </article>
             <article>
               <Archive size={22} weight="light" />
-              <span><h2>Forever downloads remain separate</h2><p>A completed download stays watched until Music Library reports it as owned or you remove it yourself.</p></span>
+              <span><h2>Forever downloads remain separate</h2><p>A verified Wanted download moves to the Fulfilled Shelf without importing it into Music Library.</p></span>
             </article>
           </div>
         </>
@@ -290,10 +313,10 @@ export function ArchiveWorkspace({
       ) : (
         <div className="wanted-workspace">
           <section className="wanted-summary" aria-label="Wanted status">
-            <span><small>Listening for</small><strong>{wanted.albums.length}</strong><p>wanted albums</p></span>
+            <span><small>Listening for</small><strong>{activeWantedCount}</strong><p>wanted albums</p></span>
             <span className="is-available"><small>Smart Matches</small><strong>{availableCount}</strong><p>ready to review</p></span>
             <span><small>Still quiet</small><strong>{waitingCount}</strong><p>without a match</p></span>
-            <span className="is-fulfilled"><small>In your Archive</small><strong>{fulfilledCount}</strong><p>fulfilled automatically</p></span>
+            <span className="is-fulfilled"><small>Fulfilled shelf</small><strong>{fulfilledCount}</strong><p>quiet · saved · reversible</p></span>
             <span className={online ? "is-online" : "is-offline"}><small>Background checks</small><strong>{online ? wanted.intervalMinutes ? "Live" : "Manual" : "Paused"}</strong><p>{online ? wanted.activeAlbumId ? "checking one album" : "network online" : "resume when reconnected"}</p></span>
           </section>
 
@@ -321,44 +344,59 @@ export function ArchiveWorkspace({
             {!wantedReady ? (
               <div className="wanted-empty"><CircleNotch className="search-spinner" size={27} /><strong>Opening Wanted</strong><p>Reading Forever’s separate watchlist.</p></div>
             ) : visibleWanted.length === 0 ? (
-              <div className="wanted-empty"><BellRinging size={30} weight="thin" /><strong>{wanted.albums.length ? "Nothing in this filter" : "Nothing wanted yet"}</strong><p>{wanted.albums.length ? "Choose another filter above." : "Use Add to Wanted from MusicBrainz album discovery."}</p></div>
+              <div className="wanted-empty"><BellRinging size={30} weight="thin" /><strong>{wanted.albums.length ? "Nothing in this filter" : "Nothing wanted yet"}</strong><p>{filter === "fulfilled" ? "Verified Wanted downloads and Music Library matches will collect here." : wanted.albums.length ? "Choose another filter above." : "Use Add to Wanted from MusicBrainz album discovery."}</p></div>
             ) : visibleWanted.map((album) => {
               const checking = wanted.activeAlbumId === album.albumId;
               const available = album.matchingSourceCount > 0 && Boolean(album.bestSource);
               const downloadState = downloadStateByAlbumId.get(album.albumId);
               const downloadLabel = downloadState ? albumDownloadLabel(downloadState) : "Download best";
+              const receipt = album.fulfillmentSource === "download" ? album.downloadReceipt : null;
+              const arrival = receipt ? arrivalByReleaseId.get(receipt.releaseId) : null;
+              const journey = arrival?.state === "filed"
+                ? "Filed away"
+                : arrival?.state === "moved"
+                  ? "Moved outside Forever"
+                  : arrival?.state === "attention"
+                    ? "Needs attention"
+                    : arrival
+                      ? "Ready to file"
+                      : "Receipt retained";
               return (
                 <article className={`wanted-row ${album.fulfilled ? "is-fulfilled" : available ? "is-available" : "is-waiting"} ${album.paused ? "is-paused" : ""}`} key={album.albumId}>
                   <WantedArtwork album={album} />
                   <span className="wanted-identity">
                     <small>{album.firstReleaseDate.slice(0, 4) || "Year unknown"} · {album.artist}</small>
                     <strong>{album.title}</strong>
-                    <p>{album.fulfilled ? "Fulfilled by Music Library" : relativeCheck(album.lastCheckedAtMs)}{album.paused && !album.fulfilled ? " · Watch paused" : ""}</p>
+                    <p>{receipt ? `Fulfilled by Forever · ${relativeCompletion(receipt.completedAtMs)}` : album.fulfilled ? "Fulfilled by Music Library" : relativeCheck(album.lastCheckedAtMs)}{album.paused && !album.fulfilled ? " · Watch paused" : ""}</p>
                     {!album.fulfilled ? <em><Gauge size={12} /> {wantedPreferencesLabel(album.preferences)}</em> : null}
                   </span>
                   <span className="wanted-availability">
-                    <small>{album.fulfilled ? "Archive state" : checking ? "Listening now" : available ? "Smart Match" : "Signal state"}</small>
-                    <strong>{album.fulfilled ? <><CheckCircle size={14} weight="fill" /> Owned</> : checking ? <><CircleNotch className="search-spinner" size={14} /> Checking</> : available ? `${album.matchingSourceCount} matching` : "Still quiet"}</strong>
-                    <p>{album.fulfilled ? `${album.ownedTrackCount ?? "—"} tracks in your library` : available ? `${album.sourceCount} total · ${album.readySourceCount} ready now` : album.sourceCount ? `${album.sourceCount} sources miss your profile` : album.error ?? "No matching folders returned"}</p>
+                    <small>{receipt ? "Completion receipt" : album.fulfilled ? "Archive state" : checking ? "Listening now" : available ? "Smart Match" : "Signal state"}</small>
+                    <strong>{receipt ? <><CheckCircle size={14} weight="fill" /> Verified download</> : album.fulfilled ? <><CheckCircle size={14} weight="fill" /> Owned</> : checking ? <><CircleNotch className="search-spinner" size={14} /> Checking</> : available ? `${album.matchingSourceCount} matching` : "Still quiet"}</strong>
+                    <p>{receipt ? `${receipt.trackCount} audio ${receipt.trackCount === 1 ? "track" : "tracks"} · ${receipt.soundcheck === "passed" ? "Soundcheck passed" : "size verified"}` : album.fulfilled ? `${album.ownedTrackCount ?? "—"} tracks in your library` : available ? `${album.sourceCount} total · ${album.readySourceCount} ready now` : album.sourceCount ? `${album.sourceCount} sources miss your profile` : album.error ?? "No matching folders returned"}</p>
                   </span>
                   <span className="wanted-quality">
-                    <small>{album.fulfilled ? "Ownership" : "Best match"}</small>
-                    <strong>{album.fulfilled ? "Archive" : album.bestFormat ?? "—"}</strong>
-                    <p>{album.fulfilled ? "Read-only source of truth" : album.bestTrackCount ? `${album.bestTrackCount} tracks · ${album.bestSizeBytes ? formatAlbumBytes(album.bestSizeBytes) : "size unknown"}` : "Waiting for a qualifying source"}</p>
+                    <small>{receipt ? "Downloaded signal" : album.fulfilled ? "Ownership" : "Best match"}</small>
+                    <strong>{receipt ? receipt.format : album.fulfilled ? "Archive" : album.bestFormat ?? "—"}</strong>
+                    <p>{receipt ? `${formatAlbumBytes(receipt.sizeBytes)} · from ${receipt.username}` : album.fulfilled ? "Read-only source of truth" : album.bestTrackCount ? `${album.bestTrackCount} tracks · ${album.bestSizeBytes ? formatAlbumBytes(album.bestSizeBytes) : "size unknown"}` : "Waiting for a qualifying source"}</p>
                   </span>
                   <span className="wanted-speed">
-                    <small>{album.fulfilled ? "Watch state" : "Recommended source"}</small>
-                    <strong>{album.fulfilled ? "Complete" : album.bestSource?.slotFree ? "Free slot" : album.bestSource ? `${album.bestSource.queueLength} queued` : speed(album.bestSpeedBytesPerSecond)}</strong>
+                    <small>{receipt ? "Journey state" : album.fulfilled ? "Watch state" : "Recommended source"}</small>
+                    <strong>{receipt ? journey : album.fulfilled ? "Complete" : album.bestSource?.slotFree ? "Free slot" : album.bestSource ? `${album.bestSource.queueLength} queued` : speed(album.bestSpeedBytesPerSecond)}</strong>
+                    {receipt ? <p>{arrival ? "Tracked in Arrival Desk" : "Transfer history may have been cleared"}</p> : null}
                     {!album.fulfilled && album.bestSource ? <p>{speed(album.bestSource.averageSpeedBytesPerSecond)}</p> : null}
                     {!album.fulfilled && album.newSourceCount > 0 ? <b>+{album.newSourceCount} new match{album.newSourceCount === 1 ? "" : "es"}</b> : null}
                   </span>
                   <span className="wanted-actions">
+                    {receipt && arrival ? <button type="button" className="wanted-open" onClick={() => setTab("arrivals")} title="Open this release in Arrival Desk"><FolderOpen size={16} /> Arrival</button> : null}
+                    {receipt && arrival?.group.releaseId ? <button type="button" aria-label={`Reveal ${album.title} files`} onClick={() => void onRevealRelease(arrival.group.releaseId!).catch(() => undefined)} title="Reveal downloaded files"><FolderOpen size={15} /></button> : null}
+                    {receipt ? <button type="button" className="wanted-restore" onClick={() => void onRestoreWanted(album.albumId).catch(() => undefined)} title="Start listening for this album again"><ArrowCounterClockwise size={15} /> Add back</button> : null}
                     {available && !album.fulfilled ? <button type="button" className={`wanted-download-best${downloadState ? ` is-${downloadState.status}` : ""}`} disabled={!online && !downloadState} onClick={() => downloadState ? onOpenTransfer(downloadState.groupId) : onReviewBest(album)} title={downloadState ? `${downloadLabel}. Open this album in Transfers.` : online ? "Review and queue Forever's recommended source" : "Reconnect before downloading"}>{downloadState ? <WantedDownloadIcon state={downloadState} /> : <DownloadSimple size={16} weight="bold" />} {downloadLabel}</button> : null}
                     {!album.fulfilled && album.sourceCount > 0 ? <button type="button" className="wanted-open" disabled={!online} onClick={() => onOpenWanted(album)} title={online ? "Run a fresh search and compare album sources" : "Reconnect before comparing sources"}><Eye size={16} /> Compare</button> : null}
                     {!album.fulfilled ? <button type="button" aria-label={`Edit ${album.title} Smart Match profile`} onClick={() => onEditPreferences(album)} title="Edit Smart Match profile"><SlidersHorizontal size={15} /></button> : null}
                     {!album.fulfilled ? <button type="button" aria-label={`Check ${album.title} now`} disabled={!online || checking || Boolean(wanted.activeAlbumId) || album.paused} onClick={() => void onCheckWanted(album.albumId).catch(() => undefined)} title={!online ? "Reconnect before checking" : "Check this album now"}><ArrowsClockwise size={15} /></button> : null}
                     {!album.fulfilled ? <button type="button" aria-label={`${album.paused ? "Resume" : "Pause"} ${album.title} watch`} onClick={() => void onSetWantedPaused(album.albumId, !album.paused).catch(() => undefined)} title={album.paused ? "Resume automatic checks" : "Pause automatic checks"}>{album.paused ? <Play size={15} /> : <Pause size={15} />}</button> : null}
-                    <button type="button" className="wanted-remove" aria-label={`Remove ${album.title} from Wanted`} onClick={() => void onRemoveWanted(album.albumId).catch(() => undefined)} title="Remove from Wanted"><Trash size={15} /></button>
+                    <button type="button" className="wanted-remove" aria-label={`Remove ${album.title} from ${album.fulfilled ? "Fulfilled history" : "Wanted"}`} onClick={() => void onRemoveWanted(album.albumId).catch(() => undefined)} title={album.fulfilled ? "Remove completion history" : "Remove from Wanted"}><Trash size={15} /></button>
                   </span>
                 </article>
               );

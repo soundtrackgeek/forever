@@ -59,8 +59,8 @@ use super::{
     },
     uploads::{UploadError, UploadHub, UploadQueueSnapshot, UploadTicket},
     wanted::{
-        WantedAlbumRequest, WantedError, WantedFulfillmentRequest, WantedHub, WantedPreferences,
-        WantedSnapshot,
+        WantedAlbumRequest, WantedDownloadFulfillmentRequest, WantedError,
+        WantedFulfillmentRequest, WantedHub, WantedPreferences, WantedSnapshot,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -650,11 +650,15 @@ impl ConnectionManager {
         Ok(self.wanted.remove(album_id)?)
     }
 
-    pub fn retire_downloaded_wanted(
+    pub fn fulfill_downloaded_wanted(
         &self,
-        album_ids: Vec<String>,
+        fulfillments: Vec<WantedDownloadFulfillmentRequest>,
     ) -> Result<WantedSnapshot, ConnectionServiceError> {
-        Ok(self.wanted.retire_downloaded(album_ids)?)
+        Ok(self.wanted.fulfill_downloaded(fulfillments)?)
+    }
+
+    pub fn restore_wanted(&self, album_id: &str) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.restore(album_id)?)
     }
 
     pub fn set_wanted_paused(

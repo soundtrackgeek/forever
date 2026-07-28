@@ -35,19 +35,19 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.47",
-  version: "0.0.48",
-  body: `## What’s new in Forever 0.0.48
+  currentVersion: "0.0.48",
+  version: "0.0.49",
+  body: `## What’s new in Forever 0.0.49
 
-### Fixed
+### Added
 
-- A Wanted album is retired automatically after its matching download completes and every expected audio track verifies.
-- Retired albums stop background Smart Match checks, in-app alerts, and Windows availability notifications.
+- The Fulfilled Shelf keeps a receipt with the actual listener, format, audio-track count, size, Soundcheck result, and completion time.
+- Completed watches can open their Arrival, reveal the downloaded folder, be removed from history, or be added back.
 
 ### Changed
 
-- Incomplete, missing, mismatched, or failed-Soundcheck downloads remain in Wanted.
-- Re-adding an album starts a fresh watch; older verified download history cannot immediately retire it again.`,
+- Verified downloads leave active monitoring and stop redundant Smart Match checks and alerts without losing their history.
+- Add back starts a fresh watch even when Music Library already recognizes the album.`,
   date: "2026-07-28",
 };
 

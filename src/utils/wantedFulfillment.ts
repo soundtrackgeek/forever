@@ -1,4 +1,4 @@
-import type { Transfer, WantedAlbum } from "../types";
+import type { Transfer, WantedAlbum, WantedDownloadFulfillment } from "../types";
 import { isAudioTransfer, summarizeSoundcheck } from "./soundcheck";
 import { groupTransfers } from "./transfers";
 
@@ -39,10 +39,15 @@ const releasePassedVerification = (transfers: Transfer[]) => {
   return soundcheck.checkedCount === 0 || soundcheck.state === "passed";
 };
 
-export function verifiedDownloadedWantedAlbumIds(
+const transferFormat = (transfer: Transfer) => {
+  const extension = transfer.remoteFilename.split(".").pop()?.trim().toLocaleUpperCase();
+  return transfer.soundcheck?.codec?.trim().toLocaleUpperCase() || extension || "Audio";
+};
+
+export function verifiedDownloadedWantedFulfillments(
   albums: WantedAlbum[],
   transfers: Transfer[],
-) {
+): WantedDownloadFulfillment[] {
   if (!albums.length || !transfers.length) return [];
 
   const verifiedGroups = groupTransfers(transfers).filter((group) =>
@@ -50,19 +55,38 @@ export function verifiedDownloadedWantedAlbumIds(
   );
 
   return albums.flatMap((album) => {
+    if (album.fulfilled) return [];
     const albumId = album.albumId.toLocaleLowerCase();
     const expectedTitle = normalizedTitle(wantedAlbumDownloadTitle(album));
-    const fulfilled = verifiedGroups.some((group) => {
-      if (!verifiedAfterWatchStarted(album, group.transfers)) return false;
+    const group = verifiedGroups.find((candidate) => {
+      if (!candidate.releaseId) return false;
+      if (!verifiedAfterWatchStarted(album, candidate.transfers)) return false;
       const releaseGroupIds = new Set(
-        group.transfers.flatMap((transfer) =>
+        candidate.transfers.flatMap((transfer) =>
           transfer.releaseGroupId ? [transfer.releaseGroupId.toLocaleLowerCase()] : []
         ),
       );
       return releaseGroupIds.size
         ? releaseGroupIds.has(albumId)
-        : normalizedTitle(group.title) === expectedTitle;
+        : normalizedTitle(candidate.title) === expectedTitle;
     });
-    return fulfilled ? [album.albumId] : [];
+    if (!group?.releaseId) return [];
+
+    const audio = group.transfers.filter(isAudioTransfer);
+    const formats = [...new Set(audio.map(transferFormat))].sort();
+    const soundcheck = summarizeSoundcheck(group.transfers);
+    return [{
+      albumId: album.albumId,
+      releaseId: group.releaseId,
+      username: group.username,
+      format: formats.join(" + "),
+      trackCount: audio.length,
+      sizeBytes: group.sizeBytes,
+      soundcheck: soundcheck.checkedCount > 0 ? "passed" : "notChecked",
+      completedAtMs: Math.max(
+        0,
+        ...group.transfers.map((transfer) => transfer.verifiedAtMs ?? transfer.updatedAtMs),
+      ),
+    }];
   });
 }

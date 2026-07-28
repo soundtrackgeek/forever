@@ -5,6 +5,36 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.49] - 2026-07-28
+
+### Added
+
+- **Fulfilled Shelf** keeps verified Wanted downloads as persistent, quiet
+  completion receipts instead of discarding their history. Each receipt records
+  the actual listener, format, verified audio-track count, size, Soundcheck
+  result, completion time, and current Arrival Desk journey.
+- A fulfilled download can open its Arrival, reveal the downloaded folder while
+  transfer history remains, be removed from history, or use **Add back** to
+  begin a fresh watch.
+- Native, frontend, persistence, and rendered interaction coverage protects the
+  completion receipt and reversible re-add flow.
+
+### Changed
+
+- Fulfilled downloads no longer contribute to active Wanted counts, background
+  checks, Missing Shelf state, or Smart Match alerts, while their receipt stays
+  available under the existing Fulfilled filter.
+- **Add back** clears stale results and completion evidence, resets the watch
+  timestamp, and explicitly resumes monitoring even when the read-only Music
+  Library already reports the album as owned.
+- Application, updater preview, package, Cargo, Tauri, Settings, and
+  MusicBrainz metadata now identify version `0.0.49`.
+
+### Fixed
+
+- Archive reconciliation can no longer replace a verified download receipt or
+  immediately re-fulfill a watch the listener explicitly added back.
+
 ## [0.0.48] - 2026-07-28
 
 ### Fixed

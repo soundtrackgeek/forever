@@ -56,7 +56,7 @@ import type {
 import { groupAlbumSources } from "./utils/albumSources";
 import { albumDownloadStatesByTitle, type AlbumDownloadState } from "./utils/albumDownloadState";
 import { groupTransfers } from "./utils/transfers";
-import { verifiedDownloadedWantedAlbumIds, wantedAlbumDownloadTitle } from "./utils/wantedFulfillment";
+import { verifiedDownloadedWantedFulfillments, wantedAlbumDownloadTitle } from "./utils/wantedFulfillment";
 
 const emptyAlbumCatalog: AlbumReleaseGroup[] = [];
 const relaySessionId = (releaseId: string) => `signal-relay:${releaseId}`;
@@ -208,7 +208,7 @@ function App() {
   const relaysNotified = useRef(new Set<string>());
   const transferVerificationActive = useRef(false);
   const lastFulfillmentSync = useRef("");
-  const lastWantedRetirement = useRef("");
+  const lastWantedFulfillment = useRef("");
   const needsOnboarding = !connection.profile || !connection.hasPassword;
   const onboardingOpen =
     connection.ready &&
@@ -352,10 +352,13 @@ function App() {
   }), [archive.wantedMatchByAlbumId, wanted.snapshot.albums]);
   const fulfillmentSignature = useMemo(
     () => fulfillmentRequests
-      .map((item) => `${item.albumId}:${item.owned ? 1 : 0}:${item.trackCount ?? ""}`)
+      .map((item) => {
+        const album = wanted.snapshot.albums.find((candidate) => candidate.albumId === item.albumId);
+        return `${item.albumId}:${item.owned ? 1 : 0}:${item.trackCount ?? ""}:${album?.fulfillmentSource ?? "active"}:${album?.watchDespiteOwnership ? "manual" : "archive"}:${album?.addedAtMs ?? 0}`;
+      })
       .sort()
       .join("|"),
-    [fulfillmentRequests],
+    [fulfillmentRequests, wanted.snapshot.albums],
   );
 
   useEffect(() => {
@@ -366,29 +369,29 @@ function App() {
     });
   }, [fulfillmentRequests, fulfillmentSignature, wanted]);
 
-  const downloadedWantedAlbumIds = useMemo(
-    () => verifiedDownloadedWantedAlbumIds(
+  const downloadedWantedFulfillments = useMemo(
+    () => verifiedDownloadedWantedFulfillments(
       wanted.snapshot.albums,
       transfers.snapshot.transfers,
     ),
     [transfers.snapshot.transfers, wanted.snapshot.albums],
   );
-  const wantedRetirementSignature = downloadedWantedAlbumIds
-    .map((albumId) => albumId.toLocaleLowerCase())
+  const wantedFulfillmentSignature = downloadedWantedFulfillments
+    .map((fulfillment) => `${fulfillment.albumId.toLocaleLowerCase()}:${fulfillment.releaseId}:${fulfillment.completedAtMs}`)
     .sort()
     .join("|");
 
   useEffect(() => {
-    if (!wantedRetirementSignature) {
-      lastWantedRetirement.current = "";
+    if (!wantedFulfillmentSignature) {
+      lastWantedFulfillment.current = "";
       return;
     }
-    if (!wanted.ready || lastWantedRetirement.current === wantedRetirementSignature) return;
-    lastWantedRetirement.current = wantedRetirementSignature;
-    void wanted.retireDownloaded(downloadedWantedAlbumIds).catch(() => {
-      lastWantedRetirement.current = "";
+    if (!wanted.ready || lastWantedFulfillment.current === wantedFulfillmentSignature) return;
+    lastWantedFulfillment.current = wantedFulfillmentSignature;
+    void wanted.fulfillDownloaded(downloadedWantedFulfillments).catch(() => {
+      lastWantedFulfillment.current = "";
     });
-  }, [downloadedWantedAlbumIds, wanted, wanted.ready, wantedRetirementSignature]);
+  }, [downloadedWantedFulfillments, wanted, wanted.ready, wantedFulfillmentSignature]);
 
   const wantedDownloadStateByAlbumId = useMemo(() => {
     const stateByTitle = albumDownloadStatesByTitle(transfers.snapshot.transfers);
@@ -408,7 +411,11 @@ function App() {
 
   const missingStudioCount = useMemo(() => {
     if (!missingShelf.catalog) return null;
-    const wantedIds = new Set(wanted.snapshot.albums.map((album) => album.albumId));
+    const wantedIds = new Set(
+      wanted.snapshot.albums
+        .filter((album) => !album.fulfilled)
+        .map((album) => album.albumId),
+    );
     return missingShelf.catalog.albums.filter((album) => {
       const secondary = album.secondaryTypes.map((value) => value.toLocaleLowerCase());
       const studio = album.primaryType?.toLocaleLowerCase() !== "ep"
@@ -857,6 +864,7 @@ function App() {
             onCheckWanted={wanted.check}
             onSetWantedPaused={wanted.setPaused}
             onRemoveWanted={wanted.remove}
+            onRestoreWanted={wanted.restore}
             downloadStateByAlbumId={wantedDownloadStateByAlbumId}
             onOpenTransfer={openTransfer}
             onReviewBest={(album) => void inspectSmartMatch(album)}

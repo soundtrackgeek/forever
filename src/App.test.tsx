@@ -25,7 +25,7 @@ describe("Forever shell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     fireEvent.click(screen.getByRole("button", { name: /2 new Wanted matches/ }));
-    expect(screen.getByRole("tab", { name: "Wanted 4" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Wanted 3" })).toHaveAttribute("aria-selected", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     fireEvent.click(screen.getByRole("button", { name: /1 room mention/ }));
@@ -308,7 +308,7 @@ describe("Forever shell", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Read-only by construction")).toBeInTheDocument();
     expect(
-      screen.getByText(/completed download stays watched until Music Library reports it as owned/),
+      screen.getByText(/verified Wanted download moves to the Fulfilled Shelf/),
     ).toBeInTheDocument();
     expect(screen.getByText("72,366")).toBeInTheDocument();
     expect(screen.getByText("1,101,878")).toBeInTheDocument();
@@ -367,7 +367,7 @@ describe("Forever shell", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Live" }));
     expect(screen.getByText("Viva! Hysteria")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Wanted 6" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Wanted 5" }));
     expect(screen.getByText("Adrenalize")).toBeInTheDocument();
     expect(screen.getByText("Slang")).toBeInTheDocument();
   });
@@ -424,7 +424,7 @@ describe("Forever shell", () => {
     ).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Wanted 5" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Wanted 4" }));
     expect(screen.getByText("High ’n’ Dry")).toBeInTheDocument();
     expect(screen.getByText("4 matching")).toBeInTheDocument();
 
@@ -468,7 +468,7 @@ describe("Forever shell", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Wanted 4" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Wanted 3" }));
 
     const highAndDry = screen.getByText("High ’n’ Dry").closest("article") as HTMLElement;
     fireEvent.click(within(highAndDry).getByRole("button", { name: "Download best" }));
@@ -483,8 +483,9 @@ describe("Forever shell", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /Fulfilled/ }));
     expect(screen.getByText("Hysteria")).toBeInTheDocument();
-    expect(screen.getByText("Fulfilled by Music Library")).toBeInTheDocument();
-    expect(screen.getByText("Read-only source of truth")).toBeInTheDocument();
+    expect(screen.getByText(/Fulfilled by Forever/)).toBeInTheDocument();
+    expect(screen.getByText("Verified download")).toBeInTheDocument();
+    expect(screen.getByText("105.0 MB · from signalsource")).toBeInTheDocument();
   });
 
   it("opens Browse as a dedicated workspace before requesting a user's shares", async () => {
@@ -868,17 +869,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.48 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.49 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "A Wanted album is retired automatically after its matching download completes and every expected audio track verifies.",
+        "The Fulfilled Shelf keeps a receipt with the actual listener, format, audio-track count, size, Soundcheck result, and completion time.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Re-adding an album starts a fresh watch; older verified download history cannot immediately retire it again.",
+        "Add back starts a fresh watch even when Music Library already recognizes the album.",
       ),
     ).toBeInTheDocument();
     expect(

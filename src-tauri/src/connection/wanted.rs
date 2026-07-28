@@ -82,6 +82,45 @@ pub struct WantedFulfillmentRequest {
     pub track_count: Option<u32>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WantedFulfillmentSource {
+    Archive,
+    Download,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WantedDownloadSoundcheck {
+    Passed,
+    NotChecked,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WantedDownloadReceipt {
+    pub release_id: String,
+    pub username: String,
+    pub format: String,
+    pub track_count: u32,
+    pub size_bytes: u64,
+    pub soundcheck: WantedDownloadSoundcheck,
+    pub completed_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WantedDownloadFulfillmentRequest {
+    pub album_id: String,
+    pub release_id: String,
+    pub username: String,
+    pub format: String,
+    pub track_count: u32,
+    pub size_bytes: u64,
+    pub soundcheck: WantedDownloadSoundcheck,
+    pub completed_at_ms: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WantedAlbum {
@@ -96,7 +135,13 @@ pub struct WantedAlbum {
     #[serde(default)]
     pub fulfilled_at_ms: Option<u64>,
     #[serde(default)]
+    pub fulfillment_source: Option<WantedFulfillmentSource>,
+    #[serde(default)]
+    pub download_receipt: Option<WantedDownloadReceipt>,
+    #[serde(default)]
     pub owned_track_count: Option<u32>,
+    #[serde(default)]
+    pub watch_despite_ownership: bool,
     #[serde(default)]
     pub preferences: WantedPreferences,
     pub added_at_ms: u64,
@@ -238,11 +283,15 @@ impl WantedHub {
             .iter_mut()
             .find(|album| album.album_id.eq_ignore_ascii_case(&request.album_id))
         {
+            let was_fulfilled = album.fulfilled;
             album.artist = request.artist;
             album.title = request.title;
             album.first_release_date = request.first_release_date;
             album.cover_art_url = request.cover_art_url;
             album.paused = false;
+            if was_fulfilled {
+                reset_for_watch(album, timestamp_ms());
+            }
         } else {
             if store.albums.len() >= MAX_WANTED_ALBUMS {
                 return Err(WantedError::TooManyAlbums);
@@ -257,7 +306,10 @@ impl WantedHub {
                 paused: false,
                 fulfilled: false,
                 fulfilled_at_ms: None,
+                fulfillment_source: None,
+                download_receipt: None,
                 owned_track_count: None,
+                watch_despite_ownership: false,
                 preferences,
                 added_at_ms: timestamp_ms(),
                 last_checked_at_ms: None,
@@ -340,24 +392,31 @@ impl WantedHub {
         Ok(self.snapshot())
     }
 
-    pub fn retire_downloaded(&self, album_ids: Vec<String>) -> Result<WantedSnapshot, WantedError> {
-        if album_ids.len() > MAX_WANTED_ALBUMS {
+    pub fn fulfill_downloaded(
+        &self,
+        fulfillments: Vec<WantedDownloadFulfillmentRequest>,
+    ) -> Result<WantedSnapshot, WantedError> {
+        if fulfillments.len() > MAX_WANTED_ALBUMS {
             return Err(WantedError::TooManyAlbums);
         }
-        let album_ids = album_ids
-            .iter()
-            .map(|album_id| valid_album_id(album_id).map(str::to_ascii_lowercase))
-            .collect::<Result<HashSet<_>, _>>()?;
-        if album_ids.is_empty() {
+        let fulfillments = fulfillments
+            .into_iter()
+            .map(validate_download_fulfillment)
+            .collect::<Result<Vec<_>, _>>()?;
+        if fulfillments.is_empty() {
             return Ok(self.snapshot());
         }
+        let album_ids = fulfillments
+            .iter()
+            .map(|fulfillment| fulfillment.album_id.to_ascii_lowercase())
+            .collect::<HashSet<_>>();
 
         let changed = {
             let mut store = self
                 .store
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            retire_downloaded_from_store(&mut store, &album_ids) > 0
+            fulfill_downloaded_in_store(&mut store, fulfillments) > 0
         };
         if !changed {
             return Ok(self.snapshot());
@@ -496,11 +555,25 @@ impl WantedHub {
             } else {
                 None
             };
-            if album.fulfilled != fulfillment.owned || album.owned_track_count != owned_track_count
+            if album.fulfillment_source == Some(WantedFulfillmentSource::Download) {
+                continue;
+            }
+            if album.watch_despite_ownership {
+                continue;
+            }
+            let fulfillment_source = fulfillment
+                .owned
+                .then_some(WantedFulfillmentSource::Archive);
+            if album.fulfilled != fulfillment.owned
+                || album.owned_track_count != owned_track_count
+                || album.fulfillment_source != fulfillment_source
             {
                 album.fulfilled = fulfillment.owned;
                 album.fulfilled_at_ms = fulfillment.owned.then(timestamp_ms);
+                album.fulfillment_source = fulfillment_source;
+                album.download_receipt = None;
                 album.owned_track_count = owned_track_count;
+                album.watch_despite_ownership = false;
                 if fulfillment.owned {
                     album.new_source_count = 0;
                 } else {
@@ -514,6 +587,24 @@ impl WantedHub {
             self.persist()?;
             self.publish();
         }
+        Ok(self.snapshot())
+    }
+
+    pub fn restore(&self, album_id: &str) -> Result<WantedSnapshot, WantedError> {
+        let album_id = valid_album_id(album_id)?;
+        let mut store = self
+            .store
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let album = store
+            .albums
+            .iter_mut()
+            .find(|album| album.album_id.eq_ignore_ascii_case(album_id))
+            .ok_or(WantedError::AlbumNotFound)?;
+        reset_for_watch(album, timestamp_ms());
+        drop(store);
+        self.persist()?;
+        self.publish();
         Ok(self.snapshot())
     }
 
@@ -936,12 +1027,44 @@ fn parent_folder(filename: &str) -> &str {
         .unwrap_or("")
 }
 
-fn retire_downloaded_from_store(store: &mut WantedStore, album_ids: &HashSet<String>) -> usize {
-    let previous = store.albums.len();
-    store
-        .albums
-        .retain(|album| !album_ids.contains(&album.album_id.to_ascii_lowercase()));
-    previous - store.albums.len()
+fn fulfill_downloaded_in_store(
+    store: &mut WantedStore,
+    fulfillments: Vec<WantedDownloadFulfillmentRequest>,
+) -> usize {
+    let by_album_id = fulfillments
+        .into_iter()
+        .map(|fulfillment| (fulfillment.album_id.to_ascii_lowercase(), fulfillment))
+        .collect::<HashMap<_, _>>();
+    let mut changed = 0;
+    for album in &mut store.albums {
+        let Some(fulfillment) = by_album_id.get(&album.album_id.to_ascii_lowercase()) else {
+            continue;
+        };
+        let receipt = WantedDownloadReceipt {
+            release_id: fulfillment.release_id.clone(),
+            username: fulfillment.username.clone(),
+            format: fulfillment.format.clone(),
+            track_count: fulfillment.track_count,
+            size_bytes: fulfillment.size_bytes,
+            soundcheck: fulfillment.soundcheck,
+            completed_at_ms: fulfillment.completed_at_ms,
+        };
+        if album.fulfillment_source == Some(WantedFulfillmentSource::Download)
+            && album.download_receipt.as_ref() == Some(&receipt)
+        {
+            continue;
+        }
+        album.fulfilled = true;
+        album.fulfilled_at_ms = Some(receipt.completed_at_ms);
+        album.fulfillment_source = Some(WantedFulfillmentSource::Download);
+        album.download_receipt = Some(receipt);
+        album.owned_track_count = None;
+        album.watch_despite_ownership = false;
+        album.new_source_count = 0;
+        album.error = None;
+        changed += 1;
+    }
+    changed
 }
 
 fn next_check_at(store: &WantedStore, now: u64) -> Option<u64> {
@@ -981,6 +1104,47 @@ fn validate_request(mut request: WantedAlbumRequest) -> Result<WantedAlbumReques
     Ok(request)
 }
 
+fn validate_download_fulfillment(
+    mut fulfillment: WantedDownloadFulfillmentRequest,
+) -> Result<WantedDownloadFulfillmentRequest, WantedError> {
+    fulfillment.album_id = valid_album_id(&fulfillment.album_id)?.to_owned();
+    fulfillment.release_id = valid_text(&fulfillment.release_id, 180)?;
+    fulfillment.username = valid_text(&fulfillment.username, 180)?;
+    fulfillment.format = valid_text(&fulfillment.format, 80)?;
+    if fulfillment.track_count == 0
+        || fulfillment.track_count > 500
+        || fulfillment.size_bytes == 0
+        || fulfillment.completed_at_ms == 0
+    {
+        return Err(WantedError::InvalidDownloadFulfillment);
+    }
+    Ok(fulfillment)
+}
+
+fn reset_for_watch(album: &mut WantedAlbum, added_at_ms: u64) {
+    album.paused = false;
+    album.fulfilled = false;
+    album.fulfilled_at_ms = None;
+    album.fulfillment_source = None;
+    album.download_receipt = None;
+    album.owned_track_count = None;
+    album.watch_despite_ownership = true;
+    album.added_at_ms = added_at_ms;
+    album.last_checked_at_ms = None;
+    album.source_count = 0;
+    album.matching_source_count = 0;
+    album.ready_source_count = 0;
+    album.complete_source_count = 0;
+    album.new_source_count = 0;
+    album.best_format = None;
+    album.best_track_count = None;
+    album.best_size_bytes = None;
+    album.best_speed_bytes_per_second = None;
+    album.best_source = None;
+    album.error = None;
+    album.source_fingerprints.clear();
+}
+
 fn validate_preferences(preferences: &WantedPreferences) -> Result<(), WantedError> {
     if !matches!(
         preferences.minimum_bitrate_kbps,
@@ -1018,12 +1182,16 @@ fn merge_bulk_requests(
             .iter_mut()
             .find(|album| album.album_id.eq_ignore_ascii_case(&request.album_id))
         {
+            let was_fulfilled = album.fulfilled;
             album.artist = request.artist;
             album.title = request.title;
             album.first_release_date = request.first_release_date;
             album.cover_art_url = request.cover_art_url;
             album.paused = false;
             album.preferences = preferences.clone();
+            if was_fulfilled {
+                reset_for_watch(album, added_at_ms);
+            }
         } else {
             store.albums.push(WantedAlbum {
                 album_id: request.album_id,
@@ -1034,7 +1202,10 @@ fn merge_bulk_requests(
                 paused: false,
                 fulfilled: false,
                 fulfilled_at_ms: None,
+                fulfillment_source: None,
+                download_receipt: None,
                 owned_track_count: None,
+                watch_despite_ownership: false,
                 preferences: preferences.clone(),
                 added_at_ms,
                 last_checked_at_ms: None,
@@ -1117,6 +1288,8 @@ pub enum WantedError {
     InvalidInterval,
     #[error("Choose valid Smart Match format, bitrate, and track requirements.")]
     InvalidPreferences,
+    #[error("Choose a valid verified download before fulfilling this Wanted album.")]
+    InvalidDownloadFulfillment,
     #[error("Forever supports up to {MAX_WANTED_ALBUMS} wanted albums.")]
     TooManyAlbums,
     #[error("Choose between 1 and {MAX_BULK_WANTED_ALBUMS} missing albums at a time.")]
@@ -1223,7 +1396,10 @@ mod tests {
             paused: false,
             fulfilled: false,
             fulfilled_at_ms: None,
+            fulfillment_source: None,
+            download_receipt: None,
             owned_track_count: None,
+            watch_despite_ownership: false,
             preferences: WantedPreferences::default(),
             added_at_ms: 1,
             last_checked_at_ms: None,
@@ -1320,7 +1496,7 @@ mod tests {
     }
 
     #[test]
-    fn verified_download_retirement_is_atomic_and_idempotent() {
+    fn verified_download_fulfillment_is_persistent_and_idempotent() {
         let mut store = WantedStore::default();
         let profile = WantedPreferences::default();
         merge_bulk_requests(
@@ -1333,12 +1509,63 @@ mod tests {
             1,
         )
         .unwrap();
-        let retired = HashSet::from(["album-1".to_owned(), "not-present".to_owned()]);
+        let fulfillment = WantedDownloadFulfillmentRequest {
+            album_id: "album-1".to_owned(),
+            release_id: "release-1".to_owned(),
+            username: "listener".to_owned(),
+            format: "MP3".to_owned(),
+            track_count: 10,
+            size_bytes: 100_000_000,
+            soundcheck: WantedDownloadSoundcheck::Passed,
+            completed_at_ms: 500,
+        };
 
-        assert_eq!(retire_downloaded_from_store(&mut store, &retired), 1);
-        assert_eq!(store.albums.len(), 1);
-        assert_eq!(store.albums[0].album_id, "album-2");
-        assert_eq!(retire_downloaded_from_store(&mut store, &retired), 0);
+        assert_eq!(
+            fulfill_downloaded_in_store(&mut store, vec![fulfillment.clone()]),
+            1
+        );
+        assert_eq!(store.albums.len(), 2);
+        let completed = store
+            .albums
+            .iter()
+            .find(|album| album.album_id == "album-1")
+            .expect("fulfilled album remains on its shelf");
+        assert!(completed.fulfilled);
+        assert_eq!(
+            completed.fulfillment_source,
+            Some(WantedFulfillmentSource::Download)
+        );
+        assert_eq!(completed.fulfilled_at_ms, Some(500));
+        assert_eq!(
+            completed
+                .download_receipt
+                .as_ref()
+                .map(|receipt| receipt.track_count),
+            Some(10)
+        );
+        assert_eq!(
+            fulfill_downloaded_in_store(&mut store, vec![fulfillment]),
+            0
+        );
+        let completed = store
+            .albums
+            .iter_mut()
+            .find(|album| album.album_id == "album-1")
+            .expect("fulfilled album can be restored");
+        reset_for_watch(completed, 600);
+        assert!(!completed.fulfilled);
+        assert_eq!(completed.added_at_ms, 600);
+        assert_eq!(completed.fulfillment_source, None);
+        assert_eq!(completed.download_receipt, None);
+        assert!(completed.watch_despite_ownership);
+        assert!(
+            !store
+                .albums
+                .iter()
+                .find(|album| album.album_id == "album-2")
+                .expect("other watch remains")
+                .fulfilled
+        );
     }
 
     #[test]

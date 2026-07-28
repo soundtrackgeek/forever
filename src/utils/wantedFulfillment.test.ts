@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Transfer, WantedAlbum } from "../types";
-import { verifiedDownloadedWantedAlbumIds } from "./wantedFulfillment";
+import { verifiedDownloadedWantedFulfillments } from "./wantedFulfillment";
 
 const album = (addedAtMs = 100): WantedAlbum => ({
   albumId: "release-group-unveiled",
@@ -11,6 +11,8 @@ const album = (addedAtMs = 100): WantedAlbum => ({
   paused: false,
   fulfilled: false,
   fulfilledAtMs: null,
+  fulfillmentSource: null,
+  downloadReceipt: null,
   ownedTrackCount: null,
   preferences: {
     formatPreference: "mp3Only",
@@ -75,26 +77,35 @@ const transfer = (index: number): Transfer => ({
 
 describe("verified Wanted download fulfillment", () => {
   it("retires a matching release only after every expected file verifies", () => {
-    expect(verifiedDownloadedWantedAlbumIds([album()], [transfer(1), transfer(2)]))
-      .toEqual(["release-group-unveiled"]);
+    expect(verifiedDownloadedWantedFulfillments([album()], [transfer(1), transfer(2)]))
+      .toEqual([{
+        albumId: "release-group-unveiled",
+        releaseId: "download-unveiled",
+        username: "source",
+        format: "MP3",
+        trackCount: 2,
+        sizeBytes: 20_000_000,
+        soundcheck: "passed",
+        completedAtMs: 202,
+      }]);
 
     const missing = transfer(2);
     missing.verificationStatus = "missing";
-    expect(verifiedDownloadedWantedAlbumIds([album()], [transfer(1), missing]))
+    expect(verifiedDownloadedWantedFulfillments([album()], [transfer(1), missing]))
       .toEqual([]);
   });
 
   it("keeps incomplete or failed-Soundcheck releases in Wanted", () => {
-    expect(verifiedDownloadedWantedAlbumIds([album()], [transfer(1)])).toEqual([]);
+    expect(verifiedDownloadedWantedFulfillments([album()], [transfer(1)])).toEqual([]);
 
     const failed = transfer(2);
     failed.soundcheck = { ...failed.soundcheck!, status: "failed", issues: ["Decoder stopped early."] };
-    expect(verifiedDownloadedWantedAlbumIds([album()], [transfer(1), failed]))
+    expect(verifiedDownloadedWantedFulfillments([album()], [transfer(1), failed]))
       .toEqual([]);
   });
 
   it("does not let an old verified download retire a newly re-added watch", () => {
-    expect(verifiedDownloadedWantedAlbumIds([album(500)], [transfer(1), transfer(2)]))
+    expect(verifiedDownloadedWantedFulfillments([album(500)], [transfer(1), transfer(2)]))
       .toEqual([]);
   });
 
@@ -103,8 +114,8 @@ describe("verified Wanted download fulfillment", () => {
       ...item,
       releaseGroupId: null,
     }));
-    expect(verifiedDownloadedWantedAlbumIds([album()], legacy))
-      .toEqual(["release-group-unveiled"]);
+    expect(verifiedDownloadedWantedFulfillments([album()], legacy)[0]?.albumId)
+      .toBe("release-group-unveiled");
   });
 
   it("accepts size verification when automatic Soundcheck was disabled", () => {
@@ -112,8 +123,8 @@ describe("verified Wanted download fulfillment", () => {
       ...item,
       soundcheck: null,
     }));
-    expect(verifiedDownloadedWantedAlbumIds([album()], unchecked))
-      .toEqual(["release-group-unveiled"]);
+    expect(verifiedDownloadedWantedFulfillments([album()], unchecked)[0]?.soundcheck)
+      .toBe("notChecked");
   });
 
   it("does not keep an audio album wanted because an optional companion moved", () => {
@@ -126,9 +137,9 @@ describe("verified Wanted download fulfillment", () => {
       verificationStatus: "missing",
       soundcheck: null,
     };
-    expect(verifiedDownloadedWantedAlbumIds(
+    expect(verifiedDownloadedWantedFulfillments(
       [album()],
       [transfer(1), transfer(2), companion],
-    )).toEqual(["release-group-unveiled"]);
+    )[0]?.trackCount).toBe(2);
   });
 });

@@ -234,7 +234,11 @@ export function MissingShelfWorkspace({
   const [openRadarAlbumId, setOpenRadarAlbumId] = useState<string | null>(null);
   const [preparingSourceId, setPreparingSourceId] = useState<string | null>(null);
   const wantedIds = useMemo(
-    () => new Set(wantedAlbums.map((album) => album.albumId.toLowerCase())),
+    () => new Set(
+      wantedAlbums
+        .filter((album) => !album.fulfilled)
+        .map((album) => album.albumId.toLowerCase()),
+    ),
     [wantedAlbums],
   );
   const albums = useMemo(() => catalog?.albums ?? [], [catalog]);
