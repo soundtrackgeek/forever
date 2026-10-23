@@ -2,6 +2,9 @@ import type { AlbumSource, SearchResult } from "../types";
 
 const AUDIO_FORMATS = new Set([
   "AAC",
+  "AIF",
+  "CAF",
+  "OGA",
   "AIFF",
   "ALAC",
   "APE",

@@ -1,11 +1,21 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { UPDATE_CHECK_INTERVAL_STORAGE_KEY } from "./hooks/useAppUpdater";
 import { MESSAGE_NOTIFICATION_STORAGE_KEY } from "./hooks/usePrivateMessages";
 import { ROOM_NOTIFICATION_STORAGE_KEY } from "./hooks/useSoulseekRooms";
 import { MESSAGE_DRAFTS_STORAGE_KEY } from "./components/MessagesWorkspace";
 import { MUSICBRAINZ_FALLBACK_TRACK_COUNT_STORAGE_KEY } from "./utils/musicbrainzFallback";
+
+// Rendered flows execute the same Rust policy as the native IPC commands.
+vi.mock("./utils/matchingClient", async () => {
+  const { runMatching } = await import("../scripts/matching-runtime.mjs");
+  return { matchingCommand: runMatching };
+});
+beforeAll(async () => {
+  const { prepareMatchingRuntime } = await import("../scripts/matching-runtime.mjs");
+  await prepareMatchingRuntime();
+}, 120_000);
 
 describe("Forever shell", () => {
   it("saves the listening port and network preferences before reconnecting", async () => {
@@ -280,7 +290,7 @@ describe("Forever shell", () => {
     expect(within(albumReport).getAllByText("3")).toHaveLength(2);
     expect(within(albumReport).getByText("Owned")).toBeInTheDocument();
     expect(screen.getByText("1987 - Hysteria [FLAC]")).toBeInTheDocument();
-    expect(screen.getAllByText("12 / 12").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("12 / 12")).length).toBeGreaterThan(0);
 
     const previewTracks = screen.getAllByRole("button", {
       name: /Preview tracks in/,
@@ -304,7 +314,7 @@ describe("Forever shell", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
-    const readyDownloadButtons = await screen.findAllByRole("button", { name: "Download album" });
+    const readyDownloadButtons = await screen.findAllByRole("button", { name: "Download album" }, { timeout: 5_000 });
     fireEvent.click(readyDownloadButtons[0]);
     const downloading = await screen.findByRole(
       "button",
@@ -487,7 +497,7 @@ describe("Forever shell", () => {
     fireEvent.click(within(trackDetails).getByText("Tracks"));
     expect(within(trackDetails).getByText(/01 - Let’s Get Rocked\.flac/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Download best" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download best" }, { timeout: 5_000 }));
     const queuedBest = await screen.findByRole("button", { name: "Queued #2" });
     expect(queuedBest).toBeEnabled();
     expect(screen.getByRole("button", { name: /Queued.*Adrenalize from rockvault/ })).toBeEnabled();
@@ -546,7 +556,7 @@ describe("Forever shell", () => {
     expect(screen.getByRole("heading", { name: "Review the best transmission." })).toBeInTheDocument();
     expect(await screen.findByText("Folder verified")).toBeInTheDocument();
     expect(screen.getByText("Companion")).toBeInTheDocument();
-    expect(screen.getByText("Exact tracklist")).toBeInTheDocument();
+    expect(await screen.findByText("Exact tracklist")).toBeInTheDocument();
     expect(screen.getByText("11/11 titles matched")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Compare alternatives" }));
     expect(
@@ -561,7 +571,7 @@ describe("Forever shell", () => {
       { timeout: 1_500 },
     );
     const exactSource = screen.getByText("1992 - A Sonic Holiday [FLAC]").closest("article") as HTMLElement;
-    expect(within(exactSource).getByText("11 / 11")).toBeInTheDocument();
+    expect(await within(exactSource).findByText("11 / 11")).toBeInTheDocument();
     expect(within(exactSource).getByText("Exact tracklist")).toBeInTheDocument();
     expect(within(exactSource).getByText("Smart Match")).toBeInTheDocument();
     const unclearSource = screen.getByText("A Sonic Holiday [Mislabeled]").closest("article") as HTMLElement;
@@ -598,7 +608,9 @@ describe("Forever shell", () => {
     expect(screen.getByRole("heading", { name: "Review the best transmission." })).toBeInTheDocument();
     expect(await screen.findByText("Folder verified")).toBeInTheDocument();
     expect(screen.getByText("Companion")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Queue complete album" }));
+    const queueComplete = await screen.findByRole("button", { name: "Queue complete album" });
+    await waitFor(() => expect(queueComplete).toBeEnabled());
+    fireEvent.click(queueComplete);
 
     expect(await within(screen.getByRole("dialog")).findByRole("button", { name: "Queued" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Close Smart Match review" }));
@@ -992,17 +1004,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.59 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.60 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Album searches normalize accents, punctuation, and edition suffixes.",
+        "Smart Match and Wanted share one Rust ranking and title matcher.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Empty searches try bounded fallbacks while keeping server pacing.",
+        "Background checks use official tracklists and show track-count fallbacks.",
       ),
     ).toBeInTheDocument();
     expect(

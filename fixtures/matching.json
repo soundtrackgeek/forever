@@ -1,0 +1,445 @@
+{
+  "normalization": [
+    {
+      "input": "Björk",
+      "expected": "bjork"
+    },
+    {
+      "input": "Simon & Garfunkel",
+      "expected": "simon and garfunkel"
+    },
+    {
+      "input": "Simon and Garfunkel",
+      "expected": "simon and garfunkel"
+    },
+    {
+      "input": "Björk",
+      "expected": "bjork"
+    },
+    {
+      "input": "Beyoncé — Déjà Vu!",
+      "expected": "beyonce deja vu"
+    },
+    {
+      "input": "Øystein Łódź Æther Œuvre Straße",
+      "expected": "oystein lodz aether oeuvre strasse"
+    },
+    {
+      "input": "東京 １２３",
+      "expected": "東京 123"
+    },
+    {
+      "input": " A᪰ & B ",
+      "expected": "a and b"
+    }
+  ],
+  "trackTitles": [
+    {
+      "input": "CD1 01 - INXS - Original Sin (2011 Remastered).flac",
+      "artist": "INXS",
+      "expected": "original sin"
+    },
+    {
+      "input": "02 - Björk - Jóga.flac",
+      "artist": "Bjork",
+      "expected": "joga"
+    },
+    {
+      "input": "1-02 Simon & Garfunkel - The Boxer.mp3",
+      "artist": "Simon and Garfunkel",
+      "expected": "the boxer"
+    },
+    {
+      "input": "Dr. Feelgood",
+      "artist": "",
+      "expected": "dr feelgood"
+    },
+    {
+      "input": "Song (Live).flac",
+      "artist": "",
+      "expected": "song live"
+    }
+  ],
+  "ranking": [
+    {
+      "name": "official titles outrank speed and extras",
+      "sources": [
+        {
+          "id": "wrong",
+          "owner": "wrong",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "Unknown Song.flac",
+              "format": "FLAC",
+              "bitrate": null
+            },
+            {
+              "id": "1",
+              "name": "Different Tune.flac",
+              "format": "FLAC",
+              "bitrate": null
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 40000000,
+          "queueLength": 0
+        },
+        {
+          "id": "extras",
+          "owner": "extras",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "Original Sin.flac",
+              "format": "FLAC",
+              "bitrate": null
+            },
+            {
+              "id": "1",
+              "name": "Melting in the Sun.flac",
+              "format": "FLAC",
+              "bitrate": null
+            },
+            {
+              "id": "2",
+              "name": "Bonus.flac",
+              "format": "FLAC",
+              "bitrate": null
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 8000000,
+          "queueLength": 0
+        },
+        {
+          "id": "partial",
+          "owner": "partial",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "Original Sin.flac",
+              "format": "FLAC",
+              "bitrate": null
+            },
+            {
+              "id": "1",
+              "name": "Unknown.flac",
+              "format": "FLAC",
+              "bitrate": null
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 8000000,
+          "queueLength": 0
+        },
+        {
+          "id": "exact",
+          "owner": "exact",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "01 - INXS - Original Sin.flac",
+              "format": "FLAC",
+              "bitrate": null
+            },
+            {
+              "id": "1",
+              "name": "02. Melting in the Sun.flac",
+              "format": "FLAC",
+              "bitrate": null
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 8000000,
+          "queueLength": 0
+        }
+      ],
+      "preferences": {
+        "formatPreference": "preferLossless",
+        "minimumBitrateKbps": 320,
+        "minimumTrackCount": 2
+      },
+      "officialTracks": [
+        {
+          "position": 1,
+          "discNumber": 1,
+          "discPosition": 1,
+          "title": "Original Sin",
+          "durationMs": null
+        },
+        {
+          "position": 2,
+          "discNumber": 1,
+          "discPosition": 2,
+          "title": "Melting in the Sun",
+          "durationMs": null
+        }
+      ],
+      "artist": "INXS",
+      "ids": [
+        "exact",
+        "extras",
+        "partial",
+        "wrong"
+      ],
+      "eligible": [
+        true,
+        true,
+        false,
+        false
+      ],
+      "scores": [
+        7120,
+        6490,
+        2370,
+        1160
+      ]
+    },
+    {
+      "name": "unknown bitrate is not silently ignored",
+      "sources": [
+        {
+          "id": "unknown",
+          "owner": "unknown",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "First.mp3",
+              "format": "MP3",
+              "bitrate": 320
+            },
+            {
+              "id": "1",
+              "name": "Second.mp3",
+              "format": "MP3",
+              "bitrate": null
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 8000000,
+          "queueLength": 0
+        },
+        {
+          "id": "known",
+          "owner": "known",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "First.mp3",
+              "format": "MP3",
+              "bitrate": 320
+            },
+            {
+              "id": "1",
+              "name": "Second.mp3",
+              "format": "MP3",
+              "bitrate": 320
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 8000000,
+          "queueLength": 0
+        }
+      ],
+      "preferences": {
+        "formatPreference": "preferLossless",
+        "minimumBitrateKbps": 320,
+        "minimumTrackCount": 2
+      },
+      "officialTracks": [],
+      "artist": "",
+      "ids": [
+        "known",
+        "unknown"
+      ],
+      "eligible": [
+        true,
+        false
+      ],
+      "scores": [
+        520,
+        520
+      ]
+    },
+    {
+      "name": "stable equal scores",
+      "sources": [
+        {
+          "id": "z",
+          "owner": "z",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "A",
+              "format": "FLAC",
+              "bitrate": null
+            },
+            {
+              "id": "1",
+              "name": "B",
+              "format": "FLAC",
+              "bitrate": null
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 8000000,
+          "queueLength": 0
+        },
+        {
+          "id": "a",
+          "owner": "a",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "A",
+              "format": "FLAC",
+              "bitrate": null
+            },
+            {
+              "id": "1",
+              "name": "B",
+              "format": "FLAC",
+              "bitrate": null
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 8000000,
+          "queueLength": 0
+        }
+      ],
+      "preferences": {
+        "formatPreference": "preferLossless",
+        "minimumBitrateKbps": 320,
+        "minimumTrackCount": 2
+      },
+      "officialTracks": [],
+      "artist": "",
+      "ids": [
+        "a",
+        "z"
+      ],
+      "eligible": [
+        true,
+        true
+      ],
+      "scores": [
+        1120,
+        1120
+      ]
+    },
+    {
+      "name": "mp3-only excludes mixed and lossless",
+      "sources": [
+        {
+          "id": "flac",
+          "owner": "flac",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "A",
+              "format": "FLAC",
+              "bitrate": null
+            },
+            {
+              "id": "1",
+              "name": "B",
+              "format": "FLAC",
+              "bitrate": null
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 8000000,
+          "queueLength": 0
+        },
+        {
+          "id": "mp3",
+          "owner": "mp3",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "A",
+              "format": "mp3",
+              "bitrate": 320
+            },
+            {
+              "id": "1",
+              "name": "B",
+              "format": "mp3",
+              "bitrate": 320
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 8000000,
+          "queueLength": 0
+        }
+      ],
+      "preferences": {
+        "formatPreference": "mp3Only",
+        "minimumBitrateKbps": 320,
+        "minimumTrackCount": 2
+      },
+      "officialTracks": [],
+      "artist": "",
+      "ids": [
+        "mp3",
+        "flac"
+      ],
+      "eligible": [
+        true,
+        false
+      ],
+      "scores": [
+        1020,
+        1120
+      ]
+    },
+    {
+      "name": "track minimum rejects short source",
+      "sources": [
+        {
+          "id": "short",
+          "owner": "short",
+          "folder": "Music/Album",
+          "tracks": [
+            {
+              "id": "0",
+              "name": "A",
+              "format": "FLAC",
+              "bitrate": null
+            }
+          ],
+          "slotFree": true,
+          "averageSpeed": 8000000,
+          "queueLength": 0
+        }
+      ],
+      "preferences": {
+        "formatPreference": "preferLossless",
+        "minimumBitrateKbps": 320,
+        "minimumTrackCount": 2
+      },
+      "officialTracks": [],
+      "artist": "",
+      "ids": [
+        "short"
+      ],
+      "eligible": [
+        false
+      ],
+      "scores": [
+        1090
+      ]
+    }
+  ]
+}

@@ -38,7 +38,7 @@ import {
   albumDownloadStates,
   type AlbumDownloadStatus,
 } from "../utils/albumDownloadState";
-import { rankAlbumSources } from "../utils/smartMatches";
+import { useRankedSources } from "../hooks/useMatching";
 
 type MissingShelfWorkspaceProps = {
   query: string;
@@ -156,8 +156,8 @@ function RadarSourceDrawer({
   onRescan: () => void;
   onOpenTransfer: (groupId: string) => void;
 }) {
-  const ranked = rankAlbumSources(sources, preferences);
-  const best = ranked.find((source) => source.eligible)?.source ?? sources[0];
+  const { ranked, pending: rankingPending, error: rankingError } = useRankedSources(sources, preferences);
+  const best = ranked.find((source) => source.eligible)?.source;
   const downloadStates = useMemo(
     () => albumDownloadStates(sources, transfers),
     [sources, transfers],
@@ -172,7 +172,7 @@ function RadarSourceDrawer({
   return (
     <section className="shelf-radar-drawer">
       <header>
-        <span><Broadcast size={17} /><strong>{sources.length} {sources.length === 1 ? "source" : "sources"} on radar</strong><small>{best ? `Best signal: ${best.formats.join(" + ") || "unknown format"} from ${best.owner}` : "No grouped folders were returned."}</small></span>
+        <span><Broadcast size={17} /><strong>{sources.length} {sources.length === 1 ? "source" : "sources"} on radar</strong><small>{best ? `Best signal: ${best.formats.join(" + ") || "unknown format"} from ${best.owner}` : rankingPending ? "Ranking sources…" : rankingError ? "Source ranking unavailable" : "No source meets your profile."}</small></span>
         <div>
           <button type="button" className="shelf-radar-rescan" onClick={onRescan}><Broadcast size={14} /> Rescan</button>
           {!watched ? <button type="button" className="shelf-radar-watch" onClick={onWatch}><Plus size={14} weight="bold" /> Watch for better</button> : null}

@@ -19,12 +19,14 @@ import {
   type AlbumDownloadStatus,
 } from "../utils/albumDownloadState";
 import { formatAlbumBytes } from "../utils/albumSources";
-import { rankAlbumSources } from "../utils/smartMatches";
-import { tracklistConfidenceForSource } from "../utils/tracklistConfidence";
+import type { RankedAlbumSource } from "../utils/smartMatches";
 import { CountryFlag } from "./CountryFlag";
 
 type AlbumSourceResultsProps = {
   sources: AlbumSource[];
+  rankedSources: RankedAlbumSource[];
+  rankingPending: boolean;
+  rankingError: string | null;
   transfers: Transfer[];
   searching: boolean;
   onQueueAlbumSource: (source: AlbumSource) => Promise<void>;
@@ -148,6 +150,9 @@ function TrackPreview({ source }: { source: AlbumSource }) {
 
 export function AlbumSourceResults({
   sources,
+  rankedSources,
+  rankingPending,
+  rankingError,
   transfers,
   searching,
   onQueueAlbumSource,
@@ -155,11 +160,9 @@ export function AlbumSourceResults({
   onBrowseUser,
   personByUsername,
   onOpenPerson,
-  smartPreferences,
   minimumTrackCount,
   officialTracks,
   tracklistState,
-  artist,
 }: AlbumSourceResultsProps) {
   const [preparingSourceId, setPreparingSourceId] = useState<string | null>(null);
   const [openConfidenceSourceId, setOpenConfidenceSourceId] = useState<string | null>(null);
@@ -169,22 +172,19 @@ export function AlbumSourceResults({
     () => albumDownloadStates(sources, transfers),
     [sources, transfers],
   );
-  const rankedSources = useMemo(
-    () => smartPreferences ? rankAlbumSources(sources, smartPreferences, officialTracks, artist) : [],
-    [artist, officialTracks, smartPreferences, sources],
-  );
   const confidenceBySourceId = useMemo(
-    () => new Map(sources.map((source) => [source.id, tracklistConfidenceForSource(source, officialTracks, artist)])),
-    [artist, officialTracks, sources],
+    () => new Map(rankedSources.map((match) => [match.source.id, match.tracklistConfidence])),
+    [rankedSources],
   );
   const rankBySourceId = useMemo(
     () => new Map(rankedSources.map((match) => [match.source.id, match])),
     [rankedSources],
   );
-  const recommendedSourceId = rankedSources.find((match) => match.eligible)?.source.id;
+  const recommendedSourceId = rankedSources.find((match) => match.eligible && sources.some((source) => source.id === match.source.id))?.source.id;
 
   const queueAlbum = async (source: AlbumSource, confirmed = false) => {
     const confidence = confidenceBySourceId.get(source.id);
+    if (rankingPending || rankingError) return;
     if (!confirmed && officialTracks.length > 0 && confidence && !confidence.safeToRecommend) {
       setConfirmingSourceId(source.id);
       return;
@@ -203,6 +203,7 @@ export function AlbumSourceResults({
 
   return (
     <div className="album-source-results">
+      {rankingError ? <p role="alert">Source ranking unavailable: {rankingError}</p> : null}
       {error ? (
         <div className="album-source-error" role="alert">
           <span><strong>Could not prepare that album.</strong>{error}</span>
@@ -260,7 +261,7 @@ export function AlbumSourceResults({
               const queuedState = sourceDownloadStates.get(source.id);
               const confidence = confidenceBySourceId.get(source.id);
               const confidenceOpen = openConfidenceSourceId === source.id;
-              const checkingTracklist = tracklistState === "loading";
+              const checkingTracklist = tracklistState === "loading" || rankingPending || Boolean(rankingError);
               const downloadable = Boolean(source.representative.folder);
               const buttonLabel = queuedState
                 ? albumDownloadLabel(queuedState)
@@ -328,7 +329,7 @@ export function AlbumSourceResults({
                     <button
                       type="button"
                       className={`album-source-download${queuedState ? ` is-${queuedState.status}` : ""}`}
-                      disabled={!downloadable || checkingTracklist || (preparingSourceId !== null && !queuedState)}
+                      disabled={!queuedState && (!downloadable || checkingTracklist || preparingSourceId !== null)}
                       title={queuedState ? `${buttonLabel}. Open this album in Transfers.` : checkingTracklist ? "Waiting for the official tracklist check" : downloadable ? "Inspect the folder and download every file" : "This result has no source folder"}
                       onClick={() => queuedState ? onOpenTransfer(queuedState.groupId) : void queueAlbum(source)}
                     >

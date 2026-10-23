@@ -386,7 +386,7 @@ export function ArchiveWorkspace({
                     <small>{receipt ? "Journey state" : album.fulfilled ? "Watch state" : "Recommended source"}</small>
                     <strong>{receipt ? journey : album.fulfilled ? "Complete" : album.bestSource?.slotFree ? "Free slot" : album.bestSource ? `${album.bestSource.queueLength} queued` : speed(album.bestSpeedBytesPerSecond)}</strong>
                     {receipt ? <p>{arrival ? "Tracked in Arrival Desk" : "Transfer history may have been cleared"}</p> : null}
-                    {!album.fulfilled && album.bestSource ? <p>{speed(album.bestSource.averageSpeedBytesPerSecond)}</p> : null}
+                    {!album.fulfilled && album.bestSource ? <p>{speed(album.bestSource.averageSpeedBytesPerSecond)} · {album.bestSource.tracklistLabel || "Track count only"}</p> : null}
                     {!album.fulfilled && album.newSourceCount > 0 ? <b>+{album.newSourceCount} new match{album.newSourceCount === 1 ? "" : "es"}</b> : null}
                   </span>
                   <span className="wanted-actions">

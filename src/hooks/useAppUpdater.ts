@@ -35,15 +35,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.58",
-  version: "0.0.59",
-  body: `## What's new in Forever 0.0.59
+  currentVersion: "0.0.59",
+  version: "0.0.60",
+  body: `## What's new in Forever 0.0.60
 
 ### Changed
 
-- Album searches normalize accents, punctuation, and edition suffixes.
-- Empty searches try bounded fallbacks while keeping server pacing.
-- Successful album queries are remembered across Wanted, Radar, and Relay.`,
+- Smart Match and Wanted share one Rust ranking and title matcher.
+- Background checks use official tracklists and show track-count fallbacks.
+- Archive and search share accent and ampersand normalization.`,
   date: "2026-10-23",
 };
 

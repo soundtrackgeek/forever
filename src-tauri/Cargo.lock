@@ -1168,11 +1168,12 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "forever"
-version = "0.0.59"
+version = "0.0.60"
 dependencies = [
  "base64 0.22.1",
  "crab_nat",
  "flate2",
+ "forever-matching",
  "igd-next",
  "keyring",
  "md5",
@@ -1193,8 +1194,17 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
- "unicode-normalization",
  "zeroize",
+]
+
+[[package]]
+name = "forever-matching"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "unicode-normalization",
 ]
 
 [[package]]

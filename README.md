@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.59` adds normalized album searches,
-> paced empty-result fallbacks, and remembered successful query variants.
+> **Status:** pre-alpha. Version `0.0.60` unifies ranking and title matching in Rust,
+> including official tracklists in background Wanted recommendations.
 
-If `0.0.16` is installed, download and run the latest `0.0.59` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.60` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -333,11 +333,20 @@ npm install
 npm run tauri dev
 ```
 
-The frontend can also run independently:
+The browser preview can run without the desktop shell:
 
 ```powershell
 npm run dev
 ```
+
+Smart Match in the local browser preview and frontend integration tests uses the
+same Rust matching crate as the desktop app. Rust/Cargo must be installed; the
+first matching request builds a small helper under `src-tauri/target/matching`.
+The local Vite server runs that helper only for matching calculations. Preview
+network activity remains simulated. Restart Vite after editing Rust matching
+code; `cargo clean` removes this helper too. Run `cargo test --workspace
+--all-targets --all-features` from `src-tauri` to include the matching crate's
+unit tests alongside the desktop tests.
 
 Use `http://localhost:1420/?update=available` during frontend development to
 preview the update toast and modal without publishing a release.
@@ -542,7 +551,22 @@ set minimum bitrate and track-count requirements. Forever suggests the track
 count from the earliest official MusicBrainz edition when available. Select
 **Use this as my default profile** to apply the same starting profile to future
 Wanted albums. Qualifying folders are ranked by completeness, format, free
-upload slot, speed, and queue length.
+upload slot, speed, and queue length. One Rust matcher supplies rankings and
+Tracklist Confidence to Wanted, Search, Radar's source drawer, and folder review.
+Background Wanted checks load the same official MusicBrainz title list as review;
+metadata has a 45-second deadline and failure uses a visible **Track count only**
+fallback. Different available files or metadata can still change a later review.
+Unknown or zero bitrates in lossy-only folders cannot satisfy a configured minimum.
+Equal scores use a stable listener/folder tie-breaker, independent of reply order.
+
+Archive ownership, album queries, and track matching share NFKD accent folding,
+punctuation spacing, and `&` → `and` normalization (including Björk/Bjork).
+Track filenames additionally lose audio extensions, track/disc prefixes, and
+conservative remaster suffixes. Official titles retain meaningful dotted words.
+The TypeScript layer contains no scoring or title-matching implementation.
+Shared golden fixtures cover Rust and the real frontend-to-Rust bridge; stale
+asynchronous replies cannot restore an older recommendation. Duration scoring
+and edition selection remain review item 8.
 
 Use **Download best** to inspect the recommended folder before anything is
 queued. The review shows the listener, remote path, format, tracks, aggregate
@@ -761,8 +785,8 @@ file automatically.
 npm run check
 Set-Location src-tauri
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets --all-features
 ```
 
 The Windows release workflow also builds the packaged executable before

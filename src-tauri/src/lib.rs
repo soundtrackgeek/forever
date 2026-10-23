@@ -1,5 +1,6 @@
 mod archive;
 mod connection;
+mod matching;
 mod musicbrainz;
 
 use tauri::Manager;
@@ -19,6 +20,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            matching::rank_album_sources,
+            matching::tracklist_confidence,
+            matching::normalize_title,
             archive::archive_status,
             archive::archive_artists,
             archive::archive_cached_catalog,

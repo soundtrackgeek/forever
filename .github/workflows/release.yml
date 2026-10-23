@@ -83,8 +83,8 @@ jobs:
         working-directory: src-tauri
         run: |
           cargo fmt --all -- --check
-          cargo clippy --all-targets --all-features -- -D warnings
-          cargo test --all-targets --all-features
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-targets --all-features
 
       - name: Build release executable for startup smoke test
         run: npx tauri build --no-bundle

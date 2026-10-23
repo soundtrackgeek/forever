@@ -601,7 +601,7 @@ function App() {
   const queueReviewedSmartMatch = async () => {
     if (!reviewAlbum || !reviewInspection) return;
     if (reviewOfficialTracks.length > 0) {
-      const confidence = tracklistConfidenceForInspection(
+      const confidence = await tracklistConfidenceForInspection(
         reviewInspection,
         reviewOfficialTracks,
         reviewAlbum.artist,

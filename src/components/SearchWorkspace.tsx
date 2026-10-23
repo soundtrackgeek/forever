@@ -47,7 +47,7 @@ import { ArchiveOwnershipBadge } from "./ArchiveOwnershipBadge";
 import { CountryFlag } from "./CountryFlag";
 import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
 import { WantedToggle } from "./WantedToggle";
-import { rankAlbumSources } from "../utils/smartMatches";
+import { useRankedSources } from "../hooks/useMatching";
 
 export type SearchFilter = "all" | "lossless" | "compressed";
 export type SearchSort = "best" | "ready" | "fast" | "small";
@@ -290,6 +290,7 @@ export function SearchWorkspace({
     return filtered;
   }, [filter, results, sort]);
 
+  const ranking = useRankedSources(qualifiedAlbumSources, wantedAlbum?.preferences ?? neutralAlbumPreferences, officialTracks, albumContext?.artist ?? "");
   const visibleAlbumSources = useMemo(() => {
     const filtered = qualifiedAlbumSources.filter((source) => {
       if (filter === "lossless") {
@@ -318,15 +319,11 @@ export function SearchWorkspace({
       );
     }
     if (officialTracks.length > 0) {
-      return rankAlbumSources(
-        filtered,
-        wantedAlbum?.preferences ?? neutralAlbumPreferences,
-        officialTracks,
-        albumContext?.artist ?? "",
-      ).map((match) => match.source);
+      const visible = new Set(filtered.map((source) => source.id));
+      if (!ranking.pending && !ranking.error) return ranking.ranked.filter((match) => visible.has(match.source.id)).map((match) => match.source);
     }
     return filtered;
-  }, [albumContext?.artist, filter, officialTracks, qualifiedAlbumSources, sort, wantedAlbum]);
+  }, [filter, officialTracks, qualifiedAlbumSources, sort, ranking]);
 
   const showingAlbumSources = Boolean(albumContext) && albumResultView === "sources";
   const visibleCount = showingAlbumSources
@@ -690,6 +687,9 @@ export function SearchWorkspace({
       {showingAlbumSources ? (
         <AlbumSourceResults
           sources={visibleAlbumSources}
+          rankedSources={ranking.ranked}
+          rankingPending={ranking.pending}
+          rankingError={ranking.error}
           transfers={transfers}
           searching={searching}
           onQueueAlbumSource={onQueueAlbumSource}

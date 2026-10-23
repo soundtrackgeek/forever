@@ -2,13 +2,15 @@ use super::album_query::{next_token, AlbumIdentity, AlbumQueryPlan, QueryMemory}
 use super::protocol::SearchResponse;
 use super::search_governor::{SearchGovernor, SearchLane, SEARCH_SPACING};
 use super::store::{self, DecodeError, JsonFile};
+use crate::matching::{self, RankingSource, RankingTrack};
+use crate::musicbrainz::{AlbumTrack, MusicBrainzClient};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     sync::{atomic::AtomicU32, Arc, Mutex, RwLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
 
 pub const WANTED_EVENT: &str = "forever://wanted";
@@ -17,10 +19,6 @@ const DEFAULT_INTERVAL_MINUTES: u32 = 30;
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_WANTED_ALBUMS: usize = 500;
 const MAX_BULK_WANTED_ALBUMS: usize = 100;
-const AUDIO_EXTENSIONS: &[&str] = &[
-    "aac", "aiff", "alac", "ape", "flac", "m4a", "mp3", "ogg", "opus", "wav", "wma", "wv",
-];
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WantedAlbumRequest {
@@ -33,33 +31,9 @@ pub struct WantedAlbumRequest {
     pub minimum_track_count: Option<u32>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum WantedFormatPreference {
-    Any,
-    #[default]
-    PreferLossless,
-    LosslessOnly,
-    Mp3Only,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WantedPreferences {
-    pub format_preference: WantedFormatPreference,
-    pub minimum_bitrate_kbps: Option<u32>,
-    pub minimum_track_count: Option<u32>,
-}
-
-impl Default for WantedPreferences {
-    fn default() -> Self {
-        Self {
-            format_preference: WantedFormatPreference::PreferLossless,
-            minimum_bitrate_kbps: Some(320),
-            minimum_track_count: None,
-        }
-    }
-}
+#[cfg(test)]
+use forever_matching::WantedFormatPreference;
+pub use forever_matching::WantedPreferences;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +48,8 @@ pub struct WantedBestSource {
     pub queue_length: u32,
     pub minimum_bitrate_kbps: Option<u32>,
     pub score: u32,
+    #[serde(default)]
+    pub tracklist_label: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -210,12 +186,40 @@ struct SourceAggregate {
     folder: String,
     track_count: u32,
     total_size_bytes: u64,
-    formats: HashSet<String>,
     slot_free: bool,
     average_speed: u32,
     queue_length: u32,
-    minimum_bitrate_kbps: Option<u32>,
-    unknown_lossy_bitrate: bool,
+    tracks: HashMap<String, RankingTrack>,
+}
+
+impl SourceAggregate {
+    fn remember_file(&mut self, file: &super::protocol::SearchFile, extension: &str) {
+        if self.tracks.contains_key(&file.filename) {
+            return;
+        }
+        self.tracks.insert(
+            file.filename.clone(),
+            RankingTrack {
+                id: file.filename.clone(),
+                name: file.filename.clone(),
+                format: extension.to_ascii_uppercase(),
+                bitrate: file.bitrate,
+            },
+        );
+        self.track_count = self.track_count.saturating_add(1);
+        self.total_size_bytes = self.total_size_bytes.saturating_add(file.size_bytes);
+    }
+}
+
+async fn official_tracks_or_fallback(
+    load: impl std::future::Future<Output = Result<Vec<AlbumTrack>, String>>,
+    timeout: Duration,
+) -> Vec<AlbumTrack> {
+    tokio::time::timeout(timeout, load)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default()
 }
 
 struct ActiveSearch {
@@ -226,6 +230,7 @@ struct ActiveSearch {
     sources: HashMap<String, SourceAggregate>,
     plan: AlbumQueryPlan,
     automatic: bool,
+    official_tracks: Arc<Mutex<Option<Vec<AlbumTrack>>>>,
 }
 
 impl ActiveSearch {
@@ -738,6 +743,19 @@ impl WantedHub {
                 .map_err(|_| WantedError::InvalidAlbum)?
         };
         let query = plan.query().to_owned();
+        let official_tracks = Arc::new(Mutex::new(None));
+        let result = official_tracks.clone();
+        let app = self.app.clone();
+        let id = album_id.to_owned();
+        tauri::async_runtime::spawn(async move {
+            let client = app.state::<MusicBrainzClient>();
+            let tracks = official_tracks_or_fallback(
+                client.official_tracklist(&id),
+                Duration::from_secs(45),
+            )
+            .await;
+            *result.lock().unwrap_or_else(|p| p.into_inner()) = Some(tracks);
+        });
         runtime.active = Some(ActiveSearch {
             album_id: album_id.to_owned(),
             token,
@@ -746,6 +764,7 @@ impl WantedHub {
             sources: HashMap::new(),
             plan,
             automatic: !force,
+            official_tracks,
         });
         drop(runtime);
         self.publish();
@@ -773,11 +792,12 @@ impl WantedHub {
             .runtime
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(active) = runtime
-            .active
-            .as_mut()
-            .filter(|active| active.token == response.token && active.deadline.is_some())
-        else {
+        let Some(active) = runtime.active.as_mut().filter(|active| {
+            active.token == response.token
+                && active
+                    .deadline
+                    .is_some_and(|deadline| Instant::now() <= deadline)
+        }) else {
             return;
         };
         for file in &response.files {
@@ -785,7 +805,7 @@ impl WantedHub {
                 continue;
             }
             let extension = file.extension.trim_start_matches('.').to_ascii_lowercase();
-            if !AUDIO_EXTENSIONS.contains(&extension.as_str()) {
+            if !matching::is_audio(&extension) {
                 continue;
             }
             let folder = parent_folder(&file.filename);
@@ -805,23 +825,9 @@ impl WantedHub {
             } else {
                 source.queue_length = source.queue_length.min(response.queue_length);
             }
-            source.track_count = source.track_count.saturating_add(1);
-            source.total_size_bytes = source.total_size_bytes.saturating_add(file.size_bytes);
-            source.formats.insert(extension.to_ascii_uppercase());
             source.slot_free |= response.slot_free;
             source.average_speed = source.average_speed.max(response.average_speed);
-            if !is_lossless(&extension) {
-                match file.bitrate {
-                    Some(bitrate) => {
-                        source.minimum_bitrate_kbps = Some(
-                            source
-                                .minimum_bitrate_kbps
-                                .map_or(bitrate, |current| current.min(bitrate)),
-                        );
-                    }
-                    None => source.unknown_lossy_bitrate = true,
-                }
-            }
+            source.remember_file(file, &extension);
         }
     }
 
@@ -840,8 +846,18 @@ impl WantedHub {
                 if runtime.active.as_mut().unwrap().retry_empty(tokens) {
                     retried = true;
                     None
-                } else {
+                } else if runtime
+                    .active
+                    .as_ref()
+                    .unwrap()
+                    .official_tracks
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .is_some()
+                {
                     runtime.active.take()
+                } else {
+                    None
                 }
             } else {
                 None
@@ -899,7 +915,22 @@ impl WantedHub {
             .find(|album| album.album_id == active.album_id)
             .map(|album| album.preferences.clone())
             .unwrap_or_default();
-        let summary = summarize_sources(active.sources, &preferences);
+        let artist = self
+            .store
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .albums
+            .iter()
+            .find(|a| a.album_id == active.album_id)
+            .map(|a| a.artist.clone())
+            .unwrap_or_default();
+        let tracks = active
+            .official_tracks
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+            .unwrap_or_default();
+        let summary = summarize_ranked_sources(active.sources, &preferences, &tracks, &artist);
         if let Some(album) = self
             .store
             .write()
@@ -960,9 +991,31 @@ struct SourceSummary {
     source_fingerprints: Vec<String>,
 }
 
+#[cfg(test)]
 fn summarize_sources(
     sources: HashMap<String, SourceAggregate>,
     preferences: &WantedPreferences,
+) -> SourceSummary {
+    summarize_ranked_sources(sources, preferences, &[], "")
+}
+
+fn ranking_source(id: &str, source: &SourceAggregate) -> RankingSource {
+    RankingSource {
+        id: id.into(),
+        owner: source.username.clone(),
+        folder: source.folder.clone(),
+        tracks: source.tracks.values().cloned().collect(),
+        slot_free: source.slot_free,
+        average_speed: source.average_speed,
+        queue_length: source.queue_length,
+    }
+}
+
+fn summarize_ranked_sources(
+    sources: HashMap<String, SourceAggregate>,
+    preferences: &WantedPreferences,
+    official: &[AlbumTrack],
+    artist: &str,
 ) -> SourceSummary {
     let best_track_count = sources.values().map(|source| source.track_count).max();
     let complete_source_count = best_track_count
@@ -975,24 +1028,31 @@ fn summarize_sources(
                 .unwrap_or(u32::MAX)
         })
         .unwrap_or(0);
-    let mut matching_sources: Vec<_> = sources
+    let inputs: Vec<_> = sources
         .iter()
-        .filter(|(_, source)| source_matches(source, preferences))
+        .map(|(id, source)| ranking_source(id, source))
         .collect();
-    matching_sources.sort_by(|(_, left), (_, right)| {
-        source_score(right, preferences)
-            .cmp(&source_score(left, preferences))
-            .then(right.track_count.cmp(&left.track_count))
-            .then(right.slot_free.cmp(&left.slot_free))
-            .then(right.average_speed.cmp(&left.average_speed))
-            .then(left.queue_length.cmp(&right.queue_length))
+    let ranked = matching::rank_sources(&inputs, preferences, official, artist);
+    let matching_sources: Vec<_> = ranked.iter().filter(|r| r.eligible).collect();
+    let best_source = matching_sources.first().map(|rank| {
+        let source = &sources[&rank.source_id];
+        WantedBestSource {
+            username: source.username.clone(),
+            folder: source.folder.clone(),
+            format: rank.format.clone(),
+            track_count: source.track_count,
+            size_bytes: source.total_size_bytes,
+            slot_free: source.slot_free,
+            average_speed_bytes_per_second: source.average_speed,
+            queue_length: source.queue_length,
+            minimum_bitrate_kbps: rank.minimum_bitrate_kbps,
+            score: rank.score,
+            tracklist_label: rank.tracklist_confidence.label.clone(),
+        }
     });
-    let best_source = matching_sources
-        .first()
-        .map(|(_, source)| wanted_best_source(source, preferences));
     let mut source_fingerprints: Vec<_> = matching_sources
         .iter()
-        .map(|(fingerprint, _)| (*fingerprint).clone())
+        .map(|r| r.source_id.clone())
         .collect();
     source_fingerprints.sort();
     SourceSummary {
@@ -1017,104 +1077,9 @@ fn summarize_sources(
     }
 }
 
+#[cfg(test)]
 fn source_matches(source: &SourceAggregate, preferences: &WantedPreferences) -> bool {
-    if preferences
-        .minimum_track_count
-        .is_some_and(|minimum| source.track_count < minimum)
-    {
-        return false;
-    }
-    let lossless = source.formats.iter().any(|format| is_lossless(format));
-    if preferences.format_preference == WantedFormatPreference::LosslessOnly && !lossless {
-        return false;
-    }
-    if preferences.format_preference == WantedFormatPreference::Mp3Only
-        && (source.formats.is_empty()
-            || source
-                .formats
-                .iter()
-                .any(|format| !format.eq_ignore_ascii_case("MP3")))
-    {
-        return false;
-    }
-    if !lossless {
-        if let Some(minimum) = preferences.minimum_bitrate_kbps {
-            if source.unknown_lossy_bitrate
-                || source
-                    .minimum_bitrate_kbps
-                    .is_none_or(|bitrate| bitrate < minimum)
-            {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn wanted_best_source(
-    source: &SourceAggregate,
-    preferences: &WantedPreferences,
-) -> WantedBestSource {
-    WantedBestSource {
-        username: source.username.clone(),
-        folder: source.folder.clone(),
-        format: best_format(source).unwrap_or_else(|| "Unknown".to_owned()),
-        track_count: source.track_count,
-        size_bytes: source.total_size_bytes,
-        slot_free: source.slot_free,
-        average_speed_bytes_per_second: source.average_speed,
-        queue_length: source.queue_length,
-        minimum_bitrate_kbps: source.minimum_bitrate_kbps,
-        score: source_score(source, preferences),
-    }
-}
-
-fn source_score(source: &SourceAggregate, preferences: &WantedPreferences) -> u32 {
-    let lossless = source.formats.iter().any(|format| is_lossless(format));
-    let preference_bonus = match preferences.format_preference {
-        WantedFormatPreference::PreferLossless if lossless => 500,
-        WantedFormatPreference::LosslessOnly => 500,
-        WantedFormatPreference::Mp3Only => 500,
-        _ => 0,
-    };
-    let format_bonus = best_format(source)
-        .map(|format| u32::from(format_rank(&format)) * 20)
-        .unwrap_or(0);
-    preference_bonus
-        + format_bonus
-        + source.track_count.saturating_mul(30)
-        + u32::from(source.slot_free) * 180
-        + (source.average_speed / 100_000).min(120)
-        + 100u32.saturating_sub(source.queue_length.min(20).saturating_mul(5))
-}
-
-fn best_format(source: &SourceAggregate) -> Option<String> {
-    source
-        .formats
-        .iter()
-        .max_by_key(|format| format_rank(format))
-        .cloned()
-}
-
-fn is_lossless(format: &str) -> bool {
-    matches!(
-        format.to_ascii_uppercase().as_str(),
-        "FLAC" | "ALAC" | "WAV" | "AIFF" | "APE" | "WV"
-    )
-}
-
-fn format_rank(format: &str) -> u8 {
-    match format {
-        "FLAC" => 10,
-        "ALAC" => 9,
-        "WAV" | "AIFF" => 8,
-        "APE" | "WV" => 7,
-        "MP3" => 5,
-        "M4A" | "AAC" => 4,
-        "OGG" | "OPUS" => 3,
-        "WMA" => 2,
-        _ => 1,
-    }
+    matching::rank_sources(&[ranking_source("test", source)], preferences, &[], "")[0].eligible
 }
 
 fn parent_folder(filename: &str) -> &str {
@@ -1546,6 +1511,7 @@ mod tests {
                 )
                 .unwrap(),
                 automatic: false,
+                official_tracks: Arc::new(Mutex::new(Some(vec![]))),
                 sources: HashMap::new(),
             }),
         };
@@ -1587,6 +1553,7 @@ mod tests {
                 query: "artist the northern lights".into(),
                 sources: HashMap::new(),
                 automatic: true,
+                official_tracks: Arc::new(Mutex::new(Some(vec![]))),
                 plan: AlbumQueryPlan::new(
                     &AlbumIdentity {
                         artist: "Artist".into(),
@@ -1775,6 +1742,27 @@ mod tests {
     use crate::connection::protocol::SearchFile;
     use std::fs;
 
+    fn test_tracks(
+        format: &str,
+        count: usize,
+        bitrate: Option<u32>,
+    ) -> HashMap<String, RankingTrack> {
+        (0..count)
+            .map(|i| {
+                let name = format!("{i}. Song.{format}");
+                (
+                    name.clone(),
+                    RankingTrack {
+                        id: name.clone(),
+                        name,
+                        format: format.into(),
+                        bitrate,
+                    },
+                )
+            })
+            .collect()
+    }
+
     fn request(id: &str) -> WantedAlbumRequest {
         WantedAlbumRequest {
             album_id: id.to_owned(),
@@ -1825,7 +1813,7 @@ mod tests {
         ] {
             for file in response.files {
                 let extension = file.extension.to_ascii_lowercase();
-                if !AUDIO_EXTENSIONS.contains(&extension.as_str()) {
+                if !matching::is_audio(&extension) {
                     continue;
                 }
                 let key = format!(
@@ -1836,9 +1824,18 @@ mod tests {
                 let source: &mut SourceAggregate = sources.entry(key).or_default();
                 source.username = response.username.clone();
                 source.folder = parent_folder(&file.filename).to_owned();
+                source.tracks.insert(
+                    file.filename.clone(),
+                    RankingTrack {
+                        id: file.filename.clone(),
+                        name: file.filename.clone(),
+                        format: extension.to_ascii_uppercase(),
+                        bitrate: file.bitrate,
+                    },
+                );
                 source.track_count += 1;
                 source.total_size_bytes += file.size_bytes;
-                source.formats.insert(extension.to_ascii_uppercase());
+
                 source.slot_free = response.slot_free;
             }
         }
@@ -2055,12 +2052,12 @@ mod tests {
                 folder: "Music\\Album".to_owned(),
                 track_count: 10,
                 total_size_bytes: 500_000_000,
-                formats: HashSet::from(["FLAC".to_owned()]),
+
                 slot_free: true,
                 average_speed: 8_000_000,
                 queue_length: 0,
-                minimum_bitrate_kbps: None,
-                unknown_lossy_bitrate: false,
+
+                tracks: test_tracks("FLAC", 10, None),
             },
         );
         sources.insert(
@@ -2070,17 +2067,124 @@ mod tests {
                 folder: "Music\\Album".to_owned(),
                 track_count: 12,
                 total_size_bytes: 120_000_000,
-                formats: HashSet::from(["MP3".to_owned()]),
+
                 slot_free: true,
                 average_speed: 12_000_000,
                 queue_length: 0,
-                minimum_bitrate_kbps: Some(320),
-                unknown_lossy_bitrate: false,
+
+                tracks: test_tracks("MP3", 12, Some(320)),
             },
         );
         let summary = summarize_sources(sources, &WantedPreferences::default());
         assert_eq!(summary.matching_source_count, 2);
         assert_eq!(summary.best_source.unwrap().username, "lossless");
+    }
+
+    #[test]
+    fn background_summary_uses_the_same_ranking_as_the_review_command() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/matching.json")).unwrap();
+        for case in fixture["ranking"].as_array().unwrap() {
+            let inputs: Vec<RankingSource> =
+                serde_json::from_value(case["sources"].clone()).unwrap();
+            let preferences = serde_json::from_value(case["preferences"].clone()).unwrap();
+            let official: Vec<AlbumTrack> =
+                serde_json::from_value(case["officialTracks"].clone()).unwrap();
+            let sources = inputs
+                .iter()
+                .map(|source| {
+                    (
+                        source.id.clone(),
+                        SourceAggregate {
+                            username: source.owner.clone(),
+                            folder: source.folder.clone(),
+                            track_count: source.tracks.len() as u32,
+                            tracks: source
+                                .tracks
+                                .iter()
+                                .map(|track| (track.id.clone(), track.clone()))
+                                .collect(),
+                            slot_free: source.slot_free,
+                            average_speed: source.average_speed,
+                            queue_length: source.queue_length,
+                            ..SourceAggregate::default()
+                        },
+                    )
+                })
+                .collect();
+            let ranked = matching::rank_sources(
+                &inputs,
+                &preferences,
+                &official,
+                case["artist"].as_str().unwrap(),
+            );
+            let summary = summarize_ranked_sources(
+                sources,
+                &preferences,
+                &official,
+                case["artist"].as_str().unwrap(),
+            );
+            assert_eq!(
+                summary.matching_source_count as usize,
+                ranked.iter().filter(|r| r.eligible).count()
+            );
+            let expected = ranked.iter().find(|r| r.eligible);
+            assert_eq!(
+                summary.best_source.as_ref().map(|s| s.score),
+                expected.map(|r| r.score)
+            );
+            assert_eq!(
+                summary.best_source.as_ref().map(|s| &s.tracklist_label),
+                expected.map(|r| &r.tracklist_confidence.label)
+            );
+            assert_eq!(
+                summary.best_source.as_ref().map(|s| s.username.as_str()),
+                expected.map(|r| inputs
+                    .iter()
+                    .find(|s| s.id == r.source_id)
+                    .unwrap()
+                    .owner
+                    .as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_replies_do_not_inflate_the_ranking_input() {
+        let response = response(1, "listener", "Album", "flac", 2);
+        let mut source = SourceAggregate::default();
+        for _ in 0..3 {
+            for file in &response.files {
+                source.remember_file(file, "flac");
+            }
+        }
+        assert_eq!(source.track_count, 2);
+        assert_eq!(source.tracks.len(), 2);
+        assert_eq!(source.total_size_bytes, 20_000_000);
+    }
+
+    #[tokio::test]
+    async fn background_metadata_failure_and_timeout_use_the_count_fallback() {
+        let timeout = Duration::from_millis(1);
+        assert!(
+            official_tracks_or_fallback(async { Err("offline".into()) }, timeout)
+                .await
+                .is_empty()
+        );
+        assert!(official_tracks_or_fallback(std::future::pending(), timeout)
+            .await
+            .is_empty());
+        let tracks = vec![AlbumTrack {
+            position: 1,
+            disc_number: 1,
+            disc_position: 1,
+            title: "Song".into(),
+            duration_ms: None,
+        }];
+        assert_eq!(
+            official_tracks_or_fallback(async { Ok(tracks) }, timeout).await[0].title,
+            "Song"
+        );
     }
 
     #[test]
@@ -2091,17 +2195,21 @@ mod tests {
             minimum_track_count: None,
         };
         let mp3 = SourceAggregate {
-            formats: HashSet::from(["MP3".to_owned()]),
-            minimum_bitrate_kbps: Some(320),
+            tracks: test_tracks("MP3", 1, Some(320)),
+
             ..SourceAggregate::default()
         };
         let flac = SourceAggregate {
-            formats: HashSet::from(["FLAC".to_owned()]),
+            tracks: test_tracks("FLAC", 1, None),
+
             ..SourceAggregate::default()
         };
         let mixed = SourceAggregate {
-            formats: HashSet::from(["MP3".to_owned(), "FLAC".to_owned()]),
-            minimum_bitrate_kbps: Some(320),
+            tracks: test_tracks("MP3", 1, Some(320))
+                .into_iter()
+                .chain(test_tracks("FLAC", 1, None))
+                .collect(),
+
             ..SourceAggregate::default()
         };
         assert!(source_matches(&mp3, &preferences));

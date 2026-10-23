@@ -80,6 +80,7 @@ export type WantedBestSource = {
   queueLength: number;
   minimumBitrateKbps: number | null;
   score: number;
+  tracklistLabel?: string;
 };
 
 export type WantedFulfillmentSource = "archive" | "download";

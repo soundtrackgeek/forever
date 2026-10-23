@@ -1,3 +1,4 @@
+use crate::matching::words;
 use crate::musicbrainz::{AlbumCatalog, AlbumReleaseGroup};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -241,21 +242,6 @@ fn status_for_path(path: &Path) -> ArchiveStatus {
         Ok(status) => status,
         Err(error) => disconnected_status(path, error),
     }
-}
-
-fn normalize_title(value: &str) -> String {
-    let mut normalized = String::new();
-    let mut separated = false;
-    for character in value.chars().flat_map(char::to_lowercase) {
-        if character.is_alphanumeric() {
-            normalized.push(character);
-            separated = false;
-        } else if !normalized.is_empty() && !separated {
-            normalized.push(' ');
-            separated = true;
-        }
-    }
-    normalized.trim().to_owned()
 }
 
 fn table_exists(connection: &Connection, table: &str) -> Result<bool, String> {
@@ -538,27 +524,59 @@ fn year_distance(query_year: Option<i32>, local_year: Option<i32>) -> i32 {
     }
 }
 
-fn query_artist_albums(connection: &Connection, artist: &str) -> Result<Vec<LocalAlbum>, String> {
+fn normalize_title(value: &str) -> String {
+    words(value).join(" ")
+}
+
+// Normalize distinct artist names once per request, then use indexed exact-name
+// lookups. A 500-album Wanted reconciliation must not scan all albums 500 times.
+fn normalized_artist_names(
+    connection: &Connection,
+) -> Result<HashMap<String, Vec<String>>, String> {
+    let mut statement = connection.prepare("SELECT DISTINCT album_artist_display FROM albums WHERE album_artist_display IS NOT NULL")
+        .map_err(|e| format!("Could not prepare Archive artist names: {e}"))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("Could not query Archive artist names: {e}"))?;
+    let mut names: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let name = row.map_err(|e| format!("Could not read Archive artist name: {e}"))?;
+        names.entry(normalize_title(&name)).or_default().push(name);
+    }
+    Ok(names)
+}
+
+fn query_artist_albums(
+    connection: &Connection,
+    artist: &str,
+    names: &HashMap<String, Vec<String>>,
+) -> Result<Vec<LocalAlbum>, String> {
     let mut statement = connection
         .prepare(
             "SELECT id, album, album_artist_display, COALESCE(release_year, year), total_tracks
              FROM albums
-             WHERE album_artist_display = ?1 COLLATE NOCASE",
+             WHERE album_artist_display = ?1",
         )
         .map_err(|error| format!("Could not prepare the Archive ownership lookup: {error}"))?;
-    let rows = statement
-        .query_map([artist], |row| {
-            Ok(LocalAlbum {
-                id: row.get(0)?,
-                title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                year: row.get(3)?,
-                track_count: row.get::<_, u32>(4)?,
+    let mut albums = Vec::new();
+    for name in names.get(&normalize_title(artist)).into_iter().flatten() {
+        let rows = statement
+            .query_map([name], |row| {
+                Ok(LocalAlbum {
+                    id: row.get(0)?,
+                    title: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    artist: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    year: row.get(3)?,
+                    track_count: row.get::<_, u32>(4)?,
+                })
             })
-        })
-        .map_err(|error| format!("Could not query Archive albums: {error}"))?;
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|error| format!("Could not read Archive album matches: {error}"))
+            .map_err(|error| format!("Could not query Archive albums: {error}"))?;
+        albums.extend(
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|error| format!("Could not read Archive album matches: {error}"))?,
+        );
+    }
+    Ok(albums)
 }
 
 fn match_queries(
@@ -629,7 +647,9 @@ fn match_for_path(
             }
         }
     };
-    match query_artist_albums(&connection, artist) {
+    match normalized_artist_names(&connection)
+        .and_then(|names| query_artist_albums(&connection, artist, &names))
+    {
         Ok(local_albums) => ArchiveMatchResponse {
             source,
             matches: match_queries(&local_albums, queries),
@@ -671,13 +691,22 @@ fn match_wanted_for_path(path: &Path, queries: &[ArchiveWantedQuery]) -> Archive
             };
         }
     };
+    let names = match normalized_artist_names(&connection) {
+        Ok(names) => names,
+        Err(error) => {
+            return ArchiveMatchResponse {
+                source: disconnected_status(path, error),
+                matches: Vec::new(),
+            }
+        }
+    };
     let mut by_artist: HashMap<String, Result<Vec<LocalAlbum>, String>> = HashMap::new();
     let mut matches = Vec::with_capacity(queries.len());
     for query in queries {
-        let artist_key = query.artist.to_lowercase();
+        let artist_key = normalize_title(&query.artist);
         let local_albums = by_artist
             .entry(artist_key)
-            .or_insert_with(|| query_artist_albums(&connection, &query.artist));
+            .or_insert_with(|| query_artist_albums(&connection, &query.artist, &names));
         let local_albums = match local_albums {
             Ok(local_albums) => local_albums,
             Err(error) => {
@@ -918,6 +947,47 @@ mod tests {
         assert_eq!(response.matches[0].track_count, Some(12));
         assert_eq!(response.matches[1].ownership, ArchiveOwnership::NotOwned);
         assert_eq!(response.matches[2].ownership, ArchiveOwnership::Owned);
+    }
+
+    #[test]
+    fn archive_artist_and_album_matching_share_unicode_and_ampersand_folding() {
+        let file = fixture();
+        let connection = Connection::open(file.path()).unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO albums VALUES
+            ('bjork', 'Jóga & More', 'Björk', 1997, 1997, 10),
+            ('simon', 'Parsley, Sage, Rosemary & Thyme', 'Simon & Garfunkel', 1966, 1966, 12);",
+            )
+            .unwrap();
+        drop(connection);
+        let response = match_wanted_for_path(
+            file.path(),
+            &[
+                ArchiveWantedQuery {
+                    id: "one".into(),
+                    artist: "Bjork".into(),
+                    title: "Joga and More".into(),
+                    first_release_date: "1997".into(),
+                },
+                ArchiveWantedQuery {
+                    id: "two".into(),
+                    artist: "Simon and Garfunkel".into(),
+                    title: "Parsley Sage Rosemary and Thyme".into(),
+                    first_release_date: "1966".into(),
+                },
+                ArchiveWantedQuery {
+                    id: "three".into(),
+                    artist: "Bjork".into(),
+                    title: "Joga and More Live".into(),
+                    first_release_date: "1997".into(),
+                },
+            ],
+        );
+        assert_eq!(response.matches[0].local_album_id.as_deref(), Some("bjork"));
+        assert_eq!(response.matches[1].local_album_id.as_deref(), Some("simon"));
+        assert_eq!(response.matches[2].ownership, ArchiveOwnership::NotOwned);
+        assert!(response.source.read_only);
     }
 
     #[test]

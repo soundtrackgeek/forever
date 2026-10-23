@@ -8,7 +8,7 @@ use tauri::State;
 use tokio::sync::{Mutex, RwLock};
 
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "Forever/0.0.59 (https://github.com/soundtrackgeek/forever)";
+const USER_AGENT: &str = "Forever/0.0.60 (https://github.com/soundtrackgeek/forever)";
 const REQUEST_INTERVAL: Duration = Duration::from_millis(1_050);
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const MAX_CATALOG_PAGES: usize = 3;
@@ -103,15 +103,7 @@ struct OfficialTrack {
     length: Option<u32>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AlbumTrack {
-    pub position: u32,
-    pub disc_number: u32,
-    pub disc_position: u32,
-    pub title: String,
-    pub duration_ms: Option<u32>,
-}
+pub use forever_matching::AlbumTrack;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

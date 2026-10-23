@@ -10,11 +10,11 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { AlbumTrack, FolderInspection, WantedAlbum } from "../types";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
-import { tracklistConfidenceForInspection } from "../utils/tracklistConfidence";
+import { useInspectionConfidence } from "../hooks/useMatching";
 
 type SmartMatchReviewDialogProps = {
   album: WantedAlbum;
@@ -55,11 +55,10 @@ export function SmartMatchReviewDialog({
   const audioCount = inspection?.files.filter((file) => AUDIO_EXTENSIONS.has(file.extension.toLowerCase())).length ?? source?.trackCount ?? 0;
   const companionCount = inspection ? inspection.files.length - audioCount : 0;
   const inspectedSize = inspection?.files.reduce((total, file) => total + file.sizeBytes, 0) ?? source?.sizeBytes ?? 0;
-  const tracklistConfidence = useMemo(
-    () => inspection ? tracklistConfidenceForInspection(inspection, officialTracks, album.artist) : null,
-    [album.artist, inspection, officialTracks],
-  );
-  const tracklistBlocked = tracklistState === "ready" && Boolean(tracklistConfidence && !tracklistConfidence.safeToRecommend);
+  const check = useInspectionConfidence(inspection, officialTracks, album.artist);
+  const tracklistConfidence = check.data;
+  const checking = tracklistState === "loading" || check.pending;
+  const tracklistBlocked = Boolean(check.error) || (tracklistState === "ready" && Boolean(tracklistConfidence && !tracklistConfidence.safeToRecommend));
 
   const queueAlbum = async () => {
     setQueueing(true);
@@ -119,8 +118,9 @@ export function SmartMatchReviewDialog({
           ) : null}
         </div>
 
+        {check.error ? <p role="alert">Tracklist check failed: {check.error}</p> : null}
         <div className={`smart-tracklist-check ${tracklistState === "ready" && tracklistConfidence ? `is-${tracklistConfidence.state}` : "is-fallback"}`}>
-          {tracklistState === "loading" ? (
+          {checking ? (
             <><CircleNotch className="search-spinner" size={20} /><span><strong>Checking official titles</strong><small>Comparing the folder filenames with MusicBrainz.</small></span></>
           ) : tracklistState === "ready" && tracklistConfidence ? (
             <>
@@ -147,7 +147,7 @@ export function SmartMatchReviewDialog({
           <button
             type="button"
             className={`primary-action ${queued ? "is-queued" : ""}`}
-            disabled={!inspection || loading || Boolean(error) || queued || queueing || tracklistState === "loading" || tracklistBlocked}
+            disabled={!inspection || loading || Boolean(error) || queued || queueing || checking || tracklistBlocked}
             title={tracklistBlocked ? "Compare alternatives: this folder does not match the official tracklist" : undefined}
             onClick={() => void queueAlbum()}
           >

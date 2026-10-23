@@ -275,7 +275,19 @@ illustrate the problem.
   alone with an artist post-filter, then artist plus distinctive title words.
 - Record which variant succeeded and reuse it for that album.
 
-### 7. One source of truth for ranking and normalization
+### 7. One source of truth for ranking and normalization - DONE
+
+**Implemented in 0.0.60 (2026-10-23):** one portable Rust crate owns scoring,
+format/bitrate eligibility, stable ties, Tracklist Confidence, and Unicode title
+normalization. Desktop commands and the local browser/test bridge call it;
+TypeScript scoring and normalization copies are removed. Wanted loads official
+titles for background checks (45-second metadata deadline), labels unavailable
+metadata as track-count fallback, and deduplicates repeated files. Archive and
+album queries share NFKD/ampersand folding. Shared fixtures and actual Rust-backed
+frontend flows verify the contract; async identity guards reject stale replies.
+Review can still differ when peers return different files or metadata becomes
+available later. Duration matching and edition selection remain item 8. The
+original findings follow for context.
 
 **Today:** Smart Match logic exists twice. Rust has `source_score`, `format_rank`,
 and `is_lossless` ([wanted.rs:977](src-tauri/src/connection/wanted.rs:977)).

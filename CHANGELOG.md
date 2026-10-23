@@ -5,6 +5,37 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.60] - 2026-10-23
+
+### Changed
+
+- Consolidated Smart Match scoring, format preference, bitrate eligibility,
+  deterministic tie-breaking, and Tracklist Confidence in one portable Rust
+  matching crate. Desktop IPC, Wanted summaries, Search, Radar review, and
+  inspected-folder review use that implementation; TypeScript policy copies
+  are removed.
+- Background Wanted checks fetch the official tracklist with a bounded metadata
+  deadline and label the track-count fallback when it is unavailable. Repeated
+  file replies no longer inflate source completeness or scores.
+- Archive ownership and album queries share the matcher's Unicode NFKD accent,
+  punctuation, and ampersand normalization. Filename cleanup preserves dotted
+  official titles and uses the same supported audio formats.
+- Local browser previews and frontend integration tests run the Rust matcher
+  through a small local helper. Rust/Cargo is now required for matching in
+  browser development; CI installs it for the frontend checks.
+
+### Fixed
+
+- Unknown or zero lossy bitrates no longer pass the frontend's minimum-bitrate
+  rule. Late ranking responses cannot revive recommendations for old inputs;
+  loading and failed checks block recommendation-based downloads.
+
+### Tests
+
+- Shared golden fixtures cover normalization, official titles, extras, missing
+  tracks, format restrictions, unknown bitrates, and stable scores/order.
+  Wanted summary parity and frontend flows exercise the same Rust implementation.
+
 ## [0.0.59] - 2026-10-23
 
 ### Added

@@ -1,116 +1,35 @@
-import { describe, expect, it } from "vitest";
-import type { AlbumSource, AlbumTrack, SearchResult, WantedPreferences } from "../types";
-import { rankAlbumSources, wantedPreferencesLabel } from "./smartMatches";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { matchingCommand as invoke } from "./matchingClient";
+import fixture from "../../fixtures/matching.json";
+import type { AlbumSource, WantedPreferences } from "../types";
+import { rankAlbumSources, rankingInput, wantedPreferencesLabel } from "./smartMatches";
 
-const source = (
-  id: string,
-  format: string,
-  tracks: number,
-  bitrate: number | null,
-  slotFree: boolean,
-): AlbumSource => {
-  const files: SearchResult[] = Array.from({ length: tracks }, (_, index) => ({
-    id: `${id}-${index}`,
-    title: `${index + 1}.${format.toLowerCase()}`,
-    subtitle: "",
-    owner: id,
-    trust: 100,
-    format,
-    quality: bitrate ? `${bitrate} kbps` : "Lossless",
-    size: "10 MB",
-    tracks: 1,
-    rating: 5,
-    ratingLabel: "Ready",
-    availability: [],
-    bitrate,
-  }));
-  return {
-    id,
-    owner: id,
-    folder: `Music\\${id}`,
-    folderName: id,
-    files,
-    tracks: files,
-    formats: [format],
-    qualities: [],
-    totalSizeBytes: tracks * 10_000_000,
-    slotFree,
-    averageSpeed: slotFree ? 8_000_000 : 12_000_000,
-    queueLength: slotFree ? 0 : 4,
-    isPrivate: false,
-    representative: files[0],
-  };
-};
+vi.mock("./matchingClient", () => ({ matchingCommand: vi.fn() }));
+beforeEach(() => { vi.mocked(invoke).mockReset(); });
+const scenario = fixture.ranking[0];
+const sources = scenario.sources.map((s) => ({ ...s, tracks: s.tracks.map((t) => ({ ...t, filename: t.name, title: "display title" })) })) as unknown as AlbumSource[];
+const preferences = scenario.preferences as WantedPreferences;
 
-const preferences: WantedPreferences = {
-  formatPreference: "preferLossless",
-  minimumBitrateKbps: 320,
-  minimumTrackCount: 10,
-};
-
-const officialTracks: AlbumTrack[] = Array.from({ length: 10 }, (_, index) => ({
-  position: index + 1,
-  discNumber: 1,
-  discPosition: index + 1,
-  title: `Song ${index + 1}`,
-  durationMs: null,
-}));
-
-const titledSource = (id: string, titles: string[], format = "FLAC") => {
-  const candidate = source(id, format, titles.length, format === "MP3" ? 320 : null, true);
-  candidate.tracks = candidate.tracks.map((track, index) => ({
-    ...track,
-    title: `${String(index + 1).padStart(2, "0")} - ${titles[index]}.${format.toLocaleLowerCase()}`,
-    filename: `${String(index + 1).padStart(2, "0")} - ${titles[index]}.${format.toLocaleLowerCase()}`,
-  }));
-  candidate.files = candidate.tracks;
-  candidate.representative = candidate.tracks[0];
-  return candidate;
-};
-
-describe("Smart Match ranking", () => {
-  it("recommends a complete ready FLAC source over a larger MP3 folder", () => {
-    const ranked = rankAlbumSources([
-      source("mp3", "MP3", 12, 320, false),
-      source("flac", "FLAC", 10, null, true),
-    ], preferences);
-    expect(ranked[0].source.id).toBe("flac");
-    expect(ranked[0].eligible).toBe(true);
+describe("Rust ranking bridge", () => {
+  it("sends raw filenames, preferences and the official tracklist without local scoring", async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+    await rankAlbumSources(sources, preferences, scenario.officialTracks, scenario.artist);
+    expect(invoke).toHaveBeenCalledWith("rank_album_sources", { sources: scenario.sources, preferences, officialTracks: scenario.officialTracks, artist: scenario.artist });
   });
-
-  it("rejects lossy sources below the configured bitrate", () => {
-    const ranked = rankAlbumSources([source("mp3", "MP3", 10, 256, true)], preferences);
-    expect(ranked[0].eligible).toBe(false);
-    expect(ranked[0].reason).toBe("320 kbps minimum");
+  it("preserves backend order and attaches current source objects by id", async () => {
+    vi.mocked(invoke).mockResolvedValue(scenario.ids.map((sourceId, i) => ({ sourceId, score: scenario.scores[i], eligible: scenario.eligible[i] })));
+    const ranked = await rankAlbumSources(sources, preferences);
+    expect(ranked.map((r) => r.source.id)).toEqual(scenario.ids);
+    expect(ranked.map((r) => r.score)).toEqual(scenario.scores);
+    expect(ranked[0].source).toBe(sources.find((s) => s.id === "exact"));
   });
-
-  it("summarizes persisted preferences clearly", () => {
-    expect(wantedPreferencesLabel(preferences)).toBe("Prefer FLAC · 320+ kbps · 10+ tracks");
+  it("retains unknown bitrate and never substitutes a local recommendation on failure", async () => {
+    const unknown = { ...sources[0], tracks: [{ ...sources[0].tracks[0], bitrate: undefined }] };
+    expect(rankingInput([unknown], preferences).sources[0].tracks[0].bitrate).toBeNull();
+    vi.mocked(invoke).mockRejectedValue(new Error("backend unavailable"));
+    await expect(rankAlbumSources(sources, preferences)).rejects.toThrow("backend unavailable");
   });
-
-  it("accepts only MP3 sources in MP3-only mode", () => {
-    const mp3Only = { ...preferences, formatPreference: "mp3Only" as const };
-    const ranked = rankAlbumSources([
-      source("flac", "FLAC", 10, null, true),
-      source("mp3", "MP3", 10, 320, true),
-    ], mp3Only);
-    expect(ranked[0].source.id).toBe("mp3");
-    expect(ranked[0].eligible).toBe(true);
-    expect(ranked[1].eligible).toBe(false);
-    expect(wantedPreferencesLabel(mp3Only)).toBe("MP3 only · 320+ kbps · 10+ tracks");
-  });
-
-  it("ranks an exact official tracklist above a faster same-sized wrong album", () => {
-    const exact = titledSource("exact", officialTracks.map((track) => track.title));
-    const wrong = titledSource("wrong", Array.from({ length: 10 }, (_, index) => `Different ${index + 1}`));
-    wrong.averageSpeed = 40_000_000;
-
-    const ranked = rankAlbumSources([wrong, exact], preferences, officialTracks, "Artist");
-
-    expect(ranked[0].source.id).toBe("exact");
-    expect(ranked[0].eligible).toBe(true);
-    expect(ranked[0].tracklistConfidence.state).toBe("exact");
-    expect(ranked[1].eligible).toBe(false);
-    expect(ranked[1].reason).toBe("Track titles do not line up");
+  it("summarizes persisted preferences", () => {
+    expect(wantedPreferencesLabel({ ...preferences, minimumTrackCount: 10 })).toBe("Prefer FLAC · 320+ kbps · 10+ tracks");
   });
 });

@@ -34,6 +34,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Rust for shared matching tests
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Validate version metadata
         run: npm run verify:version
 
@@ -74,8 +77,8 @@ jobs:
 
       - name: Run Clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Test Rust
         working-directory: src-tauri
-        run: cargo test --all-targets --all-features
+        run: cargo test --workspace --all-targets --all-features

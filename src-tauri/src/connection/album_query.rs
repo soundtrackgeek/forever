@@ -1,5 +1,6 @@
 //! Album search policy only; ranking and general file-search syntax are unchanged.
 use super::store::{self, DecodeError, JsonFile};
+pub use crate::matching::words;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -8,7 +9,6 @@ use std::{
         Arc, Mutex,
     },
 };
-use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
 pub const MAX_QUERY_BYTES: usize = 200;
 const MAX_HISTORY: usize = 1_000;
@@ -162,27 +162,6 @@ pub fn next_token(counter: &AtomicU32) -> u32 {
             return token;
         }
     }
-}
-
-pub fn words(value: &str) -> Vec<String> {
-    let mut normalized = String::new();
-    for c in value
-        .nfkd()
-        .filter(|c| !is_combining_mark(*c))
-        .flat_map(char::to_lowercase)
-    {
-        match c {
-            '&' => normalized.push_str(" and "),
-            'ø' => normalized.push('o'),
-            'ł' => normalized.push('l'),
-            'æ' => normalized.push_str("ae"),
-            'œ' => normalized.push_str("oe"),
-            'ß' => normalized.push_str("ss"),
-            c if c.is_alphanumeric() => normalized.push(c),
-            _ => normalized.push(' '),
-        }
-    }
-    normalized.split_whitespace().map(str::to_owned).collect()
 }
 
 fn query_words(words: &[String]) -> Vec<String> {
