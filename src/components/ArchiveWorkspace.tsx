@@ -1,3 +1,4 @@
+import { wantedScheduleLabel, wantedScheduleStatus } from "../utils/wantedSchedule";
 import {
   Archive,
   ArrowCounterClockwise,
@@ -217,15 +218,15 @@ export function ArchiveWorkspace({
           </button>
         ) : tab === "wanted" ? (
           <label className="wanted-interval">
-            <span>Check rhythm</span>
+            <span>Preferred rhythm</span>
             <select
               value={wanted.intervalMinutes}
               onChange={(event) => void onSetWantedInterval(Number(event.target.value) as 0 | 15 | 30 | 60).catch(() => undefined)}
             >
               <option value={0}>Manual only</option>
-              <option value={15}>Every 15 minutes</option>
-              <option value={30}>Every 30 minutes</option>
-              <option value={60}>Every hour</option>
+              <option value={15}>Prefer 15 minutes</option>
+              <option value={30}>Prefer 30 minutes</option>
+              <option value={60}>Prefer hourly</option>
             </select>
           </label>
         ) : (
@@ -317,7 +318,7 @@ export function ArchiveWorkspace({
             <span className="is-available"><small>Smart Matches</small><strong>{availableCount}</strong><p>ready to review</p></span>
             <span><small>Still quiet</small><strong>{waitingCount}</strong><p>without a match</p></span>
             <span className="is-fulfilled"><small>Fulfilled shelf</small><strong>{fulfilledCount}</strong><p>quiet · saved · reversible</p></span>
-            <span className={online ? "is-online" : "is-offline"}><small>Background checks</small><strong>{online ? wanted.intervalMinutes ? "Live" : "Manual" : "Paused"}</strong><p>{online ? wanted.activeAlbumId ? "checking one album" : "network online" : "resume when reconnected"}</p></span>
+            <span className={online ? "is-online" : "is-offline"}><small>Background checks</small><strong>{wantedScheduleStatus(wanted, online)}</strong><p>{online ? wanted.activeAlbumId ? wanted.checkQueued ? "manual check queued" : "checking one album" : "network online" : "resume when reconnected"}</p></span>
           </section>
 
           {wantedError ? (
@@ -337,8 +338,8 @@ export function ArchiveWorkspace({
                 </button>
               ))}
             </div>
-            <p>{wanted.intervalMinutes ? `Checks run every ${wanted.intervalMinutes === 60 ? "hour" : `${wanted.intervalMinutes} minutes`} while connected.` : "Automatic checks are off."}</p>
           </div>
+          <p className="wanted-schedule" role="status">{wantedScheduleLabel(wanted, online)}</p>
 
           <div className="wanted-list" aria-live="polite">
             {!wantedReady ? (
@@ -347,6 +348,7 @@ export function ArchiveWorkspace({
               <div className="wanted-empty"><BellRinging size={30} weight="thin" /><strong>{wanted.albums.length ? "Nothing in this filter" : "Nothing wanted yet"}</strong><p>{filter === "fulfilled" ? "Verified Wanted downloads and Music Library matches will collect here." : wanted.albums.length ? "Choose another filter above." : "Use Add to Wanted from MusicBrainz album discovery."}</p></div>
             ) : visibleWanted.map((album) => {
               const checking = wanted.activeAlbumId === album.albumId;
+              const queued = checking && wanted.checkQueued;
               const available = album.matchingSourceCount > 0 && Boolean(album.bestSource);
               const downloadState = downloadStateByAlbumId.get(album.albumId);
               const downloadLabel = downloadState ? albumDownloadLabel(downloadState) : "Download best";
@@ -371,8 +373,8 @@ export function ArchiveWorkspace({
                     {!album.fulfilled ? <em><Gauge size={12} /> {wantedPreferencesLabel(album.preferences)}</em> : null}
                   </span>
                   <span className="wanted-availability">
-                    <small>{receipt ? "Completion receipt" : album.fulfilled ? "Archive state" : checking ? "Listening now" : available ? "Smart Match" : "Signal state"}</small>
-                    <strong>{receipt ? <><CheckCircle size={14} weight="fill" /> Verified download</> : album.fulfilled ? <><CheckCircle size={14} weight="fill" /> Owned</> : checking ? <><CircleNotch className="search-spinner" size={14} /> Checking</> : available ? `${album.matchingSourceCount} matching` : "Still quiet"}</strong>
+                    <small>{receipt ? "Completion receipt" : album.fulfilled ? "Archive state" : queued ? "Waiting to send" : checking ? "Listening now" : available ? "Smart Match" : "Signal state"}</small>
+                    <strong>{receipt ? <><CheckCircle size={14} weight="fill" /> Verified download</> : album.fulfilled ? <><CheckCircle size={14} weight="fill" /> Owned</> : checking ? <><CircleNotch className="search-spinner" size={14} /> {queued ? "Queued" : "Checking"}</> : available ? `${album.matchingSourceCount} matching` : "Still quiet"}</strong>
                     <p>{receipt ? `${receipt.trackCount} audio ${receipt.trackCount === 1 ? "track" : "tracks"} · ${receipt.soundcheck === "passed" ? "Soundcheck passed" : "size verified"}` : album.fulfilled ? `${album.ownedTrackCount ?? "—"} tracks in your library` : available ? `${album.sourceCount} total · ${album.readySourceCount} ready now` : album.sourceCount ? `${album.sourceCount} sources miss your profile` : album.error ?? "No matching folders returned"}</p>
                   </span>
                   <span className="wanted-quality">

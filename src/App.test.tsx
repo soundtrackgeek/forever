@@ -529,10 +529,10 @@ describe("Forever shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save match profile" }));
     expect(await screen.findByText("Lossless only · 10+ tracks")).toBeInTheDocument();
 
-    const rhythm = screen.getByRole("combobox", { name: "Check rhythm" });
+    const rhythm = screen.getByRole("combobox", { name: "Preferred rhythm" });
     fireEvent.change(rhythm, { target: { value: "15" } });
     await waitFor(() => expect(rhythm).toHaveValue("15"));
-    expect(await screen.findByText(/Checks run every 15 minutes/)).toBeInTheDocument();
+    expect(await screen.findByText(/Capacity: .*every 36 min at current list size/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: /Waiting/ }));
     const sonicHoliday = screen.getByText("A Sonic Holiday").closest("article") as HTMLElement;
@@ -992,17 +992,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.57 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.58 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Server excluded phrases now filter search, browse, and folder responses.",
+        "Wanted uses server-paced wishlist searches with adaptive backoff.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Completed uploads report measured speed without counting resumed bytes.",
+        "User searches, Signal Relay, Shelf Radar, and Wanted share one search budget.",
       ),
     ).toBeInTheDocument();
     expect(

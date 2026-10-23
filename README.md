@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.57` honors server-provided excluded phrases
-> in shared-file responses and reports measured upload speeds after completion.
+> **Status:** pre-alpha. Version `0.0.58` adds server-paced Wanted scheduling,
+> adaptive backoff, a shared search budget, and honest list-capacity estimates.
 
-If `0.0.16` is installed, download and run the latest `0.0.57` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.58` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -118,7 +118,8 @@ configuration and transfers.
   and Soulseek album-source reports, matched from the Archive's normalized
   artist, album, release-year, and track-count metadata
 - A separate **Wanted Signals** watchlist for albums that are still missing,
-  with 15-minute, 30-minute, hourly, or manual background checks, per-album
+  with preferred 15-minute, 30-minute, hourly, or manual rhythms, server-paced
+  wishlist checks, adaptive backoff, effective cadence estimates, and per-album
   pause/check/remove controls, in-app and Windows availability alerts, and
   configurable **Smart Match** profiles for format, minimum bitrate, and track
   count, including MP3-only matching and a reusable default for new watches
@@ -471,9 +472,41 @@ in the download folder remain untouched.
 ![Forever completed release needing attention](design/implementation/finish-line-0.0.30-attention.png)
 
 Choose **Add to Wanted** on a missing MusicBrainz album, then open **Archive →
-Wanted** to follow it. Forever serializes background checks while connected and
-groups returned audio by listener and remote folder without disturbing the
-visible Search workspace. Edit a row's **Smart Match profile** to prefer
+Wanted** to follow it. Automatic checks use Soulseek **WishlistSearch (103)**
+only after **WishlistInterval (104)** announces a positive interval in seconds.
+One album is checked per server interval; a zero interval disables automatic
+checks, and reconnecting waits for a fresh announcement. Forever never falls
+back to ordinary searches to bypass this limit. The first automatic check waits
+one announced interval; a changed interval is applied to the last wishlist send.
+These wire contracts follow the [Nicotine+ protocol documentation](https://nicotine-plus.org/doc/SLSKPROTOCOL.html#server-code-103).
+
+**Preferred rhythm** is a target for each album, not a promise. New and recently
+found albums use that target; consecutive completed checks without audio sources
+back off to **1 hour -> 6 hours -> 24 hours**. Finding sources resets the backoff.
+Failures and disconnects do not count as empty checks. Backoff survives restarts;
+legacy stores migrate without inventing missing search history. Paused and
+fulfilled albums consume no slots. Overdue albums are served by due time, with
+stable ordering so a large list rotates fairly.
+
+The Wanted toolbar shows estimated capacity at the current active list size,
+plus the earliest next slot. With 500 active albums and a 12-minute server
+interval, one rotation takes roughly **100 hours**, not 30 minutes. Quiet-watch
+backoff and competing searches can extend the interval; this is an estimate,
+not a deadline. Manual **Check now** remains available even when automatic
+checks are disabled, and shows when it is waiting to send.
+
+All outgoing search producers share a minimum **five-second gap**, with priority
+**user (including manual Wanted) -> Signal Relay -> Shelf Radar -> automatic Wanted**.
+This is Forever's conservative local policy, not a published ordinary-search
+server limit. Existing bounded producer queues retain work while waiting; stopped,
+closed, replaced, paused, or fulfilled queued checks are discarded. Response
+windows start on dispatch, so waiting does not consume search time. Reconnects
+clear queued work and require new server wishlist permission; missed slots never
+cause a catch-up burst. Sustained higher-priority traffic can delay background
+checks. Public-server interoperation has not been verified live.
+
+Forever groups returned audio by listener and remote folder without disturbing
+the visible Search workspace. Edit a row's **Smart Match profile** to prefer
 lossless, require lossless, require MP3, or accept any format, then optionally
 set minimum bitrate and track-count requirements. Forever suggests the track
 count from the earliest official MusicBrainz edition when available. Select

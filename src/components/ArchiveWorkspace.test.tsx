@@ -109,6 +109,9 @@ const wanted: WantedSnapshot = {
   intervalMinutes: 30,
   activeAlbumId: null,
   nextCheckAtMs: null,
+  wishlistIntervalSeconds: 720,
+  effectiveCadenceMinutes: 30,
+  checkQueued: false,
   updatedAtMs: 500,
 };
 

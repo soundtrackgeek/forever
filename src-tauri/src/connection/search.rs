@@ -13,7 +13,7 @@ const SEARCH_RESULT_LIMIT: usize = 5_000;
 const SEARCH_EVENT_BATCH_SIZE: usize = 200;
 const SEARCH_SESSION_LIMIT: usize = 8;
 const RELAY_SESSION_LIMIT: usize = 4;
-const RELAY_CLIENT_PREFIX: &str = "signal-relay:";
+pub const RELAY_CLIENT_PREFIX: &str = "signal-relay:";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,6 +89,7 @@ struct SearchRuntime {
     seen: HashSet<String>,
     peers: HashSet<String>,
     next_result_id: u64,
+    queued_at: Instant,
 }
 
 impl SearchRuntime {
@@ -99,6 +100,7 @@ impl SearchRuntime {
             seen: HashSet::new(),
             peers: HashSet::new(),
             next_result_id: 0,
+            queued_at: Instant::now(),
         }
     }
 
@@ -121,8 +123,17 @@ impl SearchRuntime {
         self.snapshot.clone()
     }
 
+    fn queue(&mut self, token: u32, client_id: String, query: String) -> SearchSnapshot {
+        self.start(token, client_id, query);
+        self.deadline = None;
+        self.snapshot.started_at_ms = None;
+        self.snapshot.message = "Queued for the shared search budget...".to_owned();
+        self.snapshot.clone()
+    }
+
     fn record(&mut self, response: SearchResponse) -> Vec<SearchResult> {
         if self.snapshot.state != SearchState::Searching
+            || self.deadline.is_none()
             || self.snapshot.token != Some(response.token)
         {
             return Vec::new();
@@ -273,12 +284,23 @@ impl SearchHub {
                 }
             }
             let mut runtime = SearchRuntime::new();
-            let snapshot = runtime.start(token, client_id, query);
+            let snapshot = runtime.queue(token, client_id, query);
             runtimes.insert(token, runtime);
             snapshot
         };
         self.emit("started", snapshot.clone(), Vec::new());
         Ok(snapshot)
+    }
+
+    pub fn start_pending(&self, relay: bool) -> Option<(u32, String)> {
+        let snapshot = take_pending(
+            &mut self.runtimes.lock().unwrap_or_else(|p| p.into_inner()),
+            relay,
+            Instant::now(),
+        )?;
+        let request = (snapshot.token?, snapshot.query.clone());
+        self.emit("started", snapshot, Vec::new());
+        Some(request)
     }
 
     pub fn record(&self, response: SearchResponse) {
@@ -437,6 +459,36 @@ impl SearchHub {
     }
 }
 
+fn take_pending(
+    runtimes: &mut HashMap<u32, SearchRuntime>,
+    relay: bool,
+    now: Instant,
+) -> Option<SearchSnapshot> {
+    let runtime = runtimes
+        .values_mut()
+        .filter(|runtime| {
+            runtime.snapshot.state == SearchState::Searching
+                && runtime.deadline.is_none()
+                && runtime.snapshot.client_id.starts_with(RELAY_CLIENT_PREFIX) == relay
+        })
+        .min_by_key(|runtime| runtime.queued_at)?;
+    runtime.deadline = Some(now + SEARCH_TIMEOUT);
+    runtime.snapshot.started_at_ms = Some(timestamp_ms());
+    runtime.snapshot.message = "Listening across the Soulseek network…".to_owned();
+    Some(runtime.snapshot.clone())
+}
+
+pub fn valid_client_id(client_id: &str) -> bool {
+    let suffix = client_id
+        .strip_prefix(RELAY_CLIENT_PREFIX)
+        .unwrap_or(client_id);
+    !suffix.is_empty()
+        && client_id.len() <= 128
+        && suffix
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
 fn timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -450,6 +502,63 @@ fn timestamp_ms() -> u64 {
 mod tests {
     use super::*;
     use crate::connection::protocol::SearchFile;
+
+    #[test]
+    fn queued_searches_wait_without_timing_out_and_cancelled_tokens_never_send() {
+        let now = Instant::now();
+        let mut runtimes = HashMap::new();
+        for (token, id) in [(1, "signal-relay:release-1"), (2, "user-2"), (3, "user-3")] {
+            let mut runtime = SearchRuntime::new();
+            runtime.queue(token, id.to_owned(), "query".to_owned());
+            runtime.queued_at = now + Duration::from_secs(u64::from(token));
+            assert!(runtime.record(response(token, "listener")).is_empty());
+            runtimes.insert(token, runtime);
+        }
+        runtimes
+            .get_mut(&2)
+            .unwrap()
+            .finish(SearchState::Stopped, "Cancelled".to_owned());
+        let sent_at = now + Duration::from_secs(300);
+        assert_eq!(
+            take_pending(&mut runtimes, false, sent_at).unwrap().token,
+            Some(3)
+        );
+        assert_eq!(runtimes[&3].deadline, Some(sent_at + SEARCH_TIMEOUT));
+        assert!(take_pending(&mut runtimes, false, sent_at).is_none());
+        assert_eq!(
+            take_pending(&mut runtimes, true, sent_at).unwrap().token,
+            Some(1)
+        );
+        assert_eq!(
+            runtimes
+                .get_mut(&3)
+                .unwrap()
+                .record(response(3, "listener"))
+                .len(),
+            1
+        );
+        assert!(runtimes
+            .get_mut(&2)
+            .unwrap()
+            .record(response(2, "listener"))
+            .is_empty());
+    }
+
+    #[test]
+    fn relay_session_ids_reach_the_relay_lane_without_accepting_arbitrary_colons() {
+        assert!(valid_client_id("signal-relay:release-123"));
+        assert!(valid_client_id("dial_1-2"));
+        for invalid in [
+            "signal-relay:",
+            "other:release",
+            "signal-relay:release:extra",
+            "a b",
+            "",
+        ] {
+            assert!(!valid_client_id(invalid));
+        }
+        assert!(!valid_client_id(&"a".repeat(129)));
+    }
 
     fn response(token: u32, username: &str) -> SearchResponse {
         SearchResponse {

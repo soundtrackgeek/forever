@@ -166,6 +166,9 @@ const previewSnapshot: WantedSnapshot = {
   intervalMinutes: 30,
   activeAlbumId: null,
   nextCheckAtMs: now + 7 * 60_000,
+  wishlistIntervalSeconds: 720,
+  effectiveCadenceMinutes: 30,
+  checkQueued: false,
   updatedAtMs: now,
 };
 
@@ -212,7 +215,7 @@ export function useWantedAlbums() {
   const native = isTauri();
   const [snapshot, setSnapshot] = useState<WantedSnapshot>(
     native
-      ? { albums: [], defaultPreferences: defaultWantedPreferences, intervalMinutes: 30, activeAlbumId: null, nextCheckAtMs: null, updatedAtMs: 0 }
+      ? { albums: [], defaultPreferences: defaultWantedPreferences, intervalMinutes: 30, activeAlbumId: null, nextCheckAtMs: null, wishlistIntervalSeconds: null, effectiveCadenceMinutes: null, checkQueued: false, updatedAtMs: 0 }
       : previewSnapshot,
   );
   const [ready, setReady] = useState(!native);
@@ -245,7 +248,13 @@ export function useWantedAlbums() {
       if (album.lastCheckedAtMs) knownChecks.current.set(album.albumId, album.lastCheckedAtMs);
     }
     initialized.current = true;
-    setSnapshot(next);
+    const activeCount = next.albums.filter((album) => !album.paused && !album.fulfilled).length;
+    setSnapshot(native ? next : {
+      ...next,
+      effectiveCadenceMinutes: next.intervalMinutes && activeCount
+        ? Math.max(next.intervalMinutes, Math.ceil(activeCount * (next.wishlistIntervalSeconds ?? 720) / 60))
+        : null,
+    });
   }, [native]);
 
   useEffect(() => {

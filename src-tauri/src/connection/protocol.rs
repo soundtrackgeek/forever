@@ -23,6 +23,8 @@ pub const CONNECT_TO_PEER_CODE: u32 = 18;
 pub const MESSAGE_USER_CODE: u32 = 22;
 pub const MESSAGE_ACKED_CODE: u32 = 23;
 pub const FILE_SEARCH_CODE: u32 = 26;
+pub const WISHLIST_SEARCH_CODE: u32 = 103;
+pub const WISHLIST_INTERVAL_CODE: u32 = 104;
 pub const SET_STATUS_CODE: u32 = 28;
 pub const SERVER_PING_CODE: u32 = 32;
 pub const SHARED_COUNTS_CODE: u32 = 35;
@@ -444,6 +446,21 @@ pub fn file_search_frame(token: u32, query: &str) -> Vec<u8> {
     push_u32(&mut payload, token);
     push_string(&mut payload, query);
     encode_message(FILE_SEARCH_CODE, &payload)
+}
+
+pub fn wishlist_search_frame(token: u32, query: &str) -> Vec<u8> {
+    let mut payload = Vec::new();
+    push_u32(&mut payload, token);
+    push_string(&mut payload, query);
+    encode_message(WISHLIST_SEARCH_CODE, &payload)
+}
+
+pub fn parse_wishlist_interval(frame: &Frame) -> Result<u32, ProtocolError> {
+    expect_code(frame, WISHLIST_INTERVAL_CODE)?;
+    if frame.payload.len() != 4 {
+        return Err(ProtocolError::InvalidLength(frame.payload.len()));
+    }
+    PayloadReader::new(&frame.payload).read_u32()
 }
 
 pub fn shared_file_list_request_frame() -> Vec<u8> {
@@ -2002,6 +2019,48 @@ pub enum ProtocolError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wishlist_frames_use_code_103_and_interval_is_exact_u32_seconds() {
+        let query = "Björk Debut";
+        let frame = wishlist_search_frame(0x12345678, query);
+        assert_eq!(u32::from_le_bytes(frame[4..8].try_into().unwrap()), 103);
+        assert_eq!(
+            u32::from_le_bytes(frame[8..12].try_into().unwrap()),
+            0x12345678
+        );
+        assert_eq!(
+            u32::from_le_bytes(frame[12..16].try_into().unwrap()) as usize,
+            query.len()
+        );
+        assert_eq!(&frame[16..], query.as_bytes());
+        assert_eq!(
+            u32::from_le_bytes(frame[..4].try_into().unwrap()) as usize,
+            frame.len() - 4
+        );
+        for seconds in [0_u32, 120, 720, u32::MAX] {
+            assert_eq!(
+                parse_wishlist_interval(&Frame {
+                    code: 104,
+                    payload: seconds.to_le_bytes().to_vec()
+                })
+                .unwrap(),
+                seconds
+            );
+        }
+        for length in [0, 3, 5, 100] {
+            assert!(parse_wishlist_interval(&Frame {
+                code: 104,
+                payload: vec![0; length]
+            })
+            .is_err());
+        }
+        assert!(parse_wishlist_interval(&Frame {
+            code: 103,
+            payload: vec![0; 4]
+        })
+        .is_err());
+    }
     use flate2::{write::ZlibEncoder, Compression};
     use std::io::Write;
 

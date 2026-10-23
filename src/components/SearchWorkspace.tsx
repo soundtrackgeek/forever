@@ -234,6 +234,7 @@ export function SearchWorkspace({
   }, [sessionId]);
   const online = connection.state === "online";
   const searching = search.state === "searching";
+  const queued = searching && search.startedAtMs === null;
   const preview = search.message.startsWith("Preview data");
   const deferredResults = useDeferredValue(results);
   const losslessCount = results.filter((result) =>
@@ -720,9 +721,11 @@ export function SearchWorkspace({
               ) : (
                 <MagnifyingGlass size={28} weight="light" />
               )}
-              <h3>{searching ? "Listening for responses" : "No signals found"}</h3>
+              <h3>{queued ? "Waiting to search" : searching ? "Listening for responses" : "No signals found"}</h3>
               <p>
-                {searching
+                {queued
+                  ? search.message
+                  : searching
                   ? "Results will appear here as people respond."
                   : search.state === "idle"
                     ? "Search for an artist, album, track, or filename."

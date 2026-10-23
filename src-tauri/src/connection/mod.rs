@@ -12,6 +12,7 @@ mod radar;
 mod reachability;
 mod rooms;
 mod search;
+mod search_governor;
 mod service;
 mod settings;
 mod shares;

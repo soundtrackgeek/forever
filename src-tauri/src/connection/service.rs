@@ -30,32 +30,34 @@ use super::{
         parse_transfer_request, parse_transfer_response, parse_upload_denied,
         parse_user_info_response, parse_user_interests, parse_user_joined_room,
         parse_user_left_room, parse_user_stats, parse_user_status, parse_watch_user,
-        peer_init_frame, pierce_firewall_frame, place_in_queue_request_frame,
-        place_in_queue_response_frame, queue_upload_frame, read_distributed_frame, read_frame,
-        read_peer_frame, read_peer_init, read_profile_frame, room_list_frame, say_chatroom_frame,
-        send_upload_speed_frame, server_ping_frame, set_online_frame, set_wait_port_frame,
-        shared_counts_frame, shared_file_list_request_frame, shared_file_list_response_frame,
-        transfer_request_frame, transfer_response_frame, unwatch_user_frame, upload_denied_frame,
-        user_info_request_frame, user_info_response_frame, user_interests_frame, user_stats_frame,
-        watch_user_frame, write_raw_frame, ConnectToPeer, DistributedFrame, DistributedSearch,
-        Frame, LoginResponse, ParentCandidate, PeerAddress, PeerInit, ProtocolError,
-        CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE, DISTRIBUTED_BRANCH_LEVEL_CODE,
-        DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_EMBEDDED_CODE, DISTRIBUTED_SEARCH_CODE,
-        EMBEDDED_MESSAGE_CODE, EXCLUDED_SEARCH_PHRASES_CODE, FILE_SEARCH_CODE,
-        FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE,
-        GET_PEER_ADDRESS_CODE, JOIN_ROOM_CODE, LEAVE_ROOM_CODE, MESSAGE_USER_CODE,
-        PARENT_MIN_SPEED_CODE, PARENT_SPEED_RATIO_CODE, PLACE_IN_QUEUE_REQUEST_CODE,
-        PLACE_IN_QUEUE_RESPONSE_CODE, POSSIBLE_PARENTS_CODE, QUEUE_UPLOAD_CODE, RELOGGED_CODE,
-        RESET_DISTRIBUTED_CODE, ROOM_LIST_CODE, SAY_CHATROOM_CODE, SHARED_FILE_LIST_REQUEST_CODE,
+        parse_wishlist_interval, peer_init_frame, pierce_firewall_frame,
+        place_in_queue_request_frame, place_in_queue_response_frame, queue_upload_frame,
+        read_distributed_frame, read_frame, read_peer_frame, read_peer_init, read_profile_frame,
+        room_list_frame, say_chatroom_frame, send_upload_speed_frame, server_ping_frame,
+        set_online_frame, set_wait_port_frame, shared_counts_frame, shared_file_list_request_frame,
+        shared_file_list_response_frame, transfer_request_frame, transfer_response_frame,
+        unwatch_user_frame, upload_denied_frame, user_info_request_frame, user_info_response_frame,
+        user_interests_frame, user_stats_frame, watch_user_frame, wishlist_search_frame,
+        write_raw_frame, ConnectToPeer, DistributedFrame, DistributedSearch, Frame, LoginResponse,
+        ParentCandidate, PeerAddress, PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE,
+        CONNECT_TO_PEER_CODE, DISTRIBUTED_BRANCH_LEVEL_CODE, DISTRIBUTED_BRANCH_ROOT_CODE,
+        DISTRIBUTED_EMBEDDED_CODE, DISTRIBUTED_SEARCH_CODE, EMBEDDED_MESSAGE_CODE,
+        EXCLUDED_SEARCH_PHRASES_CODE, FILE_SEARCH_CODE, FILE_SEARCH_RESPONSE_CODE,
+        FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE, GET_PEER_ADDRESS_CODE,
+        JOIN_ROOM_CODE, LEAVE_ROOM_CODE, MESSAGE_USER_CODE, PARENT_MIN_SPEED_CODE,
+        PARENT_SPEED_RATIO_CODE, PLACE_IN_QUEUE_REQUEST_CODE, PLACE_IN_QUEUE_RESPONSE_CODE,
+        POSSIBLE_PARENTS_CODE, QUEUE_UPLOAD_CODE, RELOGGED_CODE, RESET_DISTRIBUTED_CODE,
+        ROOM_LIST_CODE, SAY_CHATROOM_CODE, SHARED_FILE_LIST_REQUEST_CODE,
         SHARED_FILE_LIST_RESPONSE_CODE, TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE,
         UPLOAD_FAILED_CODE, USER_INFO_REQUEST_CODE, USER_INFO_RESPONSE_CODE, USER_INTERESTS_CODE,
         USER_JOINED_ROOM_CODE, USER_LEFT_ROOM_CODE, USER_STATS_CODE, USER_STATUS_CODE,
-        WATCH_USER_CODE,
+        WATCH_USER_CODE, WISHLIST_INTERVAL_CODE,
     },
     radar::{RadarAlbumRequest, RadarError, RadarHub, RadarSnapshot},
     reachability::{bind_listener, DirectStatus, ReachabilityHub, ReachabilitySnapshot},
     rooms::{valid_room_message, valid_room_name, RoomsError, RoomsHub, RoomsSnapshot},
-    search::{SearchHub, SearchSnapshot, SearchState},
+    search::{valid_client_id, SearchHub, SearchSnapshot, SearchState},
+    search_governor::{SearchGovernor, SearchLane},
     settings::{ConnectionProfile, SettingsStore},
     shares::{
         ShareFolderSnapshot, ShareSearchSnapshot, SharesError, SharesHub, SharesTicket,
@@ -334,10 +336,7 @@ impl DistributedCoordinator {
 }
 
 enum ConnectionCommand {
-    StartSearch {
-        token: u32,
-        query: String,
-    },
+    SearchesChanged,
     SendPrivateMessage {
         id: String,
         username: String,
@@ -425,6 +424,7 @@ pub struct ConnectionManager {
     next_folder_token: Arc<AtomicU32>,
     next_connection_token: Arc<AtomicU32>,
     search: SearchHub,
+    search_governor: SearchGovernor,
     wanted: WantedHub,
     radar: RadarHub,
     folders: FolderHub,
@@ -484,7 +484,8 @@ impl ConnectionManager {
         let people = PeopleHub::new(app.clone(), store_files[3].clone())?;
         let messages = MessagesHub::new(app.clone(), store_files[4].clone())?;
         let rooms = RoomsHub::new(app.clone(), store_files[5].clone())?;
-        let wanted = WantedHub::new(app.clone(), store_files[6].clone())?;
+        let search_governor = SearchGovernor::default();
+        let wanted = WantedHub::new(app.clone(), store_files[6].clone(), search_governor.clone())?;
         let radar = RadarHub::new(app.clone());
 
         Ok(Self {
@@ -506,6 +507,7 @@ impl ConnectionManager {
                 (timestamp_ms() as u32).wrapping_add(0x4000).max(1),
             )),
             search,
+            search_governor,
             wanted,
             radar,
             folders: FolderHub::default(),
@@ -780,11 +782,8 @@ impl ConnectionManager {
         if token == 0 {
             token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
         }
-        let query = self.wanted.start_manual(album_id, token)?;
-        if sender
-            .send(ConnectionCommand::StartSearch { token, query })
-            .is_err()
-        {
+        self.wanted.start_manual(album_id, token)?;
+        if sender.send(ConnectionCommand::SearchesChanged).is_err() {
             self.wanted
                 .fail_active("The Soulseek connection changed before this check could start.");
             return Err(ConnectionServiceError::WantedUnavailable);
@@ -1588,12 +1587,7 @@ impl ConnectionManager {
                 "Search queries can be at most {MAX_SEARCH_QUERY_BYTES} bytes."
             )));
         }
-        if client_id.is_empty()
-            || client_id.len() > 64
-            || !client_id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-        {
+        if !valid_client_id(&client_id) {
             return Err(ConnectionServiceError::InvalidSearch(
                 "The search session identifier is invalid.".to_owned(),
             ));
@@ -1617,10 +1611,7 @@ impl ConnectionManager {
             .search
             .start(token, client_id.clone(), query.clone())
             .map_err(ConnectionServiceError::InvalidSearch)?;
-        if sender
-            .send(ConnectionCommand::StartSearch { token, query })
-            .is_err()
-        {
+        if sender.send(ConnectionCommand::SearchesChanged).is_err() {
             self.search.fail(
                 &client_id,
                 "The Soulseek connection changed before the search could start.",
@@ -1844,6 +1835,7 @@ impl ConnectionManager {
             self.people.connection_lost();
             self.distributed.offline();
             self.reachability.offline();
+            self.search_governor.set_online(false);
             self.wanted.connection_lost();
             self.radar.connection_lost();
             self.search
@@ -2037,6 +2029,8 @@ impl ConnectionManager {
             "Looking for a global-search relay.",
         );
 
+        self.search_governor.set_online(true);
+        self.wanted.publish();
         let connected_at_ms = timestamp_ms();
         self.diagnostics.record(
             "info",
@@ -2071,15 +2065,11 @@ impl ConnectionManager {
 
         let mut keepalive = tokio::time::interval(KEEPALIVE_INTERVAL);
         let mut search_tick = tokio::time::interval(Duration::from_millis(250));
-        let mut wanted_tick = tokio::time::interval(Duration::from_secs(5));
-        let mut radar_tick = tokio::time::interval(Duration::from_millis(500));
         let mut download_retry_tick = tokio::time::interval(Duration::from_secs(1));
         let mut network_tick = tokio::time::interval(Duration::from_secs(1));
         let peer_limit = Arc::new(Semaphore::new(MAX_CONCURRENT_PEERS));
         keepalive.tick().await;
         search_tick.tick().await;
-        wanted_tick.tick().await;
-        radar_tick.tick().await;
         download_retry_tick.tick().await;
         loop {
             tokio::select! {
@@ -2116,7 +2106,18 @@ impl ConnectionManager {
                             "relogged",
                         ));
                     }
-                    if frame.code == EXCLUDED_SEARCH_PHRASES_CODE {
+                    if frame.code == WISHLIST_INTERVAL_CODE {
+                        match parse_wishlist_interval(&frame) {
+                            Ok(seconds) => {
+                                self.search_governor.set_wishlist_interval(seconds, Instant::now());
+                                self.wanted.publish();
+                            }
+                            Err(_) => self.diagnostics.record(
+                                "warning", "wishlist_interval_invalid",
+                                "The server sent an invalid wishlist interval; the last valid interval remains active.",
+                            ),
+                        }
+                    } else if frame.code == EXCLUDED_SEARCH_PHRASES_CODE {
                         match parse_excluded_search_phrases(&frame) {
                             Ok(phrases) => self.local_shares.set_excluded_phrases(phrases),
                             Err(_) => self.diagnostics.record(
@@ -2494,16 +2495,9 @@ impl ConnectionManager {
                 }
                 command = command_receiver.recv() => {
                     match command {
-                        Some(ConnectionCommand::StartSearch { token, query }) => {
-                            write_raw_frame(&mut server_writer, &file_search_frame(token, &query))
-                                .await
-                                .map_err(|error| {
-                                    ConnectionFailure::retryable(
-                                        format!("The live search could not be sent: {error}"),
-                                        "search_send_failed",
-                                    )
-                                })?;
-                        }
+                        // Producers queue in their bounded hubs. The shared tick is
+                        // the only place that admits and sends network searches.
+                        Some(ConnectionCommand::SearchesChanged) => {}
                         Some(ConnectionCommand::SendPrivateMessage { id, username, message }) => {
                             let frame = match message_user_frame(&username, &message) {
                                 Ok(frame) => frame,
@@ -2810,34 +2804,55 @@ impl ConnectionManager {
                     self.search.expire_if_due();
                     self.wanted.expire_if_due();
                     self.radar.expire_if_due();
+                    self.dispatch_search(&mut server_writer).await?;
                 }
-                _ = radar_tick.tick() => {
-                    let mut token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
-                    if token == 0 {
-                        token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
-                    }
-                    if let Some((token, query)) = self.radar.start_next(token) {
-                        if let Err(error) = write_raw_frame(&mut server_writer, &file_search_frame(token, &query)).await {
-                            self.radar.fail_active(format!("The Shelf Radar search could not be sent: {error}"));
-                        }
-                    }
-                }
-                _ = wanted_tick.tick() => {
-                    let mut token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
-                    if token == 0 {
-                        token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
-                    }
-                    if let Some(query) = self.wanted.start_due(token) {
-                        write_raw_frame(&mut server_writer, &file_search_frame(token, &query))
-                            .await
-                            .map_err(|error| ConnectionFailure::retryable(
-                                format!("The Wanted check could not be sent: {error}"),
-                                "wanted_search_send_failed",
-                            ))?;
-                    }
-                }
+
             }
         }
+    }
+
+    async fn dispatch_search<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<(), ConnectionFailure> {
+        let request = self
+            .search_governor
+            .take_next(Instant::now(), |lane| match lane {
+                SearchLane::User => self
+                    .search
+                    .start_pending(false)
+                    .or_else(|| self.wanted.start_pending()),
+                SearchLane::Relay => self.search.start_pending(true),
+                SearchLane::Radar | SearchLane::Wanted => {
+                    let mut token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
+                    if token == 0 {
+                        token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
+                    }
+                    if lane == SearchLane::Radar {
+                        self.radar.start_next(token)
+                    } else {
+                        self.wanted.start_due(token).map(|query| (token, query))
+                    }
+                }
+            });
+        if let Some((lane, (token, query))) = request {
+            let frame = if lane == SearchLane::Wanted {
+                wishlist_search_frame(token, &query)
+            } else {
+                file_search_frame(token, &query)
+            };
+            if let Err(error) = write_raw_frame(writer, &frame).await {
+                let message = format!("The scheduled search could not be sent: {error}");
+                if lane == SearchLane::Radar {
+                    self.radar.fail_active(&message);
+                }
+                return Err(ConnectionFailure::retryable(message, "search_send_failed"));
+            }
+            // A slow socket write must not make the next send immediately due.
+            self.search_governor.sent(lane, Instant::now());
+            self.wanted.publish();
+        }
+        Ok(())
     }
 
     async fn wait_to_retry(
@@ -2882,6 +2897,7 @@ impl ConnectionManager {
         self.people.connection_lost();
         self.distributed.offline();
         self.reachability.offline();
+        self.search_governor.set_online(false);
         self.wanted.connection_lost();
         self.radar.connection_lost();
         if let Some(active) = self

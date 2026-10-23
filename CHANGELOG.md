@@ -5,6 +5,33 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.58] - 2026-10-23
+
+### Added
+
+- Server-paced Wanted checks using WishlistSearch (103) and strict parsing of
+  WishlistInterval (104). Unknown or zero intervals prevent automatic searches;
+  interval updates, reconnects, and delayed ticks cannot create catch-up bursts.
+- One shared five-second search budget with user, Signal Relay, Shelf Radar, and
+  Wanted priority lanes. Queued requests retain full response windows and can
+  be cancelled or replaced before dispatch.
+- Persisted Wanted backoff after empty checks (1 h, 6 h, then 24 h), resetting
+  when sources return. Due-time ordering keeps large watchlists rotating fairly.
+- Effective cadence and earliest-slot estimates, explicit waiting/disabled
+  states, and preferred-rhythm wording instead of guaranteed per-album timing.
+
+### Fixed
+
+- Accept Signal Relay's namespaced session IDs so automatic rescue searches
+  reach their intended bounded lane.
+
+### Changed
+
+- Migrate Wanted stores to schema 3, preserving existing watch history without
+  inventing misses. Mark review item 5 complete and align release versions.
+- Add protocol, mixed-producer pacing, queue cancellation, 500-album rotation,
+  backoff, migration, and scheduling-status regression coverage.
+
 ## [0.0.57] - 2026-10-23
 
 ### Fixed

@@ -1,4 +1,5 @@
 use super::protocol::SearchResponse;
+use super::search_governor::{SearchGovernor, SearchLane, SEARCH_SPACING};
 use super::store::{self, DecodeError, JsonFile};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -10,10 +11,9 @@ use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
 pub const WANTED_EVENT: &str = "forever://wanted";
-const STORE_VERSION: u32 = 2;
+const STORE_VERSION: u32 = 3;
 const DEFAULT_INTERVAL_MINUTES: u32 = 30;
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
-const SEARCH_COOLDOWN: Duration = Duration::from_secs(5);
 const MAX_WANTED_ALBUMS: usize = 500;
 const MAX_BULK_WANTED_ALBUMS: usize = 100;
 const AUDIO_EXTENSIONS: &[&str] = &[
@@ -147,6 +147,10 @@ pub struct WantedAlbum {
     pub preferences: WantedPreferences,
     pub added_at_ms: u64,
     pub last_checked_at_ms: Option<u64>,
+    #[serde(default)]
+    pub consecutive_misses: u32,
+    #[serde(default)]
+    pub last_found_at_ms: Option<u64>,
     pub source_count: u32,
     #[serde(default)]
     pub matching_source_count: u32,
@@ -172,6 +176,9 @@ pub struct WantedSnapshot {
     pub interval_minutes: u32,
     pub active_album_id: Option<String>,
     pub next_check_at_ms: Option<u64>,
+    pub wishlist_interval_seconds: Option<u32>,
+    pub effective_cadence_minutes: Option<u64>,
+    pub check_queued: bool,
     pub updated_at_ms: u64,
 }
 
@@ -212,14 +219,35 @@ struct SourceAggregate {
 struct ActiveSearch {
     album_id: String,
     token: u32,
-    deadline: Instant,
+    deadline: Option<Instant>,
+    query: String,
     sources: HashMap<String, SourceAggregate>,
 }
 
 #[derive(Default)]
 struct WantedRuntime {
     active: Option<ActiveSearch>,
-    next_allowed_at: Option<Instant>,
+}
+
+impl WantedRuntime {
+    fn start_pending(&mut self, store: &WantedStore, now: Instant) -> Option<(u32, String)> {
+        let valid = self.active.as_ref().is_some_and(|active| {
+            store
+                .albums
+                .iter()
+                .any(|album| album.album_id == active.album_id && !album.paused && !album.fulfilled)
+        });
+        if !valid {
+            self.active = None;
+            return None;
+        }
+        let active = self
+            .active
+            .as_mut()
+            .filter(|active| active.deadline.is_none())?;
+        active.deadline = Some(now + SEARCH_TIMEOUT);
+        Some((active.token, active.query.clone()))
+    }
 }
 
 #[derive(Clone)]
@@ -228,12 +256,18 @@ pub struct WantedHub {
     path: JsonFile,
     store: Arc<RwLock<WantedStore>>,
     runtime: Arc<Mutex<WantedRuntime>>,
+    governor: SearchGovernor,
 }
 
 impl WantedHub {
-    pub fn new(app: AppHandle, path: JsonFile) -> Result<Self, WantedError> {
+    pub fn new(
+        app: AppHandle,
+        path: JsonFile,
+        governor: SearchGovernor,
+    ) -> Result<Self, WantedError> {
         Ok(Self {
             app,
+            governor,
             path: path.clone(),
             store: Arc::new(RwLock::new(load_store(&path)?)),
             runtime: Arc::new(Mutex::new(WantedRuntime::default())),
@@ -241,19 +275,30 @@ impl WantedHub {
     }
 
     pub fn snapshot(&self) -> WantedSnapshot {
-        let active_album_id = self
-            .runtime
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        let runtime = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
+        let active_album_id = runtime
             .active
             .as_ref()
             .map(|active| active.album_id.clone());
+        let check_queued = runtime
+            .active
+            .as_ref()
+            .is_some_and(|active| active.deadline.is_none());
+        let active_deadline = runtime.active.as_ref().and_then(|active| active.deadline);
+        drop(runtime);
         let store = self
             .store
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let now = timestamp_ms();
-        let next_check_at_ms = next_check_at(&store, now);
+        let instant = Instant::now();
+        let wishlist_interval_seconds = self.governor.wishlist_seconds();
+        let slot = self.governor.next_slot(SearchLane::Wanted, instant);
+        let next_check_at_ms = next_check_at(&store, now).zip(slot).map(|(due, slot)| {
+            let slot = slot.max(active_deadline.unwrap_or(instant));
+            due.max(now.saturating_add(slot.saturating_duration_since(instant).as_millis() as u64))
+        });
+        let effective_cadence_minutes = effective_cadence(&store, wishlist_interval_seconds);
         let mut albums = store.albums.clone();
         albums.sort_by(|left, right| {
             left.fulfilled
@@ -269,6 +314,9 @@ impl WantedHub {
             interval_minutes: store.interval_minutes,
             active_album_id,
             next_check_at_ms,
+            wishlist_interval_seconds,
+            effective_cadence_minutes,
+            check_queued,
             updated_at_ms: now,
         }
     }
@@ -314,6 +362,8 @@ impl WantedHub {
                 preferences,
                 added_at_ms: timestamp_ms(),
                 last_checked_at_ms: None,
+                consecutive_misses: 0,
+                last_found_at_ms: None,
                 source_count: 0,
                 matching_source_count: 0,
                 ready_source_count: 0,
@@ -502,6 +552,8 @@ impl WantedHub {
             .ok_or(WantedError::AlbumNotFound)?;
         album.preferences = preferences;
         album.last_checked_at_ms = None;
+        album.consecutive_misses = 0;
+        album.last_found_at_ms = None;
         album.matching_source_count = 0;
         album.new_source_count = 0;
         album.best_format = None;
@@ -579,6 +631,8 @@ impl WantedHub {
                     album.new_source_count = 0;
                 } else {
                     album.last_checked_at_ms = None;
+                    album.consecutive_misses = 0;
+                    album.last_found_at_ms = None;
                 }
                 changed = true;
             }
@@ -621,19 +675,7 @@ impl WantedHub {
                 .store
                 .read()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if store.interval_minutes == 0 {
-                return None;
-            }
-            store
-                .albums
-                .iter()
-                .filter(|album| {
-                    !album.paused
-                        && !album.fulfilled
-                        && album_due(album, store.interval_minutes, now)
-                })
-                .min_by_key(|album| album.last_checked_at_ms.unwrap_or(0))
-                .map(|album| album.album_id.clone())
+            select_due(&store, now).map(|album| album.album_id.clone())
         }?;
         self.start(&album_id, token, false).ok()
     }
@@ -645,13 +687,6 @@ impl WantedHub {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if runtime.active.is_some() {
             return Err(WantedError::CheckInProgress);
-        }
-        if !force
-            && runtime
-                .next_allowed_at
-                .is_some_and(|next_allowed| Instant::now() < next_allowed)
-        {
-            return Err(WantedError::RateLimited);
         }
         let query = {
             let store = self
@@ -674,12 +709,28 @@ impl WantedHub {
         runtime.active = Some(ActiveSearch {
             album_id: album_id.to_owned(),
             token,
-            deadline: Instant::now() + SEARCH_TIMEOUT,
+            deadline: (!force).then(|| Instant::now() + SEARCH_TIMEOUT),
+            query: query.clone(),
             sources: HashMap::new(),
         });
         drop(runtime);
         self.publish();
         Ok(query)
+    }
+
+    pub fn start_pending(&self) -> Option<(u32, String)> {
+        let mut runtime = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
+        let had_active = runtime.active.is_some();
+        let request = runtime.start_pending(
+            &self.store.read().unwrap_or_else(|p| p.into_inner()),
+            Instant::now(),
+        );
+        let changed = request.is_some() || had_active != runtime.active.is_some();
+        drop(runtime);
+        if changed {
+            self.publish();
+        }
+        request
     }
 
     pub fn record(&self, response: &SearchResponse) {
@@ -690,7 +741,7 @@ impl WantedHub {
         let Some(active) = runtime
             .active
             .as_mut()
-            .filter(|active| active.token == response.token)
+            .filter(|active| active.token == response.token && active.deadline.is_some())
         else {
             return;
         };
@@ -742,12 +793,11 @@ impl WantedHub {
                 .runtime
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if runtime
-                .active
-                .as_ref()
-                .is_some_and(|active| Instant::now() >= active.deadline)
-            {
-                runtime.next_allowed_at = Some(Instant::now() + SEARCH_COOLDOWN);
+            if runtime.active.as_ref().is_some_and(|active| {
+                active
+                    .deadline
+                    .is_some_and(|deadline| Instant::now() >= deadline)
+            }) {
                 runtime.active.take()
             } else {
                 None
@@ -825,7 +875,7 @@ impl WantedHub {
             album.best_size_bytes = summary.best_size_bytes;
             album.best_speed_bytes_per_second = summary.best_speed_bytes_per_second;
             album.best_source = summary.best_source;
-            album.last_checked_at_ms = Some(timestamp_ms());
+            record_check_outcome(album, summary.source_count, timestamp_ms());
             album.error = None;
             album.source_fingerprints = summary.source_fingerprints;
         }
@@ -842,7 +892,7 @@ impl WantedHub {
         Ok(())
     }
 
-    fn publish(&self) {
+    pub fn publish(&self) {
         let _ = self.app.emit(WANTED_EVENT, self.snapshot());
     }
 }
@@ -1065,29 +1115,98 @@ fn fulfill_downloaded_in_store(
     changed
 }
 
+// Quiet watches back off after completed, empty checks only. A failed send or
+// interrupted session never counts as evidence that an album is unavailable.
+fn record_check_outcome(album: &mut WantedAlbum, sources: u32, now: u64) {
+    album.last_checked_at_ms = Some(now);
+    if sources > 0 {
+        album.consecutive_misses = 0;
+        album.last_found_at_ms = Some(now);
+    } else {
+        album.consecutive_misses = album.consecutive_misses.saturating_add(1);
+    }
+}
+
+fn album_interval_minutes(album: &WantedAlbum, base: u32) -> u64 {
+    let backoff = match album.consecutive_misses {
+        0 => u64::from(base),
+        1 => 60,
+        2 => 6 * 60,
+        _ => 24 * 60,
+    };
+    u64::from(base).max(backoff)
+}
+
+fn album_due_at(album: &WantedAlbum, interval_minutes: u32) -> u64 {
+    album
+        .last_checked_at_ms
+        .map_or(album.added_at_ms, |checked| {
+            checked.saturating_add(album_interval_minutes(album, interval_minutes) * 60_000)
+        })
+}
+
+fn select_due(store: &WantedStore, now: u64) -> Option<&WantedAlbum> {
+    if store.interval_minutes == 0 {
+        return None;
+    }
+    store
+        .albums
+        .iter()
+        .filter(|album| {
+            !album.paused && !album.fulfilled && album_due(album, store.interval_minutes, now)
+        })
+        .min_by_key(|album| {
+            (
+                album_due_at(album, store.interval_minutes),
+                album.added_at_ms,
+                album.album_id.as_str(),
+            )
+        })
+}
+
 fn next_check_at(store: &WantedStore, now: u64) -> Option<u64> {
     if store.interval_minutes == 0 {
         return None;
     }
-    let interval_ms = u64::from(store.interval_minutes) * 60_000;
     store
         .albums
         .iter()
         .filter(|album| !album.paused && !album.fulfilled)
-        .map(|album| {
-            album
-                .last_checked_at_ms
-                .map(|checked| checked.saturating_add(interval_ms))
-                .unwrap_or(now)
-        })
+        .map(|album| album_due_at(album, store.interval_minutes).max(now))
         .min()
 }
 
 fn album_due(album: &WantedAlbum, interval_minutes: u32, now: u64) -> bool {
-    album
-        .last_checked_at_ms
-        .map(|checked| now >= checked.saturating_add(u64::from(interval_minutes) * 60_000))
-        .unwrap_or(true)
+    now >= album_due_at(album, interval_minutes)
+}
+
+fn effective_cadence(store: &WantedStore, server_seconds: Option<u32>) -> Option<u64> {
+    if store.interval_minutes == 0 {
+        return None;
+    }
+    let seconds = u64::from(server_seconds.filter(|seconds| *seconds > 0)?);
+    let active = store
+        .albums
+        .iter()
+        .filter(|album| !album.paused && !album.fulfilled)
+        .collect::<Vec<_>>();
+    if active.is_empty() {
+        return None;
+    }
+    let rotation = (active.len() as u64
+        * seconds
+            .max(SEARCH_SPACING.as_secs())
+            .max(SEARCH_TIMEOUT.as_secs()))
+    .div_ceil(60);
+    // The fastest watch's cadence is still limited by one whole-list rotation.
+    Some(
+        rotation.max(
+            active
+                .iter()
+                .map(|album| album_interval_minutes(album, store.interval_minutes))
+                .min()?,
+        ),
+    )
 }
 
 fn validate_request(mut request: WantedAlbumRequest) -> Result<WantedAlbumRequest, WantedError> {
@@ -1135,6 +1254,8 @@ fn reset_for_watch(album: &mut WantedAlbum, added_at_ms: u64) {
     album.watch_despite_ownership = true;
     album.added_at_ms = added_at_ms;
     album.last_checked_at_ms = None;
+    album.consecutive_misses = 0;
+    album.last_found_at_ms = None;
     album.source_count = 0;
     album.matching_source_count = 0;
     album.ready_source_count = 0;
@@ -1217,6 +1338,8 @@ fn merge_bulk_requests(
                 preferences: album_preferences,
                 added_at_ms,
                 last_checked_at_ms: None,
+                consecutive_misses: 0,
+                last_found_at_ms: None,
                 source_count: 0,
                 matching_source_count: 0,
                 ready_source_count: 0,
@@ -1263,7 +1386,12 @@ fn load_store(path: &JsonFile) -> Result<WantedStore, WantedError> {
 }
 
 fn decode_store(bytes: &[u8]) -> Result<WantedStore, DecodeError> {
-    let store: WantedStore = store::decode(bytes, STORE_VERSION, None, &[(1, migrate_v1_to_v2)])?;
+    let store: WantedStore = store::decode(
+        bytes,
+        STORE_VERSION,
+        None,
+        &[(1, migrate_v1_to_v2), (2, migrate_v2_to_v3)],
+    )?;
     Ok(store)
 }
 
@@ -1271,6 +1399,17 @@ fn decode_store(bytes: &[u8]) -> Result<WantedStore, DecodeError> {
 fn migrate_v1_to_v2(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
     let mut store: WantedStore = serde_json::from_value(value)?;
     store.version = 2;
+    Ok(serde_json::to_value(store)?)
+}
+
+fn migrate_v2_to_v3(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: WantedStore = serde_json::from_value(value)?;
+    store.version = 3;
+    for album in &mut store.albums {
+        album.last_found_at_ms = (album.source_count > 0)
+            .then_some(album.last_checked_at_ms)
+            .flatten();
+    }
     Ok(serde_json::to_value(store)?)
 }
 
@@ -1295,8 +1434,6 @@ pub enum WantedError {
     AlbumFulfilled,
     #[error("Another wanted album is already being checked.")]
     CheckInProgress,
-    #[error("Wanted checks are briefly cooling down.")]
-    RateLimited,
     #[error("Choose Manual, 15 minutes, 30 minutes, or 1 hour.")]
     InvalidInterval,
     #[error("Choose valid Smart Match format, bitrate, and track requirements.")]
@@ -1316,6 +1453,150 @@ pub enum WantedError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn schedule_store(count: usize) -> WantedStore {
+        let mut store = WantedStore::default();
+        for offset in (0..count).step_by(100) {
+            merge_bulk_requests(
+                &mut store,
+                (offset..(offset + 100).min(count))
+                    .map(|index| request(&format!("album-{index:03}")))
+                    .collect(),
+                &WantedPreferences::default(),
+                1,
+            )
+            .unwrap();
+        }
+        store
+    }
+
+    #[test]
+    fn manual_checks_wait_for_dispatch_and_revalidate_queued_watches() {
+        let now = Instant::now();
+        let mut store = schedule_store(1);
+        let pending = || WantedRuntime {
+            active: Some(ActiveSearch {
+                album_id: "album-000".to_owned(),
+                token: 5,
+                deadline: None,
+                query: "artist album".to_owned(),
+                sources: HashMap::new(),
+            }),
+        };
+        let mut runtime = pending();
+        assert!(runtime.active.as_ref().unwrap().deadline.is_none());
+        let sent = now + Duration::from_secs(300);
+        assert_eq!(
+            runtime.start_pending(&store, sent),
+            Some((5, "artist album".to_owned()))
+        );
+        assert_eq!(
+            runtime.active.as_ref().unwrap().deadline,
+            Some(sent + SEARCH_TIMEOUT)
+        );
+        assert!(runtime.start_pending(&store, sent).is_none());
+        store.albums[0].paused = true;
+        let mut runtime = pending();
+        assert!(runtime.start_pending(&store, now).is_none());
+        assert!(runtime.active.is_none());
+        store.albums[0].paused = false;
+        store.albums[0].fulfilled = true;
+        assert!(pending().start_pending(&store, now).is_none());
+        store.albums.clear();
+        assert!(pending().start_pending(&store, now).is_none());
+    }
+
+    #[test]
+    fn five_hundred_album_rotation_is_fair_and_reports_real_capacity() {
+        let mut store = schedule_store(500);
+        assert_eq!(effective_cadence(&store, Some(720)), Some(6_000));
+        assert_eq!(effective_cadence(&store, Some(120)), Some(1_000));
+        assert_eq!(effective_cadence(&store, None), None);
+        assert_eq!(effective_cadence(&store, Some(0)), None);
+        let mut checked = HashSet::new();
+        for slot in 0..500 {
+            let now = 1 + slot * 720_000;
+            let id = select_due(&store, now).unwrap().album_id.clone();
+            assert!(
+                checked.insert(id.clone()),
+                "rechecked before first rotation completed"
+            );
+            let album = store
+                .albums
+                .iter_mut()
+                .find(|album| album.album_id == id)
+                .unwrap();
+            record_check_outcome(album, 0, now);
+        }
+        assert_eq!(checked.len(), 500);
+        for album in &mut store.albums[..250] {
+            album.paused = true;
+        }
+        for album in &mut store.albums[250..400] {
+            album.fulfilled = true;
+        }
+        assert_eq!(effective_cadence(&store, Some(720)), Some(1_200));
+        store.interval_minutes = 0;
+        assert!(select_due(&store, u64::MAX).is_none());
+        assert_eq!(effective_cadence(&store, Some(720)), None);
+    }
+
+    #[test]
+    fn empty_checks_back_off_persist_and_success_and_restoration_reset_them() {
+        let mut store = schedule_store(1);
+        for (now, minutes) in [(10, 60), (20, 360), (30, 1440), (40, 1440)] {
+            record_check_outcome(&mut store.albums[0], 0, now);
+            assert_eq!(album_interval_minutes(&store.albums[0], 30), minutes);
+            assert_eq!(next_check_at(&store, now), Some(now + minutes * 60_000));
+        }
+        let restored = decode_store(&serde_json::to_vec(&store).unwrap()).unwrap();
+        assert_eq!(restored.albums[0].consecutive_misses, 4);
+        record_check_outcome(&mut store.albums[0], 2, 50);
+        assert_eq!(store.albums[0].last_found_at_ms, Some(50));
+        assert_eq!(album_interval_minutes(&store.albums[0], 15), 15);
+        record_check_outcome(&mut store.albums[0], 0, 60);
+        reset_for_watch(&mut store.albums[0], 70);
+        assert_eq!(store.albums[0].consecutive_misses, 0);
+        assert_eq!(next_check_at(&store, 70), Some(70));
+    }
+
+    #[test]
+    fn due_order_gives_new_and_successful_watches_slots_while_quiet_watches_back_off() {
+        let mut store = schedule_store(3);
+        for _ in 0..3 {
+            record_check_outcome(&mut store.albums[0], 0, 100);
+        }
+        record_check_outcome(&mut store.albums[1], 1, 100);
+        assert_eq!(select_due(&store, 101).unwrap().album_id, "album-002");
+        store.albums[2].paused = true;
+        assert!(select_due(&store, 101).is_none());
+        assert_eq!(
+            select_due(&store, 100 + 30 * 60_000).unwrap().album_id,
+            "album-001"
+        );
+        store.albums[1].fulfilled = true;
+        assert!(select_due(&store, 100 + 30 * 60_000).is_none());
+        assert_eq!(
+            select_due(&store, 100 + 24 * 60 * 60_000).unwrap().album_id,
+            "album-000"
+        );
+    }
+
+    #[test]
+    fn v2_migration_preserves_watch_history_without_inventing_misses() {
+        let mut value = serde_json::to_value(schedule_store(1)).unwrap();
+        value["version"] = 2.into();
+        let album = value["albums"][0].as_object_mut().unwrap();
+        album.remove("consecutiveMisses");
+        album.remove("lastFoundAtMs");
+        album.insert("lastCheckedAtMs".to_owned(), 123.into());
+        album.insert("sourceCount".to_owned(), 2.into());
+        let migrated = decode_store(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(migrated.version, 3);
+        assert_eq!(migrated.albums[0].last_found_at_ms, Some(123));
+        assert_eq!(migrated.albums[0].consecutive_misses, 0);
+        assert_eq!(migrated.albums[0].last_checked_at_ms, Some(123));
+    }
 
     #[test]
     fn corrupt_store_recovers_fixture_and_future_schema_is_write_protected() {
@@ -1467,6 +1748,8 @@ mod tests {
             preferences: WantedPreferences::default(),
             added_at_ms: 1,
             last_checked_at_ms: None,
+            consecutive_misses: 0,
+            last_found_at_ms: None,
             source_count: 0,
             matching_source_count: 0,
             ready_source_count: 0,

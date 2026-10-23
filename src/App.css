@@ -10563,10 +10563,12 @@ form.settings-panel {
   font-size: 7px;
 }
 
-.wanted-toolbar > p {
-  margin: 0;
-  color: #656b7d;
-  font-size: 8px;
+.wanted-schedule {
+  margin: 12px 0;
+  max-width: 100ch;
+  color: #969caf;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .wanted-list {
@@ -10895,10 +10897,6 @@ form.settings-panel {
   }
 
   .wanted-quality {
-    display: none;
-  }
-
-  .wanted-toolbar > p {
     display: none;
   }
 

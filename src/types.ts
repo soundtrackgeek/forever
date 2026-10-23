@@ -133,6 +133,9 @@ export type WantedSnapshot = {
   intervalMinutes: 0 | 15 | 30 | 60;
   activeAlbumId: string | null;
   nextCheckAtMs: number | null;
+  wishlistIntervalSeconds: number | null;
+  effectiveCadenceMinutes: number | null;
+  checkQueued: boolean;
   updatedAtMs: number;
 };
 

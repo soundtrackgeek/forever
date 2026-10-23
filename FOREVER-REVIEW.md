@@ -206,7 +206,21 @@ clients use that speed to rank Forever users as sources.
 - Add protocol tests for both, using the existing frame-builder pattern in
   `protocol.rs`.
 
-### 5. Wanted scheduling that scales
+### 5. Wanted scheduling that scales - DONE
+
+**Implemented in 0.0.58 (2026-10-23):** automatic checks use WishlistSearch (103)
+at the server's WishlistInterval (104), with unknown/zero intervals disabling
+background sends. One shared five-second governor prioritizes user searches
+(including manual Wanted), Relay, Radar, then automatic Wanted; queued response
+windows begin at dispatch and cancellation/replacement invalidates pending work.
+Wanted schema 3 persists empty-check backoff (1 h -> 6 h -> 24 h), resets on found
+sources, and selects the oldest due watch. UI cadence estimates account for
+active list size and server pacing. A 500-album list at a 12-minute server
+interval takes about 100 hours per rotation: wishlist support respects network
+capacity rather than making that sweep faster. Regression coverage includes
+mixed producers, queue cancellation, 500 albums, interval changes/reconnects,
+backoff, migration, and UI state. Public Soulseek interoperation remains unverified.
+The original findings and proposal follow for context.
 
 **Today:** Wanted checks run one at a time. Each check is a 15 s search followed
 by a 5 s cooldown ([wanted.rs:13-19](src-tauri/src/connection/wanted.rs:13)),
