@@ -35,15 +35,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.61",
-  version: "0.0.62",
-  body: `## What's new in Forever 0.0.62
+  currentVersion: "0.0.62",
+  version: "0.0.63",
+  body: `## What's new in Forever 0.0.63
 
 ### Changed
 
-- Archive ownership checks saved release-group MBID links before titles.
-- Choose a Music Library database or restore automatic detection.
-- Owned badges explain MBID and normalized artist/title matches.`,
+- Large file and album-source lists now render only the visible rows.
+- Filter quality, availability, size, extension, country, and unwanted sources.
+- Sort column headers and keep advanced settings in Dial Memory presets.`,
   date: "2026-10-23",
 };
 

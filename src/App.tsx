@@ -869,8 +869,11 @@ function App() {
             <SearchWorkspace
               presetRail={presetRail}
               sessionId={dial.activeId}
+              scrollMemory={dial.resultScrollMemory}
               filter={dial.active.searchFilter}
               sort={dial.active.searchSort}
+              advancedFilters={dial.active.advancedFilters}
+              onAdvancedFiltersChange={(advancedFilters) => dial.update(dial.activeId, { advancedFilters })}
               layout={dial.active.searchLayout}
               searchMode={searchMode}
               albumContext={albumContext}

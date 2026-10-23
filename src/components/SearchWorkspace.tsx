@@ -19,7 +19,6 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
@@ -49,15 +48,22 @@ import { SearchModeSwitch, type SearchMode } from "./SearchModeSwitch";
 import { WantedToggle } from "./WantedToggle";
 import { useRankedSources } from "../hooks/useMatching";
 
-export type SearchFilter = "all" | "lossless" | "compressed";
-export type SearchSort = "best" | "ready" | "fast" | "small";
+import { AdvancedSearchFilters } from "./AdvancedSearchFilters";
+import { VirtualResultList, type ResultScrollMemory } from "./VirtualResultList";
+import { SearchSortHeader } from "./SearchSortHeader";
+import { capResultsPerUser, createSearchPredicates, sortSearchItems, sortLabels, losslessFormats, compressedFormats,
+  type AdvancedSearchFilters as AdvancedFilters, type SearchFilter, type SearchSort } from "../utils/searchResults";
+export type { SearchFilter, SearchSort } from "../utils/searchResults";
 export type AlbumResultView = "sources" | "files";
 
 type SearchWorkspaceProps = {
   presetRail: ReactNode;
   sessionId: string;
+  scrollMemory: ResultScrollMemory;
   filter: SearchFilter;
   sort: SearchSort;
+  advancedFilters: AdvancedFilters;
+  onAdvancedFiltersChange: (filters: AdvancedFilters) => void;
   layout: "list" | "grid";
   searchMode: SearchMode;
   albumContext: AlbumSearchContext | null;
@@ -93,14 +99,13 @@ type SearchWorkspaceProps = {
   onLoadOfficialTracklist: (releaseGroupId: string) => Promise<AlbumTrack[]>;
 };
 
-const losslessFormats = new Set(["FLAC", "ALAC", "WAV", "AIFF", "APE", "WV"]);
 const emptyOfficialTracks: AlbumTrack[] = [];
+const resultKey = (result: SearchResult) => result.id;
 const neutralAlbumPreferences: WantedPreferences = {
   formatPreference: "any",
   minimumBitrateKbps: null,
   minimumTrackCount: null,
 };
-const compressedFormats = new Set(["MP3", "AAC", "M4A", "OGG", "OPUS", "WMA"]);
 
 function AvailabilityBars({ values }: { values: number[] }) {
   return (
@@ -149,18 +154,14 @@ const filterLabels: Record<SearchFilter, string> = {
   compressed: "Compressed audio",
 };
 
-const sortLabels: Record<SearchSort, string> = {
-  best: "Best match",
-  ready: "Ready first",
-  fast: "Fastest first",
-  small: "Smallest first",
-};
-
 export function SearchWorkspace({
   presetRail,
   sessionId,
+  scrollMemory,
   filter,
   sort,
+  advancedFilters,
+  onAdvancedFiltersChange,
   layout,
   searchMode,
   albumContext,
@@ -197,8 +198,6 @@ export function SearchWorkspace({
 }: SearchWorkspaceProps) {
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
-  const resultListRef = useRef<HTMLDivElement>(null);
-  const scrollBySession = useRef(new Map<string, number>());
   const albumId = albumContext?.albumId ?? null;
   const [loadedTracklist, setLoadedTracklist] = useState<{
     albumId: string;
@@ -227,17 +226,14 @@ export function SearchWorkspace({
     return () => { active = false; };
   }, [albumId, onLoadOfficialTracklist]);
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      if (resultListRef.current) resultListRef.current.scrollTop = scrollBySession.current.get(sessionId) ?? 0;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [sessionId]);
   const online = connection.state === "online";
   const searching = search.state === "searching";
   const queued = searching && search.startedAtMs === null;
   const preview = search.message.startsWith("Preview data");
-  const deferredResults = useDeferredValue(results);
+  const resultBatch = useMemo(() => ({ sessionId, results }), [sessionId, results]);
+  const deferredBatch = useDeferredValue(resultBatch);
+  // A preset switch must never expose another preset's deferred rows/actions.
+  const deferredResults = deferredBatch.sessionId === sessionId ? deferredBatch.results : results;
   const losslessCount = results.filter((result) =>
     losslessFormats.has(result.format),
   ).length;
@@ -245,8 +241,8 @@ export function SearchWorkspace({
     compressedFormats.has(result.format),
   ).length;
   const albumSources = useMemo(
-    () => groupAlbumSources(deferredResults),
-    [deferredResults],
+    () => albumContext ? groupAlbumSources(deferredResults) : [],
+    [deferredResults, albumContext],
   );
   const qualifiedAlbumSources = useMemo(
     () => albumSourcesMeetingTrackMinimum(
@@ -259,72 +255,21 @@ export function SearchWorkspace({
     let lossless = 0;
     let compressed = 0;
     for (const source of qualifiedAlbumSources) {
-      if (source.formats.some((format) => losslessFormats.has(format))) lossless += 1;
-      if (source.formats.some((format) => compressedFormats.has(format))) compressed += 1;
+      if (source.formats.length && source.formats.every((format) => losslessFormats.has(format))) lossless += 1;
+      if (source.formats.length && source.formats.every((format) => compressedFormats.has(format))) compressed += 1;
     }
     return { lossless, compressed };
   }, [qualifiedAlbumSources]);
 
-  const visibleResults = useMemo(() => {
-    const filtered = results.filter((result) => {
-      if (filter === "lossless") return losslessFormats.has(result.format);
-      if (filter === "compressed") return compressedFormats.has(result.format);
-      return true;
-    });
-    if (sort === "ready") {
-      return [...filtered].sort(
-        (left, right) =>
-          Number(Boolean(right.slotFree)) - Number(Boolean(left.slotFree)) ||
-          (left.queueLength ?? 0) - (right.queueLength ?? 0),
-      );
-    }
-    if (sort === "fast") {
-      return [...filtered].sort(
-        (left, right) => (right.averageSpeed ?? 0) - (left.averageSpeed ?? 0),
-      );
-    }
-    if (sort === "small") {
-      return [...filtered].sort(
-        (left, right) => (left.sizeBytes ?? 0) - (right.sizeBytes ?? 0),
-      );
-    }
-    return filtered;
-  }, [filter, results, sort]);
-
+  const predicates = useMemo(() => createSearchPredicates(filter, advancedFilters, personByUsername), [filter, advancedFilters, personByUsername]);
+  const visibleResults = useMemo(() => capResultsPerUser(sortSearchItems(deferredResults.filter(predicates.file), sort), advancedFilters.resultsPerUser), [deferredResults, predicates, sort, advancedFilters.resultsPerUser]);
   const ranking = useRankedSources(qualifiedAlbumSources, wantedAlbum?.preferences ?? neutralAlbumPreferences, officialTracks, albumContext?.artist ?? "");
   const visibleAlbumSources = useMemo(() => {
-    const filtered = qualifiedAlbumSources.filter((source) => {
-      if (filter === "lossless") {
-        return source.formats.some((format) => losslessFormats.has(format));
-      }
-      if (filter === "compressed") {
-        return source.formats.some((format) => compressedFormats.has(format));
-      }
-      return true;
-    });
-    if (sort === "ready") {
-      return [...filtered].sort(
-        (left, right) =>
-          Number(right.slotFree) - Number(left.slotFree) ||
-          left.queueLength - right.queueLength,
-      );
-    }
-    if (sort === "fast") {
-      return [...filtered].sort(
-        (left, right) => right.averageSpeed - left.averageSpeed,
-      );
-    }
-    if (sort === "small") {
-      return [...filtered].sort(
-        (left, right) => left.totalSizeBytes - right.totalSizeBytes,
-      );
-    }
-    if (officialTracks.length > 0) {
-      const visible = new Set(filtered.map((source) => source.id));
-      if (!ranking.pending && !ranking.error) return ranking.ranked.filter((match) => visible.has(match.source.id)).map((match) => match.source);
-    }
-    return filtered;
-  }, [filter, officialTracks, qualifiedAlbumSources, sort, ranking]);
+    const base = sort === "best" && officialTracks.length > 0 && !ranking.pending && !ranking.error
+      ? ranking.ranked.map((match) => match.source) : qualifiedAlbumSources;
+    return capResultsPerUser(sortSearchItems(base.filter(predicates.source), sort), advancedFilters.resultsPerUser);
+  }, [qualifiedAlbumSources, ranking, officialTracks.length, predicates, sort, advancedFilters.resultsPerUser]);
+  const listSignature = JSON.stringify([filter, advancedFilters, sort, search.token]);
 
   const showingAlbumSources = Boolean(albumContext) && albumResultView === "sources";
   const visibleCount = showingAlbumSources
@@ -421,7 +366,6 @@ export function SearchWorkspace({
           <button
             type="button"
             className={`toolbar-button ${filterOpen ? "is-open" : ""}`}
-            disabled={results.length === 0}
             aria-expanded={filterOpen}
             onClick={() => {
               setFilterOpen((open) => !open);
@@ -609,6 +553,7 @@ export function SearchWorkspace({
           </span>
         </p>
         <div className="results-actions">
+          <AdvancedSearchFilters value={advancedFilters} onChange={onAdvancedFiltersChange} albumSources={showingAlbumSources} />
           {albumContext ? (
             <div className="album-result-view-switch" role="tablist" aria-label="Soulseek result view">
               <button
@@ -687,7 +632,13 @@ export function SearchWorkspace({
 
       {showingAlbumSources ? (
         <AlbumSourceResults
+          key={sessionId}
           sources={visibleAlbumSources}
+          sort={sort}
+          onSortChange={onSortChange}
+          scrollMemory={scrollMemory}
+          memoryKey={`${sessionId}:sources`}
+          signature={listSignature}
           rankedSources={ranking.ranked}
           rankingPending={ranking.pending}
           rankingError={ranking.error}
@@ -705,36 +656,39 @@ export function SearchWorkspace({
           artist={albumContext?.artist ?? ""}
         />
       ) : <div className={`results-table ${layout === "grid" ? "is-grid" : ""}`}>
-        <div className="result-header" aria-hidden="true">
-          <span>Name</span>
-          <span>User</span>
-          <span>Quality</span>
-          <span>Size</span>
-          <span>Availability</span>
+        <div className="result-header" role="row">
+          <SearchSortHeader label="Name" ascending="nameAsc" descending="nameDesc" sort={sort} onChange={onSortChange} />
+          <SearchSortHeader label="User" ascending="userAsc" descending="userDesc" sort={sort} onChange={onSortChange} />
+          <SearchSortHeader label="Quality" ascending="qualityAsc" descending="qualityDesc" sort={sort} onChange={onSortChange} />
+          <SearchSortHeader label="Size" ascending="small" descending="large" sort={sort} onChange={onSortChange} />
+          <SearchSortHeader label="Availability" ascending="ready" descending="busy" sort={sort} onChange={onSortChange} />
           <span />
         </div>
 
-        <div className="result-list" ref={resultListRef} onScroll={(event) => scrollBySession.current.set(sessionId, event.currentTarget.scrollTop)} aria-live="polite">
-          {visibleResults.length === 0 ? (
+        <VirtualResultList key={`${sessionId}:${layout}`} className="result-list" label="Search files"
+          items={visibleResults} itemKey={resultKey} columns={layout === "grid" ? 2 : 1} estimate={layout === "grid" ? 126 : 59}
+          memory={scrollMemory} memoryKey={`${sessionId}:files:${layout}`} signature={listSignature}
+          empty={(
             <div className="empty-results">
               {searching ? (
                 <CircleNotch className="search-spinner" size={28} />
               ) : (
                 <MagnifyingGlass size={28} weight="light" />
               )}
-              <h3>{queued ? "Waiting to search" : searching ? "Listening for responses" : "No signals found"}</h3>
+              <h3>{queued ? "Waiting to search" : searching ? "Listening for responses" : results.length ? "No files match these filters" : "No signals found"}</h3>
               <p>
                 {queued
                   ? search.message
                   : searching
                   ? "Results will appear here as people respond."
+                  : results.length ? "Adjust or reset the filters to show more results."
                   : search.state === "idle"
                     ? "Search for an artist, album, track, or filename."
                     : "Try a broader artist, album, or track name."}
               </p>
             </div>
-          ) : (
-            visibleResults.map((result) => {
+          )}>
+            {(result) => {
               const live = result.source === "live";
               const person = personByUsername(result.owner);
               return (
@@ -827,9 +781,8 @@ export function SearchWorkspace({
                   </span>
                 </article>
               );
-            })
-          )}
-        </div>
+            }}
+        </VirtualResultList>
       </div>}
     </section>
   );

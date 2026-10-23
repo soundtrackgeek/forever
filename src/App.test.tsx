@@ -1020,17 +1020,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.62 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.63 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Archive ownership checks saved release-group MBID links before titles.",
+        "Large file and album-source lists now render only the visible rows.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Choose a Music Library database or restore automatic detection.",
+        "Filter quality, availability, size, extension, country, and unwanted sources.",
       ),
     ).toBeInTheDocument();
     expect(

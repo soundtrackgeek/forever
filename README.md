@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.62` adds MBID-first Archive ownership, a configurable
-> database source, and visible ownership match reasons.
+> **Status:** pre-alpha. Version `0.0.63` adds virtualized search results, advanced filters,
+> sortable columns, and saved filter settings per Dial Memory preset.
 
-If `0.0.16` is installed, download and run the latest `0.0.62` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.63` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -43,8 +43,28 @@ configuration and transfers.
   restarts. Pinned presets persist only their query and view settings—never
   stale network results—and support **Ctrl+T**, **Ctrl+W**, **Ctrl+Tab**, and
   **Ctrl+Shift+Tab**
-- Working lossless/compressed filters, ready/speed/size sorting, stop control,
-  and a live file inspector with source speed, queue, and share visibility
+- Virtualized file lists, file grids, and album-source lists keep large searches
+  responsive, with measured expandable Tracklist Confidence rows, keyboard
+  Arrow/Home/End navigation, and scroll restoration per preset and view
+- Search filters for audio type, minimum bitrate (kbps), sample rate (Hz), bit
+  depth, free upload slots, maximum queue length, size range (decimal MB),
+  extensions, excluded path words, country, and blocked/ignored users;
+  a per-user cap applies after sorting, counting whole sources in album view
+- Click search column headers to reverse sorting, or use the sort menu for
+  best match, readiness, speed, size, name, user, quality, track count, or format.
+  Advanced filters and sort follow preset switching, duplication, and pinned
+  preset restoration across restarts; older presets start with no advanced filters
+- Lists in text filters accept commas or spaces. Country accepts two-letter
+  codes (for example `NO, GB`) or `unknown`, using currently known People data.
+  Excluded words match case-insensitive substrings anywhere in a file path.
+  Missing metadata fails active numeric filters; an empty field imposes no limit.
+  The **24-bit / 96 kHz** shortcut sets both minimums; it does not verify audio quality
+- Album filters keep sources intact: every returned audio track must pass quality
+  and extension filters, size applies to the aggregate source, and artwork and
+  other companion files remain included. Filtered search metadata cannot guarantee
+  what a later full-folder inspection will return. The normal reviewed download
+  and Tracklist Confidence flow still applies
+- Stop control and a live file inspector with source speed, queue, and share visibility
 - A Files/Albums search switch with MusicBrainz artist matching, artist
   disambiguation, studio/live/compilation/EP catalog filters, Cover Art Archive
   artwork, and one-click artist-plus-album handoff to grouped Soulseek sources

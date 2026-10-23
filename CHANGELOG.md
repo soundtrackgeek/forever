@@ -5,6 +5,32 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.63] - 2026-10-23
+
+### Added
+
+- Advanced search filters for bitrate, sample rate, bit depth, free slots, queue
+  length, decimal-MB size ranges, extensions, excluded path words, country,
+  blocked/ignored users, and a results-per-user cap applied after sorting.
+- Sortable file and album-source column headers with ascending/descending order;
+  advanced filters and sorts persist with pinned Dial Memory presets and duplicates.
+
+### Changed
+
+- File lists, two-column grids, and album-source lists use TanStack Virtual for
+  large searches, with stable row identity, dynamic confidence-panel measurement,
+  keyboard navigation, and independent preset/view scroll restoration.
+- Ordinary file searches skip album grouping and ranking. Filtering and grouping
+  use deferred result batches; album filters retain complete sources and companions.
+- Missing metadata is explicitly excluded by active numeric/country filters;
+  country supports an explicit unknown value and older presets receive defaults.
+
+### Verification
+
+- Regression tests cover 5,000-result bounded rendering, keyboard access, append
+  stability, filter resets, grid restoration, numeric boundaries, whole-album
+  preservation, stable sorting/caps, and preset migration/duplication/restoration.
+
 ## [0.0.62] - 2026-10-23
 
 ### Added

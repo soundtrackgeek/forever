@@ -1,3 +1,6 @@
+import { VirtualResultList, type ResultScrollMemory } from "./VirtualResultList";
+import { SearchSortHeader } from "./SearchSortHeader";
+import type { SearchSort } from "../utils/searchResults";
 import { durationEvidence } from "../utils/tracklistConfidence";
 import {
   CaretDown,
@@ -25,6 +28,11 @@ import { CountryFlag } from "./CountryFlag";
 
 type AlbumSourceResultsProps = {
   sources: AlbumSource[];
+  sort: SearchSort;
+  onSortChange: (sort: SearchSort) => void;
+  scrollMemory: ResultScrollMemory;
+  memoryKey: string;
+  signature: string;
   rankedSources: RankedAlbumSource[];
   rankingPending: boolean;
   rankingError: string | null;
@@ -54,6 +62,7 @@ function DownloadStateIcon({ state }: { state: AlbumDownloadStatus }) {
 
 const filename = (path: string) =>
   path.split(/[\\/]/).filter(Boolean).slice(-1)[0] ?? path;
+const sourceKey = (source: AlbumSource) => source.id;
 
 const duration = (seconds: number | null | undefined) => {
   if (!seconds) return null;
@@ -151,6 +160,7 @@ function TrackPreview({ source }: { source: AlbumSource }) {
 
 export function AlbumSourceResults({
   sources,
+  sort, onSortChange, scrollMemory, memoryKey, signature,
   rankedSources,
   rankingPending,
   rankingError,
@@ -227,17 +237,17 @@ export function AlbumSourceResults({
         ) : null;
       })() : null}
       <div className="album-source-table">
-        <div className="album-source-header" aria-hidden="true">
-          <span>User</span>
-          <span>Folder</span>
-          <span>Tracklist</span>
-          <span>Format</span>
-          <span>Album size</span>
-          <span>Availability</span>
+        <div className="album-source-header" role="row">
+          <SearchSortHeader label="User" ascending="userAsc" descending="userDesc" sort={sort} onChange={onSortChange} />
+          <SearchSortHeader label="Folder" ascending="nameAsc" descending="nameDesc" sort={sort} onChange={onSortChange} />
+          <SearchSortHeader label="Tracklist" ascending="tracksAsc" descending="tracksDesc" sort={sort} onChange={onSortChange} />
+          <SearchSortHeader label="Format" ascending="formatAsc" descending="formatDesc" sort={sort} onChange={onSortChange} />
+          <SearchSortHeader label="Album size" ascending="small" descending="large" sort={sort} onChange={onSortChange} />
+          <SearchSortHeader label="Availability" ascending="ready" descending="busy" sort={sort} onChange={onSortChange} />
           <span />
         </div>
-        <div className="album-source-list" aria-live="polite">
-          {sources.length === 0 ? (
+        <VirtualResultList className="album-source-list" label="Album sources" items={sources} itemKey={sourceKey}
+          memory={scrollMemory} memoryKey={memoryKey} signature={signature} empty={(
             <div className="empty-results">
               {searching ? (
                 <CircleNotch className="search-spinner" size={28} />
@@ -250,11 +260,11 @@ export function AlbumSourceResults({
                   ? "Sources will group here as people respond."
                   : minimumTrackCount
                     ? `Forever is hiding folders below your ${minimumTrackCount}-track minimum. Try Individual files if you want to inspect every reply.`
-                  : "Try the individual file view or search for a broader release title."}
+                  : "Adjust or reset the filters, try Individual files, or search for a broader release title."}
               </p>
             </div>
-          ) : (
-            sources.map((source) => {
+          )}>
+            {(source) => {
               const smartMatch = rankBySourceId.get(source.id);
               const recommended = source.id === recommendedSourceId;
               const person = personByUsername(source.owner);
@@ -362,9 +372,8 @@ export function AlbumSourceResults({
                   ) : null}
                 </article>
               );
-            })
-          )}
-        </div>
+            }}
+        </VirtualResultList>
       </div>
     </div>
   );

@@ -372,7 +372,20 @@ database already exposes `musicbrainz_artist_links` and
 - Show *why* an album is marked Owned (MBID match vs. title match) to build
   trust and make false positives easy to diagnose.
 
-### 10. Search results: virtualization and advanced filters
+### 10. Search results: virtualization and advanced filters - DONE
+
+**Implemented in 0.0.63 (2026-10-23):** TanStack Virtual bounds file-list, grid,
+and album-source rendering, measures expanded confidence panels, supports
+keyboard navigation, and retains preset/view scroll positions. Advanced quality,
+slot/queue, size, extension, excluded-path-word, country, blocked/ignored-user,
+and per-user-cap filters combine with sortable headers and pinned-preset
+persistence. Album filtering retains whole sources and companion files; caps
+apply after sorting. Unknown metadata fails active constraints, with explicit
+`unknown` country selection. Ordinary file searches skip album grouping/ranking.
+Regression coverage includes 5,000 results, appends, filter resets, restoration,
+whole-source semantics, and legacy presets. Browser QA uses synthetic search
+responses; live Soulseek peers and native WebView behavior remain unverified.
+The original findings and proposal follow for context.
 
 **Today:** A search can hold up to 5,000 results, and they render without
 virtualization. Each 200-result batch appends to state and re-groups album

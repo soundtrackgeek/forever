@@ -3,7 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AlbumSearchContext } from "../types";
 import type { AlbumFilter } from "../components/AlbumSearchWorkspace";
 import type { AlbumResultView, SearchFilter, SearchSort } from "../components/SearchWorkspace";
+import { normalizeAdvancedFilters, sortLabels, type AdvancedSearchFilters } from "../utils/searchResults";
 import type { SearchMode } from "../components/SearchModeSwitch";
+import type { ResultScrollMemory } from "../components/VirtualResultList";
 
 const STORAGE_KEY = "forever.dial-memory.v1";
 export const DIAL_SESSION_LIMIT = 8;
@@ -24,6 +26,7 @@ export type DialSession = {
   albumResultView: AlbumResultView;
   searchFilter: SearchFilter;
   searchSort: SearchSort;
+  advancedFilters: AdvancedSearchFilters;
   searchLayout: "list" | "grid";
   albumFilter: AlbumFilter;
   createdAtMs: number;
@@ -34,11 +37,11 @@ export type ClosedDialSession = Pick<DialSession, "mode" | "query"> & {
 };
 
 type PersistedDialMemory = {
-  pinned: Array<Pick<DialSession, "id" | "mode" | "query" | "searchFilter" | "searchSort" | "searchLayout" | "albumFilter">>;
+  pinned: Array<Pick<DialSession, "id" | "mode" | "query" | "searchFilter" | "searchSort" | "advancedFilters" | "searchLayout" | "albumFilter">>;
   recent: ClosedDialSession[];
 };
 
-type NewSession = Partial<Pick<DialSession, "mode" | "query" | "pinned" | "albumContext" | "albumResultView" | "searchFilter" | "searchSort" | "searchLayout" | "albumFilter">>;
+type NewSession = Partial<Pick<DialSession, "mode" | "query" | "pinned" | "albumContext" | "albumResultView" | "searchFilter" | "searchSort" | "advancedFilters" | "searchLayout" | "albumFilter">>;
 
 const createId = () => {
   const random = globalThis.crypto?.randomUUID?.().replace(/-/g, "");
@@ -53,8 +56,9 @@ const session = (next: NewSession = {}, id = createId()): DialSession => ({
   selectedResultId: null,
   albumContext: next.albumContext ?? null,
   albumResultView: next.albumResultView ?? "files",
-  searchFilter: next.searchFilter ?? "all",
-  searchSort: next.searchSort ?? "best",
+  searchFilter: next.searchFilter === "lossless" || next.searchFilter === "compressed" ? next.searchFilter : "all",
+  searchSort: next.searchSort && Object.prototype.hasOwnProperty.call(sortLabels, next.searchSort) ? next.searchSort : "best",
+  advancedFilters: normalizeAdvancedFilters(next.advancedFilters),
   searchLayout: next.searchLayout ?? "list",
   albumFilter: next.albumFilter ?? "studio",
   createdAtMs: Date.now(),
@@ -89,18 +93,22 @@ export function useDialMemory() {
   const [sessions, setSessions] = useState(initial.sessions);
   const [recent, setRecent] = useState(initial.recent);
   const [activeId, setActiveId] = useState(initial.sessions[0].id);
+  const [resultScrollMemory] = useState<ResultScrollMemory>(() => new Map());
   const sessionsRef = useRef(sessions);
 
   useEffect(() => {
     sessionsRef.current = sessions;
-  }, [sessions]);
+    for (const key of resultScrollMemory.keys()) {
+      if (!sessions.some((item) => key.startsWith(`${item.id}:`))) resultScrollMemory.delete(key);
+    }
+  }, [sessions, resultScrollMemory]);
 
   useEffect(() => {
     const persisted: PersistedDialMemory = {
       pinned: sessions
         .filter((item) => item.pinned && item.query.trim())
-        .map(({ id, mode, query, searchFilter, searchSort, searchLayout, albumFilter }) => ({
-          id, mode, query, searchFilter, searchSort, searchLayout, albumFilter,
+        .map(({ id, mode, query, searchFilter, searchSort, advancedFilters, searchLayout, albumFilter }) => ({
+          id, mode, query, searchFilter, searchSort, advancedFilters, searchLayout, albumFilter,
         })),
       recent,
     };
@@ -156,6 +164,7 @@ export function useDialMemory() {
       query: source.query,
       searchFilter: source.searchFilter,
       searchSort: source.searchSort,
+      advancedFilters: source.advancedFilters,
       searchLayout: source.searchLayout,
       albumFilter: source.albumFilter,
     }) : null;
@@ -176,6 +185,7 @@ export function useDialMemory() {
     activeId,
     recent,
     atLimit: sessions.length >= DIAL_SESSION_LIMIT,
+    resultScrollMemory,
     update,
     create,
     select,
