@@ -35,15 +35,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.57",
-  version: "0.0.58",
-  body: `## What's new in Forever 0.0.58
+  currentVersion: "0.0.58",
+  version: "0.0.59",
+  body: `## What's new in Forever 0.0.59
 
 ### Changed
 
-- Wanted uses server-paced wishlist searches with adaptive backoff.
-- User searches, Signal Relay, Shelf Radar, and Wanted share one search budget.
-- Wanted shows effective list cadence and waits safely for server permission.`,
+- Album searches normalize accents, punctuation, and edition suffixes.
+- Empty searches try bounded fallbacks while keeping server pacing.
+- Successful album queries are remembered across Wanted, Radar, and Relay.`,
   date: "2026-10-23",
 };
 

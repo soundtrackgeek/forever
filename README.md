@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.58` adds server-paced Wanted scheduling,
-> adaptive backoff, a shared search budget, and honest list-capacity estimates.
+> **Status:** pre-alpha. Version `0.0.59` adds normalized album searches,
+> paced empty-result fallbacks, and remembered successful query variants.
 
-If `0.0.16` is installed, download and run the latest `0.0.58` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.59` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -48,6 +48,9 @@ configuration and transfers.
 - A Files/Albums search switch with MusicBrainz artist matching, artist
   disambiguation, studio/live/compilation/EP catalog filters, Cover Art Archive
   artwork, and one-click artist-plus-album handoff to grouped Soulseek sources
+- Shared album-query normalization and paced empty-result fallbacks for Wanted,
+  Shelf Radar, Signal Relay, and album handoffs, with successful variants
+  remembered across restarts
 - Album-source results grouped by listener and remote folder, with track count,
   formats, aggregate search size, readiness and speed, hover/focus track-list
   previews, an individual-file fallback, complete-folder download, and live
@@ -362,7 +365,7 @@ explicitly asks the peer again.
 Switch Search from **Files** to **Albums** to enter an artist name. Forever
 uses MusicBrainz to resolve the artist and show cataloged studio albums, live
 albums, compilations, and EPs. Choosing **Search Soulseek** returns to Files and
-starts a normal live Soulseek search for that artist and album title. MusicBrainz
+starts an album-aware Soulseek search for that artist and album title. MusicBrainz
 identifies the release; it does not claim that a specific rip or edition is
 available. Soulseek results remain the source of truth for actual files. The
 search opens in **Album sources**, grouping returned files by listener and
@@ -371,6 +374,32 @@ to **Individual files** for the original file-by-file results. When an official
 tracklist is available, each album source reports its title match as **Exact**,
 **Complete with extras**, **Missing**, or **Unclear**. Expand that signal to see
 the matched filenames, missing official titles, and unexpected audio files.
+
+Album searches share one Rust query builder across handoffs, Wanted, Shelf
+Radar, and Signal Relay. It folds accents and punctuation, treats `&` and `and`
+consistently, removes recognized trailing edition/remaster labels, drops short
+words when longer words remain, and caps queries at 200 bytes on word boundaries.
+Entirely short names such as U2 and AC/DC remain searchable. Meaningful title
+text and volume numbers remain distinct in the saved identity.
+
+After an attempt returns no accepted audio files, Forever tries the album title
+alone, then the artist with up to two distinctive title words. Duplicate queries
+are skipped, with at most three attempts. Broader attempts require the artist's
+normalized words in each returned path; paths that omit the artist can therefore
+be missed. Search, Wanted, and Radar status show the current query. Successful
+variants are reused first and saved in `search-queries.json` for up to 1,000 album
+identities. This is a query preference, not proof of an edition or complete album.
+
+Each attempt waits for the shared search budget before its response window starts
+(15 seconds, or 12 seconds for Radar). Automatic Wanted fallbacks also wait for
+the server's wishlist interval: an empty album can consume up to three server
+slots, so a complete empty sweep can take up to three times the displayed
+single-query capacity estimate, plus other delays. Stop, close, replacement, and
+disconnect cancel pending attempts. Ordinary typed Files searches retain their
+original query syntax. New album transfers preserve artist/title metadata for
+Relay; legacy or manually browsed folders without that identity receive query
+normalization only. Browser preview data does not simulate native fallback logic.
+
 The default **Best match** sort puts complete title matches ahead of faster but
 mislabeled folders.
 Questionable sources remain available, but require an explicit **Download
@@ -427,7 +456,7 @@ the completed bar.
 
 Use **Scan visible** to check up to the first 12 visible missing albums, or
 select specific gaps and use **Scan selected**. Shelf Radar sends one search at
-a time, listens for 12 seconds, and pauses briefly between albums. Its progress
+a time, listens for 12 seconds per attempt, and pauses briefly between albums. Its progress
 strip shows the current album and can stop the remaining queue immediately.
 Scanning never replaces or clears the main Search workspace.
 
@@ -474,7 +503,7 @@ in the download folder remain untouched.
 Choose **Add to Wanted** on a missing MusicBrainz album, then open **Archive →
 Wanted** to follow it. Automatic checks use Soulseek **WishlistSearch (103)**
 only after **WishlistInterval (104)** announces a positive interval in seconds.
-One album is checked per server interval; a zero interval disables automatic
+One query is sent per server interval; a zero interval disables automatic
 checks, and reconnecting waits for a fresh announcement. Forever never falls
 back to ordinary searches to bypass this limit. The first automatic check waits
 one announced interval; a changed interval is applied to the last wishlist send.
@@ -490,7 +519,8 @@ stable ordering so a large list rotates fairly.
 
 The Wanted toolbar shows estimated capacity at the current active list size,
 plus the earliest next slot. With 500 active albums and a 12-minute server
-interval, one rotation takes roughly **100 hours**, not 30 minutes. Quiet-watch
+interval, a rotation with one attempt per album takes roughly **100 hours**.
+Empty-result fallbacks can require up to three attempts per album. Quiet-watch
 backoff and competing searches can extend the interval; this is an estimate,
 not a deadline. Manual **Check now** remains available even when automatic
 checks are disabled, and shows when it is waiting to send.
@@ -611,7 +641,7 @@ and progress checkpoints every five seconds when progress changes. Resume
 offsets still come from the actual `.part` file length. Closing Forever
 (including an idle queue) and Safe Passage updates wait for pending saves;
 save failures are shown and must be resolved before a safe exit can finish.
-All seven JSON stores (`transfers`, `wanted`, `people`, `messages`, `rooms`,
+All eight JSON stores (`transfers`, `wanted`, `search-queries`, `people`, `messages`, `rooms`,
 `sharing`, and `connection`) now use a shared persistence layer. Saves write a
 unique `name.json.tmp-*` in the same directory, flush its contents, atomically
 replace the primary file, and retain the previous validated copy in
@@ -630,6 +660,9 @@ closed.
 
 Existing version-1 stores migrate to version 2, materializing legacy defaults;
 unversioned connection preferences migrate to a version-1 profile envelope.
+Further migrations bring connection settings to schema 2 and Wanted and
+transfers to schema 3. Existing transfers keep their labels and file state;
+missing structured artist/title metadata is left unknown.
 Migration validates the result and retains the original bytes as the backup.
 Unknown store versions are preserved in place and cannot be overwritten by this
 app version. Read/preservation/migration-write failures also keep the app open

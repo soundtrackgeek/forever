@@ -19,5 +19,5 @@ export const wantedScheduleLabel = (wanted: WantedSnapshot, online: boolean) => 
   if (!wanted.wishlistIntervalSeconds) return "The server has disabled wishlist checks. Manual checks remain available.";
   if (wanted.effectiveCadenceMinutes == null) return "No active albums to check. Paused and fulfilled albums do not use wishlist slots.";
   const next = wanted.nextCheckAtMs == null ? "" : ` Next slot no earlier than ${new Date(wanted.nextCheckAtMs).toLocaleString()}.`;
-  return `Capacity: ≈ every ${duration(wanted.effectiveCadenceMinutes)} at current list size. One album per ${duration(wanted.wishlistIntervalSeconds / 60)} server slot. Quiet albums back off to 1 h, 6 h, then 24 h.${next} Other searches can delay checks.`;
+  return `Capacity: ≈ every ${duration(wanted.effectiveCadenceMinutes)} at current list size. One query per ${duration(wanted.wishlistIntervalSeconds / 60)} server slot; empty albums can need up to three slots. Quiet albums back off to 1 h, 6 h, then 24 h.${next} Other searches can delay checks.`;
 };

@@ -11,7 +11,8 @@ const snapshot: WantedSnapshot = {
 describe("Wanted schedule promises", () => {
   it("reports a 500-album server-paced rotation, not the preferred 30 minutes", () => {
     expect(wantedScheduleLabel(snapshot, true)).toContain("≈ every 100 h");
-    expect(wantedScheduleLabel(snapshot, true)).toContain("One album per 12 min server slot");
+    expect(wantedScheduleLabel(snapshot, true)).toContain("One query per 12 min server slot");
+    expect(wantedScheduleLabel(snapshot, true)).toContain("empty albums can need up to three slots");
     expect(wantedScheduleLabel(snapshot, true)).toContain("Other searches can delay checks");
   });
 

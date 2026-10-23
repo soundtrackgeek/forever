@@ -320,7 +320,7 @@ function App() {
       const sessionId = relaySessionId(group.releaseId);
       if (!waitingSince || relayClock - waitingSince < threshold || search.records[sessionId] || relaysStarted.current.has(sessionId)) continue;
       relaysStarted.current.add(sessionId);
-      void search.startSearch(sessionId, group.title).catch(() => relaysStarted.current.delete(sessionId));
+      void search.startSearch(sessionId, group.title, group.transfers.find((transfer) => transfer.searchAlbum)?.searchAlbum ?? undefined).catch(() => relaysStarted.current.delete(sessionId));
     }
   }, [connection.snapshot.state, native, relayClock, search, transferGroups, transfers.snapshot.relaySuggestionMinutes]);
 
@@ -350,7 +350,8 @@ function App() {
   const findRelaySources = (releaseId: string, title: string) => {
     const sessionId = relaySessionId(releaseId);
     relaysStarted.current.add(sessionId);
-    return search.startSearch(sessionId, title);
+    const album = transferGroups.find((group) => group.releaseId === releaseId)?.transfers.find((transfer) => transfer.searchAlbum)?.searchAlbum;
+    return search.startSearch(sessionId, title, album ?? undefined);
   };
 
   const loadOfficialTracklist = useCallback((releaseGroupId: string) => {
@@ -529,6 +530,7 @@ function App() {
       files: inspection.files,
       expectedTrackCount,
       releaseGroupId: context?.albumId ?? null,
+      searchAlbum: context ? { artist: context.artist, title: context.title } : null,
       alternatives: availableSources
         .filter((candidate) => candidate.id !== source.id)
         .slice(0, 12)
@@ -625,6 +627,7 @@ function App() {
       files: reviewInspection.files,
       expectedTrackCount,
       releaseGroupId: reviewAlbum.albumId,
+      searchAlbum: { artist: reviewAlbum.artist, title: reviewAlbum.title },
     });
   };
 
@@ -638,7 +641,7 @@ function App() {
     });
     if (!sessionId) return;
     setActiveView("search");
-    void search.startSearch(sessionId, nextQuery).catch(() => undefined);
+    void search.startSearch(sessionId, nextQuery, context).catch(() => undefined);
   };
 
   const navigate = (view: string) => {

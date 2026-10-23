@@ -136,6 +136,7 @@ export type WantedSnapshot = {
   wishlistIntervalSeconds: number | null;
   effectiveCadenceMinutes: number | null;
   checkQueued: boolean;
+  activeQuery?: string | null;
   updatedAtMs: number;
 };
 
@@ -349,6 +350,7 @@ export type Transfer = {
   fileCount?: number | null;
   expectedTrackCount?: number | null;
   releaseGroupId?: string | null;
+  searchAlbum?: Pick<AlbumSearchContext, "artist" | "title"> | null;
   title: string;
   username: string;
   remoteFilename: string;

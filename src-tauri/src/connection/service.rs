@@ -1,4 +1,5 @@
 use super::{
+    album_query::{AlbumIdentity, QueryMemory},
     branch::{Branch, ChildCandidate},
     credentials::CredentialVault,
     diagnostics::{DiagnosticEntry, Diagnostics},
@@ -463,7 +464,8 @@ impl ConnectionManager {
             paths.people,
             paths.messages,
             paths.rooms,
-            paths.wanted,
+            paths.wanted.clone(),
+            paths.wanted.with_file_name("search-queries.json"),
         ]
         .into_iter()
         .map(JsonFile::new)
@@ -475,7 +477,8 @@ impl ConnectionManager {
             .as_ref()
             .map(ConnectionSnapshot::offline)
             .unwrap_or_else(ConnectionSnapshot::unconfigured);
-        let search = SearchHub::new(app.clone());
+        let queries = QueryMemory::new(store_files[7].clone());
+        let search = SearchHub::new(app.clone(), queries.clone());
         let transfers = TransferHub::new(app.clone(), store_files[1].clone())?;
         let local_shares = LocalSharesHub::new(app.clone(), store_files[2].clone())?;
         let uploads = UploadHub::new(app.clone());
@@ -485,8 +488,13 @@ impl ConnectionManager {
         let messages = MessagesHub::new(app.clone(), store_files[4].clone())?;
         let rooms = RoomsHub::new(app.clone(), store_files[5].clone())?;
         let search_governor = SearchGovernor::default();
-        let wanted = WantedHub::new(app.clone(), store_files[6].clone(), search_governor.clone())?;
-        let radar = RadarHub::new(app.clone());
+        let wanted = WantedHub::new(
+            app.clone(),
+            store_files[6].clone(),
+            search_governor.clone(),
+            queries.clone(),
+        )?;
+        let radar = RadarHub::new(app.clone(), queries);
 
         Ok(Self {
             app,
@@ -1574,15 +1582,24 @@ impl ConnectionManager {
         &self,
         client_id: String,
         query: String,
+        album: Option<AlbumIdentity>,
     ) -> Result<SearchSnapshot, ConnectionServiceError> {
         let query = query.trim().to_owned();
         let client_id = client_id.trim().to_owned();
+        let album = album.or_else(|| {
+            client_id
+                .starts_with(super::search::RELAY_CLIENT_PREFIX)
+                .then(|| AlbumIdentity {
+                    artist: String::new(),
+                    title: query.clone(),
+                })
+        });
         if query.is_empty() {
             return Err(ConnectionServiceError::InvalidSearch(
                 "Enter something to search for.".to_owned(),
             ));
         }
-        if query.len() > MAX_SEARCH_QUERY_BYTES {
+        if album.is_none() && query.len() > MAX_SEARCH_QUERY_BYTES {
             return Err(ConnectionServiceError::InvalidSearch(format!(
                 "Search queries can be at most {MAX_SEARCH_QUERY_BYTES} bytes."
             )));
@@ -1609,7 +1626,7 @@ impl ConnectionManager {
 
         let snapshot = self
             .search
-            .start(token, client_id.clone(), query.clone())
+            .start(token, client_id.clone(), query.clone(), album)
             .map_err(ConnectionServiceError::InvalidSearch)?;
         if sender.send(ConnectionCommand::SearchesChanged).is_err() {
             self.search.fail(
@@ -2801,8 +2818,8 @@ impl ConnectionManager {
                     }
                 }
                 _ = search_tick.tick() => {
-                    self.search.expire_if_due();
-                    self.wanted.expire_if_due();
+                    self.search.expire_if_due(&self.next_search_token);
+                    self.wanted.expire_if_due(&self.next_search_token);
                     self.radar.expire_if_due();
                     self.dispatch_search(&mut server_writer).await?;
                 }
@@ -2821,7 +2838,7 @@ impl ConnectionManager {
                 SearchLane::User => self
                     .search
                     .start_pending(false)
-                    .or_else(|| self.wanted.start_pending()),
+                    .or_else(|| self.wanted.start_pending(false)),
                 SearchLane::Relay => self.search.start_pending(true),
                 SearchLane::Radar | SearchLane::Wanted => {
                     let mut token = self.next_search_token.fetch_add(1, Ordering::SeqCst);
@@ -2831,7 +2848,9 @@ impl ConnectionManager {
                     if lane == SearchLane::Radar {
                         self.radar.start_next(token)
                     } else {
-                        self.wanted.start_due(token).map(|query| (token, query))
+                        self.wanted
+                            .start_pending(true)
+                            .or_else(|| self.wanted.start_due(token).map(|query| (token, query)))
                     }
                 }
             });

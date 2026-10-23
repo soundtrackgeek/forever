@@ -263,6 +263,7 @@ export type EnqueueReleaseInput = {
   files: FolderFile[];
   expectedTrackCount?: number | null;
   releaseGroupId?: string | null;
+  searchAlbum?: { artist: string; title: string } | null;
   alternatives?: ReleaseAlternativeSource[];
 };
 
@@ -603,6 +604,7 @@ export function useSoulseekTransfers() {
                 })),
                 expectedTrackCount: release.expectedTrackCount ?? null,
                 releaseGroupId: release.releaseGroupId ?? null,
+                searchAlbum: release.searchAlbum ?? null,
                 alternatives: release.alternatives ?? [],
               },
             },
@@ -640,6 +642,7 @@ export function useSoulseekTransfers() {
             fileCount: release.files.length,
             expectedTrackCount: release.expectedTrackCount ?? null,
             releaseGroupId: release.releaseGroupId ?? null,
+            searchAlbum: release.searchAlbum ?? null,
             title: file.filename,
             username: release.username,
             remoteFilename: file.remoteFilename,

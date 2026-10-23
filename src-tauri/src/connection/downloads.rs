@@ -1,3 +1,4 @@
+use super::album_query::{AlbumIdentity, AlbumQueryPlan};
 use super::soundcheck::{inspect_file, SoundcheckResult, SoundcheckStatus};
 use super::store::{self, DecodeError, JsonFile};
 use super::transfer_writer::TransferWriter;
@@ -20,7 +21,7 @@ const PROGRESS_EVENT: &str = "forever://transfer-progress";
 const STORE_ERROR_EVENT: &str = "forever://transfer-store-error";
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
-const STORE_VERSION: u32 = 2;
+const STORE_VERSION: u32 = 3;
 const MAX_AUTOMATIC_RETRIES: u32 = 3;
 const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u8 = 3;
 const MAX_CONCURRENT_DOWNLOADS: u8 = 6;
@@ -171,6 +172,8 @@ pub struct TransferSnapshot {
     pub expected_track_count: Option<u32>,
     #[serde(default)]
     pub release_group_id: Option<String>,
+    #[serde(default)]
+    pub search_album: Option<AlbumIdentity>,
     pub title: String,
     pub username: String,
     pub remote_filename: String,
@@ -251,6 +254,8 @@ pub struct EnqueueReleaseRequest {
     pub expected_track_count: Option<u32>,
     #[serde(default)]
     pub release_group_id: Option<String>,
+    #[serde(default)]
+    pub search_album: Option<AlbumIdentity>,
     #[serde(default)]
     pub alternatives: Vec<ReleaseAlternativeSource>,
 }
@@ -655,6 +660,7 @@ impl TransferHub {
             file_count: None,
             expected_track_count: None,
             release_group_id: None,
+            search_album: None,
             title: request.title.trim().to_owned(),
             username: request.username,
             remote_filename: normalize_remote_filename(&request.remote_filename),
@@ -732,6 +738,7 @@ impl TransferHub {
                 file_count: Some(file_count),
                 expected_track_count: request.expected_track_count,
                 release_group_id: request.release_group_id.clone(),
+                search_album: request.search_album.clone(),
                 title: file.title.trim().to_owned(),
                 username: request.username.clone(),
                 remote_filename: normalize_remote_filename(&file.remote_filename),
@@ -1404,6 +1411,7 @@ impl TransferHub {
                 file_count: Some(file_count),
                 expected_track_count: first.expected_track_count,
                 release_group_id: first.release_group_id,
+                search_album: first.search_album,
                 title: request.title.trim().to_owned(),
                 username: request.username.trim().to_owned(),
                 remote_filename: normalized_remote,
@@ -2197,6 +2205,10 @@ fn validate_release_request(request: &EnqueueReleaseRequest) -> Result<(), Trans
         || request
             .expected_track_count
             .is_some_and(|count| count == 0 || count > 5_000)
+        || request
+            .search_album
+            .as_ref()
+            .is_some_and(|album| AlbumQueryPlan::new(album, None).is_err())
         || request.release_group_id.as_deref().is_some_and(|id| {
             id.len() != 36
                 || id
@@ -2382,7 +2394,12 @@ fn load_store(path: &JsonFile) -> Result<TransferStore, TransferError> {
 }
 
 fn decode_store(bytes: &[u8]) -> Result<TransferStore, DecodeError> {
-    let store: TransferStore = store::decode(bytes, STORE_VERSION, None, &[(1, migrate_v1_to_v2)])?;
+    let store: TransferStore = store::decode(
+        bytes,
+        STORE_VERSION,
+        None,
+        &[(1, migrate_v1_to_v2), (2, migrate_v2_to_v3)],
+    )?;
     if !(1..=MAX_CONCURRENT_DOWNLOADS).contains(&store.max_concurrent_downloads) {
         return Err(DecodeError::Invalid(
             TransferError::InvalidConcurrentDownloads.to_string(),
@@ -2400,6 +2417,13 @@ fn decode_store(bytes: &[u8]) -> Result<TransferStore, DecodeError> {
 fn migrate_v1_to_v2(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
     let mut store: TransferStore = serde_json::from_value(value)?;
     store.version = 2;
+    Ok(serde_json::to_value(store)?)
+}
+
+fn migrate_v2_to_v3(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: TransferStore = serde_json::from_value(value)?;
+    store.version = 3;
+    // Old folder/display labels are not a reliable artist/title identity.
     Ok(serde_json::to_value(store)?)
 }
 
@@ -2853,6 +2877,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn transfer_query_identity_round_trips_and_v2_migration_keeps_legacy_labels_unparsed() {
+        let fixture = include_bytes!("../../fixtures/stores/transfers-v1.json");
+        let mut store = decode_store(fixture).unwrap();
+        let identity = AlbumIdentity {
+            artist: "Björk".into(),
+            title: "Début (Deluxe Edition)".into(),
+        };
+        store.transfers[0].search_album = Some(identity.clone());
+        let bytes = serde_json::to_vec(&store).unwrap();
+        assert_eq!(
+            decode_store(&bytes).unwrap().transfers[0].search_album,
+            Some(identity)
+        );
+        let mut legacy = serde_json::to_value(store).unwrap();
+        legacy["version"] = 2.into();
+        legacy["transfers"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("searchAlbum");
+        let migrated = decode_store(&serde_json::to_vec(&legacy).unwrap()).unwrap();
+        assert_eq!(migrated.version, 3);
+        assert!(migrated.transfers[0].search_album.is_none());
+        assert_eq!(migrated.transfers[0].id, "resume-1");
+        assert_eq!(migrated.transfers[0].transferred_bytes, 37);
+    }
+
+    #[test]
     fn corrupt_store_recovers_fixture_and_future_schema_is_write_protected() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("transfers.json");
@@ -2920,6 +2971,7 @@ mod tests {
             file_count: Some(2),
             expected_track_count: Some(2),
             release_group_id: None,
+            search_album: None,
             title: remote_filename.to_owned(),
             username: username.to_owned(),
             remote_filename: remote_filename.to_owned(),
@@ -3111,6 +3163,7 @@ mod tests {
             file_count: None,
             expected_track_count: None,
             release_group_id: None,
+            search_album: None,
             title: "Track".to_owned(),
             username: "peer".to_owned(),
             remote_filename: "Track.flac".to_owned(),
@@ -3233,6 +3286,7 @@ mod tests {
             file_count: None,
             expected_track_count: None,
             release_group_id: None,
+            search_album: None,
             title: "Track.flac".to_owned(),
             username: "peer".to_owned(),
             remote_filename: "Music\\Track.flac".to_owned(),
@@ -3389,6 +3443,7 @@ mod tests {
             }],
             expected_track_count: Some(1),
             release_group_id: None,
+            search_album: None,
             alternatives: Vec::new(),
         };
         assert!(validate_release_request(&request).is_ok());
@@ -3414,6 +3469,7 @@ mod tests {
             }],
             expected_track_count: Some(1),
             release_group_id: None,
+            search_album: None,
             alternatives: Vec::new(),
         };
         let queued = release_transfer(

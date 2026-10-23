@@ -1,8 +1,9 @@
+use super::album_query::{next_token, AlbumIdentity, AlbumQueryPlan, QueryMemory};
 use super::protocol::SearchResponse;
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{atomic::AtomicU32, Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter};
@@ -90,6 +91,7 @@ struct SearchRuntime {
     peers: HashSet<String>,
     next_result_id: u64,
     queued_at: Instant,
+    plan: Option<AlbumQueryPlan>,
 }
 
 impl SearchRuntime {
@@ -101,6 +103,7 @@ impl SearchRuntime {
             peers: HashSet::new(),
             next_result_id: 0,
             queued_at: Instant::now(),
+            plan: None,
         }
     }
 
@@ -139,9 +142,15 @@ impl SearchRuntime {
             return Vec::new();
         }
 
-        self.peers.insert(response.username.clone());
         let mut accepted = Vec::new();
         for file in response.files {
+            if self
+                .plan
+                .as_ref()
+                .is_some_and(|plan| !plan.accepts(&file.filename))
+            {
+                continue;
+            }
             if self.seen.len() >= SEARCH_RESULT_LIMIT {
                 break;
             }
@@ -173,6 +182,9 @@ impl SearchRuntime {
             });
         }
 
+        if !accepted.is_empty() {
+            self.peers.insert(response.username.clone());
+        }
         self.snapshot.result_count = self.seen.len().try_into().unwrap_or(u32::MAX);
         self.snapshot.peer_count = self.peers.len().try_into().unwrap_or(u32::MAX);
         self.snapshot.message = format!(
@@ -215,19 +227,39 @@ impl SearchRuntime {
         };
         self.finish(SearchState::Completed, message)
     }
+
+    fn retry_empty(&mut self, tokens: &AtomicU32) -> bool {
+        if self.snapshot.result_count != 0
+            || !self.plan.as_mut().is_some_and(AlbumQueryPlan::advance)
+        {
+            return false;
+        }
+        self.snapshot.token = Some(next_token(tokens));
+        self.snapshot.query = self.plan.as_ref().unwrap().query().to_owned();
+        self.snapshot.message = format!(
+            "No matches. Queued {}",
+            self.plan.as_ref().unwrap().status()
+        );
+        self.snapshot.started_at_ms = None;
+        self.deadline = None;
+        self.queued_at = Instant::now();
+        true
+    }
 }
 
 #[derive(Clone)]
 pub struct SearchHub {
     app: AppHandle,
     runtimes: Arc<Mutex<HashMap<u32, SearchRuntime>>>,
+    queries: QueryMemory,
 }
 
 impl SearchHub {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(app: AppHandle, queries: QueryMemory) -> Self {
         Self {
             app,
             runtimes: Arc::new(Mutex::new(HashMap::new())),
+            queries,
         }
     }
 
@@ -248,7 +280,13 @@ impl SearchHub {
         token: u32,
         client_id: String,
         query: String,
+        album: Option<AlbumIdentity>,
     ) -> Result<SearchSnapshot, String> {
+        let plan = album
+            .as_ref()
+            .map(|album| self.queries.plan(album))
+            .transpose()?;
+        let query = plan.as_ref().map_or(query, |plan| plan.query().to_owned());
         let snapshot = {
             let mut runtimes = self
                 .runtimes
@@ -284,6 +322,7 @@ impl SearchHub {
                 }
             }
             let mut runtime = SearchRuntime::new();
+            runtime.plan = plan;
             let snapshot = runtime.queue(token, client_id, query);
             runtimes.insert(token, runtime);
             snapshot
@@ -413,25 +452,42 @@ impl SearchHub {
         }
     }
 
-    pub fn expire_if_due(&self) {
+    pub fn expire_if_due(&self, tokens: &AtomicU32) {
         let snapshots = {
             let mut runtimes = self
                 .runtimes
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            runtimes
-                .values_mut()
-                .filter_map(|runtime| {
+            let due = runtimes
+                .iter()
+                .filter_map(|(token, runtime)| {
                     runtime
                         .deadline
                         .is_some_and(|deadline| Instant::now() >= deadline)
-                        .then(|| runtime.finish_for_count())
-                        .flatten()
+                        .then_some(*token)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let mut snapshots = Vec::new();
+            for token in due {
+                let mut runtime = runtimes.remove(&token).unwrap();
+                if runtime.retry_empty(tokens) {
+                    snapshots.push(("started", runtime.snapshot.clone()));
+                } else {
+                    if runtime.snapshot.result_count > 0 {
+                        if let Some(plan) = &runtime.plan {
+                            self.queries.remember(plan);
+                        }
+                    }
+                    if let Some(snapshot) = runtime.finish_for_count() {
+                        snapshots.push(("completed", snapshot));
+                    }
+                }
+                runtimes.insert(runtime.snapshot.token.unwrap(), runtime);
+            }
+            snapshots
         };
-        for snapshot in snapshots {
-            self.emit("completed", snapshot, Vec::new());
+        for (event, snapshot) in snapshots {
+            self.emit(event, snapshot, Vec::new());
         }
     }
 
@@ -441,7 +497,12 @@ impl SearchHub {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(&token)
-            .and_then(|runtime| runtime.finish(SearchState::Completed, message.to_owned()));
+            .and_then(|runtime| {
+                if let Some(plan) = &runtime.plan {
+                    self.queries.remember(plan);
+                }
+                runtime.finish(SearchState::Completed, message.to_owned())
+            });
         if let Some(snapshot) = snapshot {
             self.emit("completed", snapshot, Vec::new());
         }
@@ -474,7 +535,10 @@ fn take_pending(
         .min_by_key(|runtime| runtime.queued_at)?;
     runtime.deadline = Some(now + SEARCH_TIMEOUT);
     runtime.snapshot.started_at_ms = Some(timestamp_ms());
-    runtime.snapshot.message = "Listening across the Soulseek network…".to_owned();
+    runtime.snapshot.message = runtime.plan.as_ref().map_or_else(
+        || "Listening across the Soulseek network…".to_owned(),
+        AlbumQueryPlan::status,
+    );
     Some(runtime.snapshot.clone())
 }
 
@@ -502,6 +566,76 @@ fn timestamp_ms() -> u64 {
 mod tests {
     use super::*;
     use crate::connection::protocol::SearchFile;
+
+    #[test]
+    fn album_fallbacks_wait_for_dispatch_filter_other_artists_and_stop_after_success() {
+        let mut runtime = SearchRuntime::new();
+        runtime.plan = Some(
+            AlbumQueryPlan::new(
+                &AlbumIdentity {
+                    artist: "Artist".into(),
+                    title: "The Northern Lights".into(),
+                },
+                None,
+            )
+            .unwrap(),
+        );
+        runtime.start(42, "album-dial".into(), "artist the northern lights".into());
+        let tokens = AtomicU32::new(100);
+        assert!(runtime.retry_empty(&tokens));
+        assert_eq!(runtime.snapshot.token, Some(100));
+        assert_eq!(runtime.snapshot.query, "the northern lights");
+        assert!(runtime.record(response(42, "stale")).is_empty());
+        assert!(runtime.record(response(100, "early")).is_empty());
+        let mut runtimes = HashMap::from([(100, runtime)]);
+        let sent = Instant::now() + Duration::from_secs(300);
+        assert_eq!(
+            take_pending(&mut runtimes, false, sent).unwrap().token,
+            Some(100)
+        );
+        let runtime = runtimes.get_mut(&100).unwrap();
+        assert_eq!(runtime.deadline, Some(sent + SEARCH_TIMEOUT));
+        let mut unrelated = response(100, "other");
+        unrelated.files[0].filename = "Music\\Someone Else\\The Northern Lights\\Track.flac".into();
+        assert!(runtime.record(unrelated).is_empty());
+        assert_eq!(runtime.snapshot.peer_count, 0);
+        assert_eq!(runtime.record(response(100, "correct")).len(), 1);
+        assert!(!runtime.retry_empty(&tokens));
+        assert_eq!(
+            runtime.finish_for_count().unwrap().state,
+            SearchState::Completed
+        );
+    }
+
+    #[test]
+    fn ordinary_queries_do_not_fallback_and_cancelled_album_retry_never_dispatches() {
+        let tokens = AtomicU32::new(10);
+        let mut plain = SearchRuntime::new();
+        plain.start(1, "plain".into(), "Björk -live *debut".into());
+        assert!(!plain.retry_empty(&tokens));
+        assert_eq!(plain.snapshot.query, "Björk -live *debut");
+        let mut album = SearchRuntime::new();
+        album.plan = Some(
+            AlbumQueryPlan::new(
+                &AlbumIdentity {
+                    artist: "Artist".into(),
+                    title: "Album".into(),
+                },
+                None,
+            )
+            .unwrap(),
+        );
+        album.start(2, "signal-relay:release-1".into(), "artist album".into());
+        assert!(album.retry_empty(&tokens));
+        album.finish(SearchState::Stopped, "Stopped".into());
+        let mut runtimes = HashMap::from([(10, album)]);
+        assert!(take_pending(&mut runtimes, true, Instant::now()).is_none());
+        assert!(runtimes
+            .get_mut(&10)
+            .unwrap()
+            .record(response(10, "late"))
+            .is_empty());
+    }
 
     #[test]
     fn queued_searches_wait_without_timing_out_and_cancelled_tokens_never_send() {

@@ -1,6 +1,6 @@
 [package]
 name = "forever"
-version = "0.0.58"
+version = "0.0.59"
 description = "A polished, modern desktop client for the Soulseek network."
 authors = ["soundtrackgeek"]
 edition = "2021"
@@ -38,6 +38,7 @@ symphonia = { version = "0.6", features = ["all"] }
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
 zeroize = "1"
+unicode-normalization = "0.1"
 
 tempfile = "3"
 igd-next = { version = "0.17.1", features = ["aio_tokio"] }

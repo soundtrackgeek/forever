@@ -318,7 +318,7 @@ export function ArchiveWorkspace({
             <span className="is-available"><small>Smart Matches</small><strong>{availableCount}</strong><p>ready to review</p></span>
             <span><small>Still quiet</small><strong>{waitingCount}</strong><p>without a match</p></span>
             <span className="is-fulfilled"><small>Fulfilled shelf</small><strong>{fulfilledCount}</strong><p>quiet · saved · reversible</p></span>
-            <span className={online ? "is-online" : "is-offline"}><small>Background checks</small><strong>{wantedScheduleStatus(wanted, online)}</strong><p>{online ? wanted.activeAlbumId ? wanted.checkQueued ? "manual check queued" : "checking one album" : "network online" : "resume when reconnected"}</p></span>
+            <span className={online ? "is-online" : "is-offline"}><small>Background checks</small><strong>{wantedScheduleStatus(wanted, online)}</strong><p>{online ? wanted.activeAlbumId ? wanted.checkQueued ? "album query queued" : "checking one album" : "network online" : "resume when reconnected"}</p>{wanted.activeQuery ? <p>{wanted.activeQuery}</p> : null}</span>
           </section>
 
           {wantedError ? (

@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { searchResults as previewResults } from "../data/mockData";
 import type {
+  AlbumSearchContext,
   LiveSearchResult,
   SearchEvent,
   SearchResult,
@@ -314,6 +315,7 @@ export function useSoulseekSearch(activeSessionId: string) {
           error: null,
           unseenCount: 0,
         };
+        if (kind !== "started" && existing.snapshot.token != null && existing.snapshot.token !== snapshot.token) return current;
         return {
           ...current,
           [clientId]: {
@@ -376,13 +378,13 @@ export function useSoulseekSearch(activeSessionId: string) {
   }, []);
 
   const startSearch = useCallback(
-    async (clientId: string, rawQuery: string) => {
+    async (clientId: string, rawQuery: string, album?: Pick<AlbumSearchContext, "artist" | "title">) => {
       const query = rawQuery.trim();
       if (!query) throw new Error("Enter something to search for.");
 
       if (native) {
         try {
-          const next = await invoke<SearchSnapshot>("search_start", { clientId, query });
+          const next = await invoke<SearchSnapshot>("search_start", { clientId, query, ...(album ? { album: { artist: album.artist, title: album.title } } : {}) });
           setRecords((current) => ({
             ...current,
             [clientId]: { snapshot: next, results: [], error: null, unseenCount: 0 },

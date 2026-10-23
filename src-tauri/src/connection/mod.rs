@@ -1,3 +1,4 @@
+mod album_query;
 mod branch;
 mod credentials;
 mod diagnostics;
@@ -872,9 +873,10 @@ pub async fn search_start(
     manager: State<'_, ConnectionManager>,
     client_id: String,
     query: String,
+    album: Option<album_query::AlbumIdentity>,
 ) -> Result<SearchSnapshot, String> {
     manager
-        .start_search(client_id, query)
+        .start_search(client_id, query, album)
         .map_err(|error| error.to_string())
 }
 

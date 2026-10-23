@@ -992,17 +992,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.58 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.59 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Wanted uses server-paced wishlist searches with adaptive backoff.",
+        "Album searches normalize accents, punctuation, and edition suffixes.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "User searches, Signal Relay, Shelf Radar, and Wanted share one search budget.",
+        "Empty searches try bounded fallbacks while keeping server pacing.",
       ),
     ).toBeInTheDocument();
     expect(

@@ -1,3 +1,4 @@
+use super::album_query::{AlbumIdentity, AlbumQueryPlan, QueryMemory};
 use super::{protocol::SearchResponse, search::SearchResult};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -77,10 +78,6 @@ impl RadarAlbumScan {
             error: None,
         }
     }
-
-    fn query(&self) -> String {
-        format!("{} {}", self.artist, self.title)
-    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -121,7 +118,8 @@ struct RadarEvent {
 struct ActiveRadarSearch {
     album_index: usize,
     token: u32,
-    deadline: Instant,
+    deadline: Option<Instant>,
+    plan: AlbumQueryPlan,
     seen: HashSet<String>,
     peers: HashSet<String>,
     next_result_id: u64,
@@ -132,6 +130,7 @@ struct RadarRuntime {
     queue: VecDeque<usize>,
     active: Option<ActiveRadarSearch>,
     next_allowed_at: Option<Instant>,
+    queries: QueryMemory,
 }
 
 impl RadarRuntime {
@@ -141,11 +140,20 @@ impl RadarRuntime {
             queue: VecDeque::new(),
             active: None,
             next_allowed_at: None,
+            queries: QueryMemory::default(),
         }
     }
 
     fn begin(&mut self, requests: Vec<RadarAlbumRequest>) -> Result<RadarSnapshot, RadarError> {
         let requests = validate_requests(requests)?;
+        for request in &requests {
+            self.queries
+                .plan(&AlbumIdentity {
+                    artist: request.artist.clone(),
+                    title: request.title.clone(),
+                })
+                .map_err(|_| RadarError::InvalidAlbum)?;
+        }
         self.snapshot = RadarSnapshot {
             state: RadarState::Scanning,
             total_count: requests.len().try_into().unwrap_or(u32::MAX),
@@ -162,8 +170,20 @@ impl RadarRuntime {
     }
 
     fn start_next(&mut self, token: u32) -> Option<(String, String)> {
-        if self.snapshot.state != RadarState::Scanning || self.active.is_some() {
+        if self.snapshot.state != RadarState::Scanning {
             return None;
+        }
+        if let Some(active) = &mut self.active {
+            if active.deadline.is_some() {
+                return None;
+            }
+            active.token = token;
+            active.deadline = Some(Instant::now() + RADAR_SEARCH_TIMEOUT);
+            self.snapshot.message = active.plan.status();
+            return Some((
+                self.snapshot.albums[active.album_index].album_id.clone(),
+                active.plan.query().to_owned(),
+            ));
         }
         if self
             .next_allowed_at
@@ -192,14 +212,22 @@ impl RadarRuntime {
         album.finished_at_ms = None;
         album.error = None;
         let album_id = album.album_id.clone();
-        let query = album.query();
+        let plan = self
+            .queries
+            .plan(&AlbumIdentity {
+                artist: album.artist.clone(),
+                title: album.title.clone(),
+            })
+            .ok()?;
+        let query = plan.query().to_owned();
         self.snapshot.active_album_id = Some(album_id.clone());
-        self.snapshot.message = format!("Listening for {}…", album.title);
+        self.snapshot.message = plan.status();
         self.snapshot.updated_at_ms = timestamp_ms();
         self.active = Some(ActiveRadarSearch {
             album_index,
             token,
-            deadline: Instant::now() + RADAR_SEARCH_TIMEOUT,
+            deadline: Some(Instant::now() + RADAR_SEARCH_TIMEOUT),
+            plan,
             seen: HashSet::new(),
             peers: HashSet::new(),
             next_result_id: 0,
@@ -209,13 +237,15 @@ impl RadarRuntime {
 
     fn record(&mut self, response: &SearchResponse) -> Option<(String, Vec<SearchResult>)> {
         let active = self.active.as_mut()?;
-        if response.token != active.token {
+        if response.token != active.token || active.deadline.is_none() {
             return None;
         }
-        active.peers.insert(response.username.clone());
         let album_id = self.snapshot.albums[active.album_index].album_id.clone();
         let mut accepted = Vec::new();
         for file in &response.files {
+            if !active.plan.accepts(&file.filename) {
+                continue;
+            }
             if active.seen.len() >= RADAR_RESULT_LIMIT {
                 break;
             }
@@ -245,6 +275,9 @@ impl RadarRuntime {
                 is_private: file.is_private,
             });
         }
+        if !accepted.is_empty() {
+            active.peers.insert(response.username.clone());
+        }
         let album = &mut self.snapshot.albums[active.album_index];
         album.result_count = active.seen.len().try_into().unwrap_or(u32::MAX);
         album.peer_count = active.peers.len().try_into().unwrap_or(u32::MAX);
@@ -254,12 +287,19 @@ impl RadarRuntime {
     }
 
     fn expire_if_due(&mut self) -> Option<String> {
-        if self
-            .active
-            .as_ref()
-            .is_none_or(|active| Instant::now() < active.deadline)
-        {
+        if self.active.as_ref().is_none_or(|active| {
+            active
+                .deadline
+                .is_none_or(|deadline| Instant::now() < deadline)
+        }) {
             return None;
+        }
+        let active = self.active.as_mut().unwrap();
+        if active.seen.is_empty() && active.plan.advance() {
+            active.deadline = None;
+            self.snapshot.message = format!("No matches. Queued {}", active.plan.status());
+            self.snapshot.updated_at_ms = timestamp_ms();
+            return Some(self.snapshot.albums[active.album_index].album_id.clone());
         }
         self.finish_active(None)
     }
@@ -270,6 +310,9 @@ impl RadarRuntime {
 
     fn finish_active(&mut self, error: Option<String>) -> Option<String> {
         let active = self.active.take()?;
+        if error.is_none() && !active.seen.is_empty() {
+            self.queries.remember(&active.plan);
+        }
         let album = &mut self.snapshot.albums[active.album_index];
         let album_id = album.album_id.clone();
         album.finished_at_ms = Some(timestamp_ms());
@@ -352,10 +395,12 @@ pub struct RadarHub {
 }
 
 impl RadarHub {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(app: AppHandle, queries: QueryMemory) -> Self {
+        let mut runtime = RadarRuntime::new();
+        runtime.queries = queries;
         Self {
             app,
-            runtime: Arc::new(Mutex::new(RadarRuntime::new())),
+            runtime: Arc::new(Mutex::new(runtime)),
         }
     }
 
@@ -423,7 +468,15 @@ impl RadarHub {
                 .map(|album_id| (album_id, runtime.snapshot.clone()))
         };
         if let Some((album_id, snapshot)) = completed {
-            self.emit("albumCompleted", snapshot, Some(album_id), Vec::new());
+            let event =
+                if snapshot.albums.iter().any(|album| {
+                    album.album_id == album_id && album.state == RadarAlbumState::Scanning
+                }) {
+                    "albumStarted"
+                } else {
+                    "albumCompleted"
+                };
+            self.emit(event, snapshot, Some(album_id), Vec::new());
         }
     }
 
@@ -535,6 +588,72 @@ pub enum RadarError {
 mod tests {
     use super::*;
     use crate::connection::protocol::SearchFile;
+
+    #[test]
+    fn empty_radar_attempts_retry_without_completing_album_or_accepting_old_tokens() {
+        let mut runtime = RadarRuntime::new();
+        runtime
+            .begin(vec![request("one", "The Northern Lights")])
+            .unwrap();
+        assert_eq!(
+            runtime.start_next(1).unwrap().1,
+            "def leppard the northern lights"
+        );
+        runtime.active.as_mut().unwrap().deadline = Some(Instant::now());
+        assert_eq!(runtime.expire_if_due(), Some("one".into()));
+        assert_eq!(runtime.snapshot.completed_count, 0);
+        assert_eq!(runtime.snapshot.state, RadarState::Scanning);
+        assert!(runtime.active.as_ref().unwrap().deadline.is_none());
+        let mut response = SearchResponse {
+            token: 1,
+            username: "source".into(),
+            files: vec![SearchFile {
+                filename: "Music\\Def Leppard\\The Northern Lights\\Track.flac".into(),
+                size_bytes: 10,
+                extension: "flac".into(),
+                bitrate: None,
+                duration_seconds: None,
+                vbr: None,
+                sample_rate: None,
+                bit_depth: None,
+                is_private: false,
+            }],
+            slot_free: true,
+            average_speed: 1,
+            queue_length: 0,
+        };
+        assert!(runtime.record(&response).is_none());
+        assert_eq!(runtime.start_next(2).unwrap().1, "the northern lights");
+        assert!(runtime.record(&response).is_none());
+        response.token = 2;
+        response.files[0].filename = "Other\\The Northern Lights\\01.flac".into();
+        assert!(runtime.record(&response).unwrap().1.is_empty());
+        response.files[0].filename = "Def Leppard\\The Northern Lights\\01.flac".into();
+        assert_eq!(runtime.record(&response).unwrap().1.len(), 1);
+        runtime.active.as_mut().unwrap().deadline = Some(Instant::now());
+        runtime.expire_if_due();
+        assert_eq!(runtime.snapshot.state, RadarState::Completed);
+        assert_eq!(runtime.snapshot.completed_count, 1);
+        assert_eq!(
+            runtime
+                .queries
+                .plan(&AlbumIdentity {
+                    artist: "Def Leppard".into(),
+                    title: "The Northern Lights".into()
+                })
+                .unwrap()
+                .query(),
+            "the northern lights"
+        );
+        runtime
+            .begin(vec![request("two", "Another Album")])
+            .unwrap();
+        runtime.start_next(3);
+        runtime.active.as_mut().unwrap().deadline = Some(Instant::now());
+        runtime.expire_if_due();
+        runtime.stop();
+        assert!(runtime.start_next(4).is_none());
+    }
 
     fn request(id: &str, title: &str) -> RadarAlbumRequest {
         RadarAlbumRequest {

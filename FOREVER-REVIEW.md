@@ -243,7 +243,21 @@ network whose server can throttle or ban clients that search too aggressively.
 - Show the honest effective cadence in the UI ("≈ every 2 h at current list
   size").
 
-### 6. Search query normalization and fallbacks
+### 6. Search query normalization and fallbacks - DONE
+
+**Implemented in 0.0.59 (2026-10-23):** Wanted, Radar, Relay, and album handoff
+share a Rust builder with accent/punctuation folding, conservative edition
+suffix stripping, short-word reduction with an all-short-name escape, and a
+200-byte cap. Empty attempts advance through up to three distinct queries;
+broader variants require the artist in the returned path. Fresh tokens, full
+response windows at dispatch, cancellation, and the existing priority/wishlist
+budget apply to retries. A bounded eighth JSON store remembers successful
+variants across producers and restarts. New transfers retain structured album
+identity; schema-3 migration leaves old unstructured folders as normalization-only
+Relay searches. Tests cover the builder, history/recovery, runtime transitions,
+wishlist pacing, IPC handoff, stale replies, and transfer migration. An empty
+automatic album may consume three server slots; public-network recall has not
+been measured. Ranking consolidation remains item 7. Original findings follow.
 
 **Today:** Background and handoff searches send raw strings such as
 `format!("{} {}", album.artist, album.title)`

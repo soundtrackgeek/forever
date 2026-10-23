@@ -1,10 +1,11 @@
+use super::album_query::{next_token, AlbumIdentity, AlbumQueryPlan, QueryMemory};
 use super::protocol::SearchResponse;
 use super::search_governor::{SearchGovernor, SearchLane, SEARCH_SPACING};
 use super::store::{self, DecodeError, JsonFile};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex, RwLock},
+    sync::{atomic::AtomicU32, Arc, Mutex, RwLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter};
@@ -179,6 +180,7 @@ pub struct WantedSnapshot {
     pub wishlist_interval_seconds: Option<u32>,
     pub effective_cadence_minutes: Option<u64>,
     pub check_queued: bool,
+    pub active_query: Option<String>,
     pub updated_at_ms: u64,
 }
 
@@ -222,6 +224,20 @@ struct ActiveSearch {
     deadline: Option<Instant>,
     query: String,
     sources: HashMap<String, SourceAggregate>,
+    plan: AlbumQueryPlan,
+    automatic: bool,
+}
+
+impl ActiveSearch {
+    fn retry_empty(&mut self, tokens: &AtomicU32) -> bool {
+        if !self.sources.is_empty() || !self.plan.advance() {
+            return false;
+        }
+        self.token = next_token(tokens);
+        self.query = self.plan.query().to_owned();
+        self.deadline = None;
+        true
+    }
 }
 
 #[derive(Default)]
@@ -230,12 +246,17 @@ struct WantedRuntime {
 }
 
 impl WantedRuntime {
-    fn start_pending(&mut self, store: &WantedStore, now: Instant) -> Option<(u32, String)> {
+    fn start_pending(
+        &mut self,
+        store: &WantedStore,
+        now: Instant,
+        automatic: bool,
+    ) -> Option<(u32, String)> {
         let valid = self.active.as_ref().is_some_and(|active| {
-            store
-                .albums
-                .iter()
-                .any(|album| album.album_id == active.album_id && !album.paused && !album.fulfilled)
+            (!active.automatic || store.interval_minutes > 0)
+                && store.albums.iter().any(|album| {
+                    album.album_id == active.album_id && !album.paused && !album.fulfilled
+                })
         });
         if !valid {
             self.active = None;
@@ -244,7 +265,7 @@ impl WantedRuntime {
         let active = self
             .active
             .as_mut()
-            .filter(|active| active.deadline.is_none())?;
+            .filter(|active| active.deadline.is_none() && active.automatic == automatic)?;
         active.deadline = Some(now + SEARCH_TIMEOUT);
         Some((active.token, active.query.clone()))
     }
@@ -257,6 +278,7 @@ pub struct WantedHub {
     store: Arc<RwLock<WantedStore>>,
     runtime: Arc<Mutex<WantedRuntime>>,
     governor: SearchGovernor,
+    queries: QueryMemory,
 }
 
 impl WantedHub {
@@ -264,10 +286,12 @@ impl WantedHub {
         app: AppHandle,
         path: JsonFile,
         governor: SearchGovernor,
+        queries: QueryMemory,
     ) -> Result<Self, WantedError> {
         Ok(Self {
             app,
             governor,
+            queries,
             path: path.clone(),
             store: Arc::new(RwLock::new(load_store(&path)?)),
             runtime: Arc::new(Mutex::new(WantedRuntime::default())),
@@ -285,6 +309,7 @@ impl WantedHub {
             .as_ref()
             .is_some_and(|active| active.deadline.is_none());
         let active_deadline = runtime.active.as_ref().and_then(|active| active.deadline);
+        let active_query = runtime.active.as_ref().map(|active| active.plan.status());
         drop(runtime);
         let store = self
             .store
@@ -317,6 +342,7 @@ impl WantedHub {
             wishlist_interval_seconds,
             effective_cadence_minutes,
             check_queued,
+            active_query,
             updated_at_ms: now,
         }
     }
@@ -688,7 +714,7 @@ impl WantedHub {
         if runtime.active.is_some() {
             return Err(WantedError::CheckInProgress);
         }
-        let query = {
+        let plan = {
             let store = self
                 .store
                 .read()
@@ -704,26 +730,35 @@ impl WantedHub {
             if album.fulfilled {
                 return Err(WantedError::AlbumFulfilled);
             }
-            format!("{} {}", album.artist, album.title)
+            self.queries
+                .plan(&AlbumIdentity {
+                    artist: album.artist.clone(),
+                    title: album.title.clone(),
+                })
+                .map_err(|_| WantedError::InvalidAlbum)?
         };
+        let query = plan.query().to_owned();
         runtime.active = Some(ActiveSearch {
             album_id: album_id.to_owned(),
             token,
             deadline: (!force).then(|| Instant::now() + SEARCH_TIMEOUT),
             query: query.clone(),
             sources: HashMap::new(),
+            plan,
+            automatic: !force,
         });
         drop(runtime);
         self.publish();
         Ok(query)
     }
 
-    pub fn start_pending(&self) -> Option<(u32, String)> {
+    pub fn start_pending(&self, automatic: bool) -> Option<(u32, String)> {
         let mut runtime = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
         let had_active = runtime.active.is_some();
         let request = runtime.start_pending(
             &self.store.read().unwrap_or_else(|p| p.into_inner()),
             Instant::now(),
+            automatic,
         );
         let changed = request.is_some() || had_active != runtime.active.is_some();
         drop(runtime);
@@ -746,6 +781,9 @@ impl WantedHub {
             return;
         };
         for file in &response.files {
+            if !active.plan.accepts(&file.filename) {
+                continue;
+            }
             let extension = file.extension.trim_start_matches('.').to_ascii_lowercase();
             if !AUDIO_EXTENSIONS.contains(&extension.as_str()) {
                 continue;
@@ -787,7 +825,8 @@ impl WantedHub {
         }
     }
 
-    pub fn expire_if_due(&self) {
+    pub fn expire_if_due(&self, tokens: &AtomicU32) {
+        let mut retried = false;
         let active = {
             let mut runtime = self
                 .runtime
@@ -798,13 +837,20 @@ impl WantedHub {
                     .deadline
                     .is_some_and(|deadline| Instant::now() >= deadline)
             }) {
-                runtime.active.take()
+                if runtime.active.as_mut().unwrap().retry_empty(tokens) {
+                    retried = true;
+                    None
+                } else {
+                    runtime.active.take()
+                }
             } else {
                 None
             }
         };
         if let Some(active) = active {
             self.finish(active);
+        } else if retried {
+            self.publish();
         }
     }
 
@@ -841,6 +887,9 @@ impl WantedHub {
     }
 
     fn finish(&self, active: ActiveSearch) {
+        if !active.sources.is_empty() {
+            self.queries.remember(&active.plan);
+        }
         let preferences = self
             .store
             .read()
@@ -1213,6 +1262,14 @@ fn validate_request(mut request: WantedAlbumRequest) -> Result<WantedAlbumReques
     request.album_id = valid_album_id(&request.album_id)?.to_owned();
     request.artist = valid_text(&request.artist, 180)?;
     request.title = valid_text(&request.title, 500)?;
+    AlbumQueryPlan::new(
+        &AlbumIdentity {
+            artist: request.artist.clone(),
+            title: request.title.clone(),
+        },
+        None,
+    )
+    .map_err(|_| WantedError::InvalidAlbum)?;
     request.first_release_date = request.first_release_date.trim().chars().take(32).collect();
     request.cover_art_url = request
         .cover_art_url
@@ -1480,6 +1537,15 @@ mod tests {
                 token: 5,
                 deadline: None,
                 query: "artist album".to_owned(),
+                plan: AlbumQueryPlan::new(
+                    &AlbumIdentity {
+                        artist: "artist".into(),
+                        title: "album".into(),
+                    },
+                    None,
+                )
+                .unwrap(),
+                automatic: false,
                 sources: HashMap::new(),
             }),
         };
@@ -1487,23 +1553,81 @@ mod tests {
         assert!(runtime.active.as_ref().unwrap().deadline.is_none());
         let sent = now + Duration::from_secs(300);
         assert_eq!(
-            runtime.start_pending(&store, sent),
+            runtime.start_pending(&store, sent, false),
             Some((5, "artist album".to_owned()))
         );
         assert_eq!(
             runtime.active.as_ref().unwrap().deadline,
             Some(sent + SEARCH_TIMEOUT)
         );
-        assert!(runtime.start_pending(&store, sent).is_none());
+        assert!(runtime.start_pending(&store, sent, false).is_none());
         store.albums[0].paused = true;
         let mut runtime = pending();
-        assert!(runtime.start_pending(&store, now).is_none());
+        assert!(runtime.start_pending(&store, now, false).is_none());
         assert!(runtime.active.is_none());
         store.albums[0].paused = false;
         store.albums[0].fulfilled = true;
-        assert!(pending().start_pending(&store, now).is_none());
+        assert!(pending().start_pending(&store, now, false).is_none());
         store.albums.clear();
-        assert!(pending().start_pending(&store, now).is_none());
+        assert!(pending().start_pending(&store, now, false).is_none());
+    }
+
+    #[test]
+    fn automatic_fallbacks_stay_on_wishlist_slots_and_only_finish_backoff_once() {
+        let store = schedule_store(1);
+        let now = Instant::now();
+        let governor = SearchGovernor::default();
+        governor.set_online(true);
+        governor.set_wishlist_interval(720, now);
+        let mut runtime = WantedRuntime {
+            active: Some(ActiveSearch {
+                album_id: "album-000".into(),
+                token: 1,
+                deadline: Some(now + SEARCH_TIMEOUT),
+                query: "artist the northern lights".into(),
+                sources: HashMap::new(),
+                automatic: true,
+                plan: AlbumQueryPlan::new(
+                    &AlbumIdentity {
+                        artist: "Artist".into(),
+                        title: "The Northern Lights".into(),
+                    },
+                    None,
+                )
+                .unwrap(),
+            }),
+        };
+        let tokens = AtomicU32::new(10);
+        governor.sent(SearchLane::Wanted, now);
+        assert!(runtime.active.as_mut().unwrap().retry_empty(&tokens));
+        assert!(runtime.start_pending(&store, now, false).is_none());
+        let dispatch = |runtime: &mut WantedRuntime, time| {
+            governor.take_next(time, |lane| match lane {
+                SearchLane::User => runtime.start_pending(&store, time, false),
+                SearchLane::Wanted => runtime.start_pending(&store, time, true),
+                _ => None,
+            })
+        };
+        assert!(dispatch(&mut runtime, now + Duration::from_secs(719)).is_none());
+        let sent = now + Duration::from_secs(720);
+        assert_eq!(
+            dispatch(&mut runtime, sent),
+            Some((SearchLane::Wanted, (10, "the northern lights".into())))
+        );
+        assert_eq!(
+            runtime.active.as_ref().unwrap().deadline,
+            Some(sent + SEARCH_TIMEOUT)
+        );
+        assert!(runtime.active.as_mut().unwrap().retry_empty(&tokens));
+        assert!(dispatch(&mut runtime, sent + Duration::from_secs(15)).is_none());
+        assert_eq!(
+            dispatch(&mut runtime, sent + Duration::from_secs(720))
+                .unwrap()
+                .0,
+            SearchLane::Wanted
+        );
+        assert!(!runtime.active.as_mut().unwrap().retry_empty(&tokens));
+        assert_eq!(store.albums[0].consecutive_misses, 0);
     }
 
     #[test]

@@ -5,6 +5,33 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.59] - 2026-10-23
+
+### Added
+
+- One Rust album query builder for Wanted, Shelf Radar, Signal Relay, and album
+  handoffs: Unicode accent folding, punctuation and ampersand normalization,
+  conservative edition/remaster suffix removal, short-word reduction, and a
+  200-byte word-boundary limit. Entirely short names remain searchable.
+- Up to three distinct attempts after empty results: artist plus title, title
+  alone with an artist path filter, then artist plus distinctive title words.
+  Fresh tokens reject stale replies; queued retries retain full response windows
+  and remain in their original search-governor lane, including wishlist pacing.
+- Shared successful-variant history in bounded, crash-safe `search-queries.json`,
+  reused across producers and restarts. Query progress is visible in search,
+  Wanted, and Radar status; ordinary typed file searches retain their syntax.
+
+### Changed
+
+- Preserve structured artist/title metadata on new album transfers for Relay;
+  migrate transfers to schema 3 without guessing identities for older folders.
+  Relay searches without metadata receive normalization with no broad fallback.
+- Explain that empty albums can consume up to three wishlist slots. Only the
+  completed check contributes an empty-check backoff outcome.
+- Mark review item 6 complete, align release versions, and add normalization,
+  persistence/recovery, scheduling, cancellation, artist-filter, IPC handoff,
+  transfer migration, and stale-token regression coverage.
+
 ## [0.0.58] - 2026-10-23
 
 ### Added
