@@ -74,7 +74,7 @@ one platform and one library source.
 
 ---
 
-### 1. Transfer progress hot path
+### 1. Transfer progress hot path - DONE
 
 **Implemented in 0.0.54 (2026-10-23):** active-transfer telemetry is held in
 memory and published in small, ordered batches at most every 250 ms. State
