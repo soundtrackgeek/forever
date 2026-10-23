@@ -1,6 +1,6 @@
 [package]
 name = "forever"
-version = "0.0.55"
+version = "0.0.56"
 description = "A polished, modern desktop client for the Soulseek network."
 authors = ["soundtrackgeek"]
 edition = "2021"
@@ -40,3 +40,6 @@ tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sy
 zeroize = "1"
 
 tempfile = "3"
+igd-next = { version = "0.17.1", features = ["aio_tokio"] }
+crab_nat = "0.8.1"
+netdev = "0.46.3"

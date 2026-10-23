@@ -34,6 +34,10 @@ pub struct DistributedSnapshot {
     pub searches_answered: u64,
     pub searches_ignored: u64,
     pub updated_at_ms: u64,
+    pub accepting_children: bool,
+    pub children: usize,
+    pub child_capacity: usize,
+    pub searches_relayed: u64,
 }
 
 impl DistributedSnapshot {
@@ -47,6 +51,10 @@ impl DistributedSnapshot {
             searches_answered: 0,
             searches_ignored: 0,
             updated_at_ms: timestamp_ms(),
+            accepting_children: false,
+            children: 0,
+            child_capacity: 0,
+            searches_relayed: 0,
         }
     }
 }
@@ -58,7 +66,7 @@ pub enum RequestAdmission {
     RateLimited,
 }
 
-struct RequestGuard {
+pub(super) struct RequestGuard {
     recent: VecDeque<Instant>,
     recent_by_user: HashMap<String, VecDeque<Instant>>,
     seen: HashMap<(String, u32), Instant>,
@@ -66,7 +74,7 @@ struct RequestGuard {
 }
 
 impl RequestGuard {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             recent: VecDeque::new(),
             recent_by_user: HashMap::new(),
@@ -75,9 +83,15 @@ impl RequestGuard {
         }
     }
 
-    fn admit(&mut self, username: &str, token: u32, now: Instant) -> RequestAdmission {
+    pub(super) fn admit(&mut self, username: &str, token: u32, now: Instant) -> RequestAdmission {
         prune_times(&mut self.recent, now, REQUEST_RATE_WINDOW);
         self.prune_seen(now);
+        if self.recent_by_user.len() >= MAX_SEEN_REQUESTS {
+            self.recent_by_user.retain(|_, times| {
+                prune_times(times, now, REQUEST_RATE_WINDOW);
+                !times.is_empty()
+            });
+        }
 
         let username = username.to_ascii_lowercase();
         let key = (username.clone(), token);
@@ -164,6 +178,10 @@ impl DistributedHub {
             searches_answered: 0,
             searches_ignored: 0,
             updated_at_ms: timestamp_ms(),
+            accepting_children: false,
+            children: 0,
+            child_capacity: 0,
+            searches_relayed: 0,
         };
         inner.guard = RequestGuard::new();
         inner.last_counter_publish = Instant::now();
@@ -234,6 +252,31 @@ impl DistributedHub {
         self.update_counter(|snapshot| {
             snapshot.searches_matched = snapshot.searches_matched.saturating_add(1);
         });
+    }
+
+    pub fn branch_status(&self, accepting: bool, children: usize, capacity: usize, relayed: u64) {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let snapshot = &mut inner.snapshot;
+        if (
+            snapshot.accepting_children,
+            snapshot.children,
+            snapshot.child_capacity,
+            snapshot.searches_relayed,
+        ) == (accepting, children, capacity, relayed)
+        {
+            return;
+        }
+        snapshot.accepting_children = accepting;
+        snapshot.children = children;
+        snapshot.child_capacity = capacity;
+        snapshot.searches_relayed = relayed;
+        snapshot.updated_at_ms = timestamp_ms();
+        let snapshot = snapshot.clone();
+        drop(inner);
+        self.publish(snapshot);
     }
 
     pub fn record_answered(&self) {

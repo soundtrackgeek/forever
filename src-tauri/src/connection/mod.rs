@@ -1,3 +1,4 @@
+mod branch;
 mod credentials;
 mod diagnostics;
 mod distributed;
@@ -8,6 +9,7 @@ mod messages;
 mod people;
 mod protocol;
 mod radar;
+mod reachability;
 mod rooms;
 mod search;
 mod service;
@@ -20,11 +22,24 @@ mod uploads;
 mod wanted;
 
 use search::SearchSnapshot;
-use service::{
-    ConnectionBootstrap, ConnectionManager, ConnectionPaths, ConnectionSnapshot,
-    SaveConnectionRequest,
-};
+pub use service::ConnectionManager;
+use service::{ConnectionBootstrap, ConnectionPaths, ConnectionSnapshot, SaveConnectionRequest};
 use tauri::{AppHandle, Manager, State};
+
+#[tauri::command]
+pub async fn connection_test_reachability(
+    manager: State<'_, ConnectionManager>,
+) -> Result<reachability::ReachabilitySnapshot, String> {
+    manager.test_reachability().await
+}
+
+#[tauri::command]
+pub async fn connection_shutdown_network(
+    manager: State<'_, ConnectionManager>,
+) -> Result<(), String> {
+    manager.shutdown_network().await;
+    Ok(())
+}
 
 pub fn initialize(app: &AppHandle) -> Result<ConnectionManager, String> {
     let config_directory = app

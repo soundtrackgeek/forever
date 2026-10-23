@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { UPDATE_CHECK_INTERVAL_STORAGE_KEY } from "./hooks/useAppUpdater";
@@ -8,6 +8,36 @@ import { MESSAGE_DRAFTS_STORAGE_KEY } from "./components/MessagesWorkspace";
 import { MUSICBRAINZ_FALLBACK_TRACK_COUNT_STORAGE_KEY } from "./utils/musicbrainzFallback";
 
 describe("Forever shell", () => {
+  it("saves the listening port and network preferences before reconnecting", async () => {
+    vi.useFakeTimers();
+    const { unmount } = render(<App />);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+      fireEvent.change(screen.getByRole("spinbutton", { name: /Listening port/ }), { target: { value: "2240" } });
+      fireEvent.click(screen.getByRole("checkbox", { name: /Automatic router mapping/ }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Help relay global searches/ }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+        await vi.advanceTimersByTimeAsync(240);
+      });
+      expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Test direct connections" })).toBeDisabled();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Connect now" }));
+        await vi.advanceTimersByTimeAsync(780);
+      });
+      expect(screen.getByRole("button", { name: "Test direct connections" })).toBeEnabled();
+      expect(screen.getByText("2240 / 2240")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Home" }));
+      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+      expect(screen.getByRole("spinbutton", { name: /Listening port/ })).toHaveValue(2240);
+      expect(screen.getByRole("checkbox", { name: /Automatic router mapping/ })).not.toBeChecked();
+      expect(screen.getByRole("checkbox", { name: /Help relay global searches/ })).not.toBeChecked();
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
   it("keeps navigation usable after storage recovery and lets the notice be dismissed", () => {
     window.history.replaceState({}, "", "/?storageRecovery=1");
     render(<App />);
@@ -962,17 +992,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.55 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.56 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "All seven JSON stores use atomic saves with a previous-copy backup.",
+        "A saved listening port with automatic UPnP, PCP, and NAT-PMP mapping.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Damaged saved data recovers from backup or defaults with a non-blocking notice.",
+        "Direct-connection testing and live mapping evidence in Settings.",
       ),
     ).toBeInTheDocument();
     expect(

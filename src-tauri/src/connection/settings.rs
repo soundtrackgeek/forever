@@ -5,6 +5,14 @@ use thiserror::Error;
 
 pub const DEFAULT_SERVER_HOST: &str = "server.slsknet.org";
 pub const DEFAULT_SERVER_PORT: u16 = 2242;
+pub const DEFAULT_LISTEN_PORT: u16 = 2234;
+
+fn default_listen_port() -> u16 {
+    DEFAULT_LISTEN_PORT
+}
+fn enabled() -> bool {
+    true
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +23,12 @@ pub struct ConnectionProfile {
     pub download_directory: String,
     pub remember_password: bool,
     pub auto_connect: bool,
+    #[serde(default = "default_listen_port")]
+    pub listen_port: u16,
+    #[serde(default = "enabled")]
+    pub automatic_port_mapping: bool,
+    #[serde(default = "enabled")]
+    pub allow_distributed_children: bool,
 }
 
 impl ConnectionProfile {
@@ -26,6 +40,9 @@ impl ConnectionProfile {
             download_directory: download_directory.to_string_lossy().into_owned(),
             remember_password: true,
             auto_connect: true,
+            listen_port: DEFAULT_LISTEN_PORT,
+            automatic_port_mapping: true,
+            allow_distributed_children: true,
         }
     }
 
@@ -67,6 +84,11 @@ impl ConnectionProfile {
             ));
         }
 
+        if self.listen_port == 0 {
+            return Err(SettingsError::Validation(
+                "Enter a listening port from 1 to 65535.".to_owned(),
+            ));
+        }
         if self.server_port == 0 {
             return Err(SettingsError::Validation(
                 "Enter a valid Soulseek server port.".to_owned(),
@@ -93,14 +115,19 @@ struct ConnectionStore {
 impl Default for ConnectionStore {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             profile: None,
         }
     }
 }
 
 fn decode_store(bytes: &[u8]) -> Result<ConnectionStore, DecodeError> {
-    let store: ConnectionStore = store::decode(bytes, 1, Some(0), &[(0, migrate_v0_to_v1)])?;
+    let store: ConnectionStore = store::decode(
+        bytes,
+        2,
+        Some(0),
+        &[(0, migrate_v0_to_v1), (1, migrate_v1_to_v2)],
+    )?;
     if let Some(profile) = &store.profile {
         profile
             .validate()
@@ -115,6 +142,12 @@ fn migrate_v0_to_v1(value: serde_json::Value) -> Result<serde_json::Value, Decod
         version: 1,
         profile: Some(profile),
     })?)
+}
+
+fn migrate_v1_to_v2(mut value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: ConnectionStore = serde_json::from_value(value.take())?;
+    store.version = 2;
+    Ok(serde_json::to_value(store)?)
 }
 
 #[derive(Clone)]
@@ -143,7 +176,7 @@ impl SettingsStore {
         profile.validate()?;
         std::fs::create_dir_all(&profile.download_directory)?;
         self.path.save(&ConnectionStore {
-            version: 1,
+            version: 2,
             profile: Some(profile.clone()),
         })?;
         Ok(())
@@ -234,6 +267,31 @@ mod tests {
             profile.validate(),
             Err(SettingsError::Validation(message)) if message.contains("printable ASCII")
         ));
+    }
+
+    #[test]
+    fn migrates_v1_network_defaults_and_preserves_custom_settings() {
+        let profile: serde_json::Value =
+            serde_json::from_slice(include_bytes!("../../fixtures/stores/connection-v0.json"))
+                .unwrap();
+        let bytes =
+            serde_json::to_vec(&serde_json::json!({"version": 1, "profile": profile})).unwrap();
+        let migrated = decode_store(&bytes).unwrap();
+        assert_eq!(migrated.version, 2);
+        let mut profile = migrated.profile.unwrap();
+        assert_eq!(profile.listen_port, 2234);
+        assert!(profile.automatic_port_mapping && profile.allow_distributed_children);
+        profile.listen_port = 0;
+        assert!(profile.validate().is_err());
+        profile.listen_port = 65535;
+        profile.automatic_port_mapping = false;
+        profile.allow_distributed_children = false;
+        let bytes = serde_json::to_vec(&ConnectionStore {
+            version: 2,
+            profile: Some(profile.clone()),
+        })
+        .unwrap();
+        assert_eq!(decode_store(&bytes).unwrap().profile, Some(profile));
     }
 
     #[test]

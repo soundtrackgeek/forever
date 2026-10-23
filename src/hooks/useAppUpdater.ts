@@ -1,4 +1,4 @@
-import { isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -35,15 +35,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.54",
-  version: "0.0.55",
-  body: `## What's new in Forever 0.0.55
+  currentVersion: "0.0.55",
+  version: "0.0.56",
+  body: `## What's new in Forever 0.0.56
 
-### Fixed
+### Added
 
-- All seven JSON stores use atomic saves with a previous-copy backup.
-- Damaged saved data recovers from backup or defaults with a non-blocking notice.
-- Older stores migrate automatically; unsupported schemas stay protected from writes.`,
+- A saved listening port with automatic UPnP, PCP, and NAT-PMP mapping.
+- Direct-connection testing and live mapping evidence in Settings.
+- Bounded global-search branches for reachable, stable connections.`,
   date: "2026-10-23",
 };
 
@@ -248,6 +248,8 @@ export function useAppUpdater() {
       let downloaded = 0;
       let total = 0;
 
+      // Windows installers may exit without the normal window-close path.
+      await invoke("connection_shutdown_network");
       await update.downloadAndInstall((event) => {
         if (event.event === "Started") {
           total = event.data.contentLength ?? 0;

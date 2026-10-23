@@ -5,6 +5,35 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.56] - 2026-10-23
+
+### Added
+
+- Configurable TCP listening port (2234 by default), bounded fallback on port
+  conflicts, and separate listening/advertised port evidence in Settings.
+- Automatic UPnP IGD, PCP, and NAT-PMP mapping with expiring leases, renewal,
+  discovery retry, external-port announcement, and serialized session cleanup.
+- Direct-connection testing through Soulseek's official port checker, with
+  reachable/firewalled/unknown states backed by actual incoming connections.
+- Opt-out distributed branch participation with up to four children, server
+  speed limits, a 60-second stability gate, bounded queues, duplicate/rate
+  guards, topology propagation, and reset/disconnect cleanup.
+
+### Fixed
+
+- Branch-root parent candidates can be adopted even if they send only level 0;
+  legacy wrapped searches are unwrapped before relaying to children.
+- Expired sessions cannot replace current reachability evidence or delete a
+  newer mapping; exit and updater preparation await router cleanup.
+- Per-user distributed request-rate history is pruned to remain bounded.
+
+### Changed
+
+- Connection store version 2 migrates earlier profiles with network defaults.
+- Version metadata and updater preview now identify `0.0.56`.
+- Coverage includes port conflicts, migrations, stale tests, lease renewal and
+  deletion, child protocol exchange, queue pressure, and Settings interaction.
+
 ## [0.0.55] - 2026-10-23
 
 ### Added

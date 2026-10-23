@@ -1207,6 +1207,8 @@ function App() {
             hasPassword={connection.hasPassword}
             snapshot={connection.snapshot}
             searchNetwork={connection.searchNetwork}
+            reachability={connection.reachability}
+            onTestReachability={connection.testReachability}
             diagnostics={connection.diagnostics}
             diagnosticsPath={connection.diagnosticsPath}
             error={connection.error}

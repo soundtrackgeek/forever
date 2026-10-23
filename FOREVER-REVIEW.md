@@ -144,7 +144,19 @@ a hard error with no migration path
   mode. `rusqlite` with `bundled` is already a dependency, and SQLite also
   solves #1 (row-level updates instead of whole-file rewrites).
 
-### 3. Reachability: fixed port, UPnP/NAT-PMP, and a branch role
+### 3. Reachability: fixed port, UPnP/NAT-PMP, and a branch role - DONE
+
+**Implemented in 0.0.56 (2026-10-23):** persisted port 2234 with bounded
+fallback; automatic UPnP IGD, PCP, and NAT-PMP leases with renewal, external-port
+announcement, retry, and serialized cleanup; direct-connection evidence and
+an explicit port test in Settings. Reachable, stable clients can relay to up to
+four distributed children within server speed limits. Child queues, writes,
+duplicate/rate guards, topology propagation, and resets are bounded. Connection
+profiles migrate to schema 2. Tests cover local socket exchange, lifecycle
+failures, migration, and UI controls. Real router/firewall and public-network
+interoperation remain environment-dependent; the checker is HTTP-only and
+cannot establish reachability without an observed incoming connection. The
+original findings follow for context.
 
 **Today:** Each session binds a random port, `TcpListener::bind(("0.0.0.0", 0))`
 ([service.rs:1885](src-tauri/src/connection/service.rs:1885)). Nothing maps that

@@ -7,6 +7,7 @@ import type {
   ConnectionSnapshot,
   DiagnosticEntry,
   DistributedSnapshot,
+  ReachabilitySnapshot,
 } from "../types";
 
 const MOCK_PROFILE: ConnectionProfile = {
@@ -16,14 +17,30 @@ const MOCK_PROFILE: ConnectionProfile = {
   downloadDirectory: "C:\\Users\\Music\\Forever",
   rememberPassword: true,
   autoConnect: true,
+  listenPort: 2234,
+  automaticPortMapping: true,
+  allowDistributedChildren: true,
 };
 
 const now = () => Date.now();
+
+const offlineReachability = (): ReachabilitySnapshot => ({
+  status: "unknown", message: "Connect to Soulseek to check direct connections.",
+  listenPort: null, advertisedPort: null, mapping: "inactive", mappingMessage: "No active listening port.",
+  checking: false, incomingConnections: 0,
+});
+
+const previewReachability = (port = 2234): ReachabilitySnapshot => ({
+  ...offlineReachability(), listenPort: port, advertisedPort: port, mapping: "preview",
+  mappingMessage: "Browser preview — router mapping runs in the desktop app.",
+  message: "Browser preview — no real incoming connections are being tested.",
+});
 
 const offlineSearchNetwork = (): DistributedSnapshot => ({
   state: "offline",
   message: "Connect to Soulseek to join global search.",
   branchLevel: null,
+  acceptingChildren: false, children: 0, childCapacity: 0, searchesRelayed: 0,
   searchesReceived: 0,
   searchesMatched: 0,
   searchesAnswered: 0,
@@ -37,6 +54,7 @@ function previewBootstrap(): ConnectionBootstrap {
   const profile = showOnboarding ? null : MOCK_PROFILE;
 
   return {
+    reachability: profile ? previewReachability() : offlineReachability(),
     storageNotices: new URLSearchParams(window.location.search).get("storageRecovery") === "1"
       ? [{ store: "transfers.json", message: "Restored the previous saved copy. The most recent changes may be missing. Damaged data was preserved in transfers.json.corrupt-preview." }]
       : [],
@@ -72,6 +90,7 @@ function previewBootstrap(): ConnectionBootstrap {
           state: "connected",
           message: "Global search relay connected.",
           branchLevel: 3,
+          acceptingChildren: false, children: 0, childCapacity: 0, searchesRelayed: 0,
           searchesReceived: 128,
           searchesMatched: 7,
           searchesAnswered: 7,
@@ -117,6 +136,7 @@ export function useSoulseekConnection() {
     () => bootstrap?.searchNetwork ?? offlineSearchNetwork(),
   );
   const bootstrapRef = useRef(bootstrap);
+  const [reachability, setReachability] = useState<ReachabilitySnapshot>(() => bootstrap?.reachability ?? offlineReachability());
   const [error, setError] = useState<string | null>(null);
   const autoConnectStarted = useRef(false);
 
@@ -129,6 +149,7 @@ export function useSoulseekConnection() {
       setBootstrap(next);
       setSnapshot(next.snapshot);
       setSearchNetwork(next.searchNetwork);
+      setReachability(next.reachability ?? offlineReachability());
       setError(null);
       return next;
     } catch (cause) {
@@ -143,6 +164,11 @@ export function useSoulseekConnection() {
     let mounted = true;
     let unlistenConnection: (() => void) | undefined;
     let unlistenSearchNetwork: (() => void) | undefined;
+    let unlistenReachability: (() => void) | undefined;
+
+    void listen<ReachabilitySnapshot>("forever://reachability-status", (event) => {
+      if (mounted) setReachability(event.payload);
+    }).then((dispose) => { if (mounted) unlistenReachability = dispose; else dispose(); });
 
     void listen<ConnectionSnapshot>(
       "forever://connection-status",
@@ -176,6 +202,7 @@ export function useSoulseekConnection() {
         setBootstrap(next);
         setSnapshot(next.snapshot);
         setSearchNetwork(next.searchNetwork);
+        setReachability(next.reachability ?? offlineReachability());
         setError(null);
       } catch (cause) {
         if (mounted) setError(errorMessage(cause));
@@ -186,6 +213,7 @@ export function useSoulseekConnection() {
       mounted = false;
       unlistenConnection?.();
       unlistenSearchNetwork?.();
+      unlistenReachability?.();
     };
   }, [native]);
 
@@ -214,11 +242,13 @@ export function useSoulseekConnection() {
               updatedAtMs: now(),
             },
             searchNetwork: nextSearchNetwork,
+            reachability: offlineReachability(),
           };
           bootstrapRef.current = next;
           setBootstrap(next);
           setSnapshot(next.snapshot);
           setSearchNetwork(nextSearchNetwork);
+          setReachability(next.reachability);
           return next;
         }
 
@@ -235,6 +265,7 @@ export function useSoulseekConnection() {
         setBootstrap(next);
         setSnapshot(next.snapshot);
         setSearchNetwork(next.searchNetwork);
+        setReachability(next.reachability ?? offlineReachability());
         return next;
       } catch (cause) {
         const message = errorMessage(cause);
@@ -304,6 +335,7 @@ export function useSoulseekConnection() {
           updatedAtMs: now(),
         };
         setSnapshot(connected);
+        setReachability(previewReachability(profile.listenPort));
         setSearchNetwork({
           ...offlineSearchNetwork(),
           state: "connected",
@@ -342,6 +374,7 @@ export function useSoulseekConnection() {
           : previewBootstrap().snapshot;
         setSnapshot(next);
         setSearchNetwork(offlineSearchNetwork());
+        setReachability(offlineReachability());
         return next;
       }
 
@@ -373,10 +406,12 @@ export function useSoulseekConnection() {
           updatedAtMs: now(),
         };
         next.searchNetwork = offlineSearchNetwork();
+        next.reachability = offlineReachability();
         bootstrapRef.current = next;
         setBootstrap(next);
         setSnapshot(next.snapshot);
         setSearchNetwork(next.searchNetwork);
+        setReachability(next.reachability ?? offlineReachability());
         autoConnectStarted.current = false;
         return next;
       }
@@ -386,6 +421,7 @@ export function useSoulseekConnection() {
       setBootstrap(next);
       setSnapshot(next.snapshot);
       setSearchNetwork(next.searchNetwork);
+        setReachability(next.reachability ?? offlineReachability());
       autoConnectStarted.current = false;
       return next;
     } catch (cause) {
@@ -398,6 +434,13 @@ export function useSoulseekConnection() {
   const loadDiagnostics = useCallback(async () => {
     if (!native) return bootstrapRef.current?.diagnostics ?? [];
     return invoke<DiagnosticEntry[]>("connection_diagnostics");
+  }, [native]);
+
+  const testReachability = useCallback(async () => {
+    if (!native) { setReachability(previewReachability(bootstrapRef.current?.profile?.listenPort)); return; }
+    setError(null);
+    try { setReachability(await invoke<ReachabilitySnapshot>("connection_test_reachability")); }
+    catch (cause) { setError(errorMessage(cause)); }
   }, [native]);
 
   useEffect(() => {
@@ -422,6 +465,8 @@ export function useSoulseekConnection() {
       hasPassword: bootstrap?.hasPassword ?? false,
       snapshot: snapshot ?? previewBootstrap().snapshot,
       searchNetwork,
+      reachability,
+      testReachability,
       diagnosticsPath: bootstrap?.diagnosticsPath ?? "",
       diagnostics: bootstrap?.diagnostics ?? [],
       storageNotices: bootstrap?.storageNotices ?? [],
@@ -443,6 +488,8 @@ export function useSoulseekConnection() {
       reset,
       saveProfile,
       searchNetwork,
+      reachability,
+      testReachability,
       snapshot,
     ],
   );

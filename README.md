@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.55` adds crash-safe JSON stores,
-> automatic legacy migrations, and recovery notices for damaged saved data.
+> **Status:** pre-alpha. Version `0.0.56` adds stable listening ports, automatic
+> router mapping, direct-connection testing, and distributed search branches.
 
-If `0.0.16` is installed, download and run the latest `0.0.55` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.56` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -218,9 +218,9 @@ configuration and transfers.
   zero-byte or partial/temporary files, and unsafe root overlaps
 - Live Soulseek browse and folder responses for local shares without exposing
   absolute filesystem paths
-- Full leaf participation in Soulseek's distributed search network, including
-  parent discovery, branch-root delivery, reconnect recovery, and real search
-  responses from the local share index
+- Leaf and bounded branch participation in Soulseek's distributed search network,
+  including parent discovery, branch-root delivery, child relaying, reconnect
+  recovery, and real search responses from the local share index
 - Indexed global-search matching with required words, `-excluded` words, and
   `*partial` terms, plus bounded deduplication and request-rate controls
 - Live global-search relay state, branch discovery, request counters, and safe
@@ -249,6 +249,60 @@ configuration and transfers.
   and Rust tests
 - Automatic GitHub Releases containing NSIS `.exe` and WiX `.msi` installers
 - Signed Tauri updater artifacts, `latest.json`, and SHA-256 checksums
+
+## Direct connections and global-search branches
+
+Settings → **Direct connections** saves a TCP listening port (default **2234**).
+On conflict, Forever tries the next six ports without wrapping past 65535, then
+an OS-assigned port. Settings shows both the actual **listening** port and the
+**advertised** external port; saving preserves your preference and disconnects
+so you can reconnect with the new settings.
+
+**Automatic router mapping** is enabled by default. Forever tries UPnP IGD,
+then PCP and NAT-PMP on the network interface used by the server connection.
+It requests a 30-minute TCP lease, renews at half the granted lifetime, and
+announces the external port returned by the router. Failed discovery retries
+after five minutes; manual forwarding and indirect connections remain usable.
+Mappings are removed on disconnect, account changes, normal exit, and before
+an update installer runs. Creation and cleanup are serialized across sessions;
+cleanup failures are logged. Forced termination, lost router replies, or an
+unreachable router can leave a mapping until its lease expires. Routers that
+only support permanent UPnP mappings are deliberately left for manual setup.
+
+**Test direct connections** asks [Soulseek's official port checker](http://tools.slsknet.org/porttest.php)
+to connect to the advertised port. The service currently uses HTTP; only the
+port number is submitted, and the checker sees the request's public IP. No
+username, password, filenames, or account data is sent. The request is bound
+to the server connection's local interface and bypasses HTTP proxies.
+
+- **Reachable** requires an observed incoming TCP connection from outside local,
+  loopback, and carrier-grade NAT address ranges. An “OPEN” web response or a
+  successful router mapping alone cannot establish this state.
+- **Firewalled** means the checker explicitly reported the requested port closed
+  and no outside connection arrived during that test.
+- **Unknown** covers no evidence, expired evidence (30 minutes), and unavailable
+  or unrecognized checker responses. A later incoming connection updates the
+  result. Tests are limited to one at a time and at least ten seconds apart.
+
+For manual forwarding, forward the actual listening TCP port to this PC and
+allow Forever through Windows Firewall. Double NAT, CGNAT, and VPNs can require
+additional configuration; automatic mapping cannot guarantee reachability.
+
+**Help relay global searches** is enabled by default. Forever accepts up to four
+children only after confirmed reachability, 60 seconds with an established
+upstream topology, and the server's minimum upload speed and child-ratio rules.
+New accounts without a reported upload speed remain leaves. Settings shows
+child capacity, active children, and relayed-search totals. Only searches from
+the selected parent or server are relayed; duplicate/rate guards, bounded child
+queues, and write deadlines prevent slow peers from blocking other work.
+Parent loss, server reset, lost reachability, or disconnect clears children.
+
+Protocol references: [Soulseek distributed messages](https://nicotine-plus.org/doc/SLSKPROTOCOL.html),
+[igd-next](https://docs.rs/igd-next/0.17.1/igd_next/), and
+[crab_nat](https://docs.rs/crab_nat/0.8.1/crab_nat/).
+Regression checks use local sockets and simulated lease lifecycles; router
+compatibility, Windows Firewall prompts, and public Soulseek interoperation
+still require testing on the user's actual network.
 
 ## Requirements
 
@@ -607,7 +661,7 @@ User-Agent, a 15-second timeout, and a rate below one MusicBrainz request per
 second.
 
 Live searches are sent to the Soulseek server, and responding peers connect to
-Forever’s temporary listening port or receive an indirect connection attempt.
+Forever’s configured listening port (or fallback) or receive an indirect connection attempt.
 Forever limits concurrent peer connections, message sizes, decompressed
 payloads, per-peer entries, and each search to 5,000 displayed files. Peer
 addresses are used for the active protocol exchange and are not exposed in the

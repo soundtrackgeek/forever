@@ -14130,3 +14130,16 @@ form.settings-panel {
   .patch-bay-candidate { grid-template-columns: minmax(90px, .65fr) minmax(0, 1.35fr) auto; }
   .patch-bay-candidate-signal { display: none !important; }
 }
+/* Direct connection evidence stays alongside the saved account settings. */
+.reachability-settings { border: 0; border-top: 1px solid var(--border-subtle, #30323b); margin: 24px 0 0; padding: 20px 0 0; min-width: 0; }
+.reachability-settings legend { padding-right: 12px; font-size: 14px; font-weight: 600; }
+.reachability-settings > p, .reachability-evidence p, .reachability-settings small { color: var(--text-secondary, #a2a4ad); font-size: 12px; line-height: 1.6; }
+.reachability-settings > .connection-field { max-width: 420px; margin: 16px 0; }
+.reachability-evidence { margin-top: 20px; padding: 16px; border: 1px solid var(--border-subtle, #30323b); border-radius: 8px; }
+.reachability-evidence > strong { font-size: 13px; text-transform: capitalize; }
+.reachability-evidence dl { display: grid; gap: 8px; font-size: 12px; }
+.reachability-evidence dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.reachability-evidence dt { color: var(--text-secondary, #a2a4ad); }
+.reachability-evidence dd { margin: 0; }
+.reachability-evidence > small { display: block; margin-top: 10px; }
+.reachability-evidence button:disabled { opacity: .5; cursor: default; }

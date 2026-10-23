@@ -1,4 +1,5 @@
 use super::{
+    branch::{Branch, ChildCandidate},
     credentials::CredentialVault,
     diagnostics::{DiagnosticEntry, Diagnostics},
     distributed::{DistributedHub, DistributedSnapshot, RequestAdmission},
@@ -38,10 +39,11 @@ use super::{
         user_interests_frame, user_stats_frame, watch_user_frame, write_raw_frame, ConnectToPeer,
         DistributedFrame, DistributedSearch, Frame, LoginResponse, ParentCandidate, PeerAddress,
         PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE,
-        DISTRIBUTED_BRANCH_LEVEL_CODE, DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_SEARCH_CODE,
-        EMBEDDED_MESSAGE_CODE, FILE_SEARCH_CODE, FILE_SEARCH_RESPONSE_CODE,
-        FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE, GET_PEER_ADDRESS_CODE,
-        JOIN_ROOM_CODE, LEAVE_ROOM_CODE, MESSAGE_USER_CODE, PLACE_IN_QUEUE_REQUEST_CODE,
+        DISTRIBUTED_BRANCH_LEVEL_CODE, DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_EMBEDDED_CODE,
+        DISTRIBUTED_SEARCH_CODE, EMBEDDED_MESSAGE_CODE, FILE_SEARCH_CODE,
+        FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE,
+        GET_PEER_ADDRESS_CODE, JOIN_ROOM_CODE, LEAVE_ROOM_CODE, MESSAGE_USER_CODE,
+        PARENT_MIN_SPEED_CODE, PARENT_SPEED_RATIO_CODE, PLACE_IN_QUEUE_REQUEST_CODE,
         PLACE_IN_QUEUE_RESPONSE_CODE, POSSIBLE_PARENTS_CODE, QUEUE_UPLOAD_CODE, RELOGGED_CODE,
         RESET_DISTRIBUTED_CODE, ROOM_LIST_CODE, SAY_CHATROOM_CODE, SHARED_FILE_LIST_REQUEST_CODE,
         SHARED_FILE_LIST_RESPONSE_CODE, TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE,
@@ -50,6 +52,7 @@ use super::{
         WATCH_USER_CODE,
     },
     radar::{RadarAlbumRequest, RadarError, RadarHub, RadarSnapshot},
+    reachability::{bind_listener, DirectStatus, ReachabilityHub, ReachabilitySnapshot},
     rooms::{valid_room_message, valid_room_name, RoomsError, RoomsHub, RoomsSnapshot},
     search::{SearchHub, SearchSnapshot, SearchState},
     settings::{ConnectionProfile, SettingsStore},
@@ -77,10 +80,12 @@ use std::{
 };
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
+#[cfg(test)]
+use tokio::net::TcpListener;
 use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+    net::TcpStream,
     sync::{mpsc, Semaphore},
     time::timeout,
 };
@@ -168,6 +173,7 @@ pub struct ConnectionBootstrap {
     pub diagnostics_path: String,
     pub diagnostics: Vec<DiagnosticEntry>,
     pub search_network: DistributedSnapshot,
+    pub reachability: ReachabilitySnapshot,
     pub storage_notices: Vec<StoreNotice>,
 }
 
@@ -192,6 +198,7 @@ impl Drop for AbortOnDrop {
 }
 
 struct DistributedCandidateTask {
+    username: String,
     branch_level: Option<u32>,
     branch_root: Option<String>,
     _task: AbortOnDrop,
@@ -247,6 +254,7 @@ impl DistributedCoordinator {
             self.candidates.insert(
                 id,
                 DistributedCandidateTask {
+                    username: parent.username.clone(),
                     branch_level: None,
                     branch_root: None,
                     _task: task,
@@ -256,9 +264,15 @@ impl DistributedCoordinator {
     }
 
     fn update_branch_level(&mut self, id: u64, level: u32) -> Option<u32> {
+        let own_level = level
+            .checked_add(1)
+            .filter(|level| *level <= i32::MAX as u32)?;
         let candidate = self.candidates.get_mut(&id)?;
         candidate.branch_level = Some(level);
-        (self.active_parent == Some(id)).then_some(level.saturating_add(1))
+        if level == 0 {
+            candidate.branch_root = Some(candidate.username.clone());
+        }
+        (self.active_parent == Some(id)).then_some(own_level)
     }
 
     fn update_branch_root(&mut self, id: u64, root: String) -> Option<String> {
@@ -272,7 +286,10 @@ impl DistributedCoordinator {
             return None;
         }
         let candidate = self.candidates.get(&id)?;
-        let level = candidate.branch_level?.saturating_add(1);
+        let level = candidate
+            .branch_level?
+            .checked_add(1)
+            .filter(|level| *level <= i32::MAX as u32)?;
         let root = candidate.branch_root.clone()?;
         let candidate = self.candidates.remove(&id)?;
         self.candidates.clear();
@@ -283,6 +300,12 @@ impl DistributedCoordinator {
 
     fn accepts_search_from(&self, id: u64) -> bool {
         self.active_parent == Some(id)
+    }
+
+    fn parent_username(&self) -> Option<&str> {
+        self.active_parent
+            .and_then(|id| self.candidates.get(&id))
+            .map(|parent| parent.username.as_str())
     }
 
     fn close(&mut self, id: u64) -> bool {
@@ -409,6 +432,7 @@ pub struct ConnectionManager {
     local_shares: LocalSharesHub,
     uploads: UploadHub,
     distributed: DistributedHub,
+    reachability: ReachabilityHub,
 }
 
 pub struct ConnectionPaths {
@@ -452,6 +476,7 @@ impl ConnectionManager {
         let local_shares = LocalSharesHub::new(app.clone(), store_files[2].clone())?;
         let uploads = UploadHub::new(app.clone());
         let distributed = DistributedHub::new(app.clone());
+        let reachability = ReachabilityHub::new(app.clone());
         let people = PeopleHub::new(app.clone(), store_files[3].clone())?;
         let messages = MessagesHub::new(app.clone(), store_files[4].clone())?;
         let rooms = RoomsHub::new(app.clone(), store_files[5].clone())?;
@@ -488,6 +513,7 @@ impl ConnectionManager {
             local_shares,
             uploads,
             distributed,
+            reachability,
         })
     }
 
@@ -506,6 +532,7 @@ impl ConnectionManager {
             diagnostics_path: self.diagnostics.path().to_string_lossy().into_owned(),
             diagnostics: self.diagnostics.recent(),
             search_network: self.distributed.snapshot(),
+            reachability: self.reachability.snapshot(),
             storage_notices: self
                 .store_files
                 .iter()
@@ -613,6 +640,22 @@ impl ConnectionManager {
 
     pub fn diagnostics(&self) -> Vec<DiagnosticEntry> {
         self.diagnostics.recent()
+    }
+
+    pub async fn test_reachability(&self) -> Result<ReachabilitySnapshot, String> {
+        self.reachability.test().await
+    }
+
+    pub async fn shutdown_network(&self) {
+        // Await cancellation so the session's mapping owner has been dropped
+        // before waiting for its deletion worker.
+        let active = self.task.lock().unwrap_or_else(|p| p.into_inner()).take();
+        let _ = self.disconnect();
+        if let Some(active) = active {
+            active.handle.abort();
+            let _ = active.handle.await;
+        }
+        self.reachability.wait_for_cleanup().await;
     }
 
     pub fn current_searches(&self) -> Vec<SearchSnapshot> {
@@ -1796,6 +1839,7 @@ impl ConnectionManager {
             self.local_shares.connection_lost();
             self.people.connection_lost();
             self.distributed.offline();
+            self.reachability.offline();
             self.wanted.connection_lost();
             self.radar.connection_lost();
             self.search
@@ -1905,7 +1949,7 @@ impl ConnectionManager {
             }
         }
 
-        let listener = TcpListener::bind(("0.0.0.0", 0)).await.map_err(|error| {
+        let listener = bind_listener(profile.listen_port).await.map_err(|error| {
             ConnectionFailure::retryable(
                 format!("Forever could not open a peer listening port: {error}"),
                 "listen_failed",
@@ -1920,6 +1964,14 @@ impl ConnectionManager {
                 )
             })?
             .port();
+        let local_ip = stream
+            .local_addr()
+            .map_err(|error| ConnectionFailure::retryable(error.to_string(), "listen_failed"))?
+            .ip();
+        let reachability_session =
+            self.reachability
+                .begin(profile, listen_port, local_ip, self.diagnostics.clone());
+        let mut advertised_port = listen_port;
         write_raw_frame(&mut stream, &set_wait_port_frame(listen_port))
             .await
             .map_err(|error| {
@@ -1969,6 +2021,9 @@ impl ConnectionManager {
         let (distributed_event_sender, mut distributed_event_receiver) =
             mpsc::channel(DISTRIBUTED_EVENT_QUEUE_SIZE);
         let mut distributed_coordinator = DistributedCoordinator::new();
+        let mut branch = Branch::new();
+        let (child_sender, mut child_receiver) = mpsc::channel::<ChildCandidate>(8);
+        let mut accepting_children = false;
         self.announce_no_distributed_parent(&mut server_writer, &profile.username)
             .await?;
         self.distributed.begin_discovery();
@@ -2001,6 +2056,11 @@ impl ConnectionManager {
         }
         let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
         let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
+        write_raw_frame(&mut server_writer, &user_stats_frame(&profile.username))
+            .await
+            .map_err(|error| {
+                ConnectionFailure::retryable(error.to_string(), "session_setup_failed")
+            })?;
         for username in self.people.saved_users_to_watch() {
             let _ = command_sender.send(ConnectionCommand::WatchPerson { username });
         }
@@ -2010,6 +2070,7 @@ impl ConnectionManager {
         let mut wanted_tick = tokio::time::interval(Duration::from_secs(5));
         let mut radar_tick = tokio::time::interval(Duration::from_millis(500));
         let mut download_retry_tick = tokio::time::interval(Duration::from_secs(1));
+        let mut network_tick = tokio::time::interval(Duration::from_secs(1));
         let peer_limit = Arc::new(Semaphore::new(MAX_CONCURRENT_PEERS));
         keepalive.tick().await;
         search_tick.tick().await;
@@ -2128,12 +2189,18 @@ impl ConnectionManager {
                         }
                     } else if frame.code == USER_STATS_CODE {
                         if let Ok(stats) = parse_user_stats(&frame) {
+                            if stats.username.eq_ignore_ascii_case(&profile.username) { branch.upload_speed = stats.average_speed; }
                             self.rooms.update_stats(&stats);
                             self.people.update_stats(stats);
                         }
                     } else if frame.code == USER_INTERESTS_CODE {
                         if let Ok(interests) = parse_user_interests(&frame) {
                             self.people.update_interests(interests);
+                        }
+                    } else if frame.code == PARENT_MIN_SPEED_CODE || frame.code == PARENT_SPEED_RATIO_CODE {
+                        if let Ok(bytes) = <[u8; 4]>::try_from(frame.payload.as_slice()) {
+                            let value = u32::from_le_bytes(bytes);
+                            if frame.code == PARENT_MIN_SPEED_CODE { branch.minimum_speed = Some(value); } else { branch.speed_ratio = Some(value); }
                         }
                     } else if frame.code == POSSIBLE_PARENTS_CODE {
                         if let Ok(parents) = parse_possible_parents(&frame) {
@@ -2146,6 +2213,10 @@ impl ConnectionManager {
                     } else if frame.code == EMBEDDED_MESSAGE_CODE {
                         if let Ok(request) = parse_embedded_distributed_search(&frame) {
                             if distributed_coordinator.become_branch_root() {
+                                branch.reset();
+                                branch.topology(0, profile.username.clone());
+                                self.announce_no_distributed_parent(&mut server_writer, &profile.username).await?;
+                                accepting_children = false;
                                 self.distributed.branch_root();
                                 self.diagnostics.record(
                                     "info",
@@ -2153,6 +2224,7 @@ impl ConnectionManager {
                                     "Global search connected in branch-root mode.",
                                 );
                             }
+                            branch.relay(&DistributedFrame { code: DISTRIBUTED_SEARCH_CODE, payload: frame.payload[1..].to_vec() });
                             self.answer_search_request(
                                 &mut server_writer,
                                 &profile.username,
@@ -2162,6 +2234,8 @@ impl ConnectionManager {
                         }
                     } else if frame.code == RESET_DISTRIBUTED_CODE {
                         distributed_coordinator.reset();
+                        branch.reset();
+                        accepting_children = false;
                         self.announce_no_distributed_parent(
                             &mut server_writer,
                             &profile.username,
@@ -2174,11 +2248,13 @@ impl ConnectionManager {
                         );
                     } else if frame.code == CONNECT_TO_PEER_CODE {
                         if let Ok(request) = parse_connect_to_peer(&frame) {
-                            spawn_indirect_peer(
+                            if request.connection_type == "D" {
+                                if branch.accepting() { spawn_indirect_child(request, child_sender.clone(), peer_limit.clone()); }
+                            } else { spawn_indirect_peer(
                                 request,
                                 self.peer_services(&profile.username, &command_sender),
                                 peer_limit.clone(),
-                            );
+                            ); }
                         }
                     } else if frame.code == GET_PEER_ADDRESS_CODE {
                         if let Ok(address) = parse_peer_address(&frame) {
@@ -2289,6 +2365,7 @@ impl ConnectionManager {
                                             "distributed_parent_failed",
                                         ))?;
                                         self.distributed.connected(own_level);
+                                        branch.level(own_level);
                                     }
                                 }
                             }
@@ -2304,10 +2381,17 @@ impl ConnectionManager {
                                             format!("The global-search branch update failed: {error}"),
                                             "distributed_parent_failed",
                                         ))?;
+                                        branch.root(own_root);
                                     }
                                 }
                             }
-                            DISTRIBUTED_SEARCH_CODE => {
+                            DISTRIBUTED_SEARCH_CODE | DISTRIBUTED_EMBEDDED_CODE => {
+                                // Older peers wrap searches in distributed code 93.
+                                // Relay the inner code-3 message, never the wrapper.
+                                let frame = if frame.code == DISTRIBUTED_EMBEDDED_CODE {
+                                    if frame.payload.first() != Some(&DISTRIBUTED_SEARCH_CODE) { continue; }
+                                    DistributedFrame { code: DISTRIBUTED_SEARCH_CODE, payload: frame.payload[1..].to_vec() }
+                                } else { frame };
                                 if let Ok(request) = parse_distributed_search(&frame) {
                                     if !distributed_coordinator.accepts_search_from(id) {
                                         if let Some((branch_level, branch_root)) =
@@ -2319,6 +2403,8 @@ impl ConnectionManager {
                                                 branch_level,
                                             ).await?;
                                             self.distributed.connected(branch_level);
+                                            branch.topology(branch_level, branch_root);
+                                            accepting_children = false;
                                             self.diagnostics.record(
                                                 "info",
                                                 "distributed_connected",
@@ -2327,6 +2413,7 @@ impl ConnectionManager {
                                         }
                                     }
                                     if distributed_coordinator.accepts_search_from(id) {
+                                        branch.relay(&frame);
                                         self.answer_search_request(
                                             &mut server_writer,
                                             &profile.username,
@@ -2340,6 +2427,8 @@ impl ConnectionManager {
                         },
                         DistributedPeerEvent::Closed { id } => {
                             if distributed_coordinator.close(id) {
+                                branch.reset();
+                                accepting_children = false;
                                 self.announce_no_distributed_parent(
                                     &mut server_writer,
                                     &profile.username,
@@ -2354,17 +2443,40 @@ impl ConnectionManager {
                         }
                     }
                 }
+                Some(candidate) = child_receiver.recv() => {
+                    branch.refresh(profile.allow_distributed_children, self.reachability.snapshot().status == DirectStatus::Reachable);
+                    if !self.people.is_blocked(&candidate.username) {
+                        branch.add(candidate, &profile.username, distributed_coordinator.parent_username());
+                    }
+                }
+                _ = network_tick.tick() => {
+                    self.reachability.expire_evidence(reachability_session.id);
+                    let network = self.reachability.snapshot();
+                    let port = network.advertised_port.unwrap_or(listen_port);
+                    if port != advertised_port {
+                        write_raw_frame(&mut server_writer, &set_wait_port_frame(port)).await.map_err(|error| ConnectionFailure::retryable(error.to_string(), "listen_announce_failed"))?;
+                        advertised_port = port;
+                    }
+                    branch.refresh(profile.allow_distributed_children, network.status == DirectStatus::Reachable);
+                    if branch.accepting() != accepting_children {
+                        accepting_children = branch.accepting();
+                        write_raw_frame(&mut server_writer, &accept_children_frame(accepting_children)).await.map_err(|error| ConnectionFailure::retryable(error.to_string(), "distributed_parent_failed"))?;
+                    }
+                    self.distributed.branch_status(accepting_children, branch.count(), branch.capacity, branch.relayed);
+                }
                 accepted = listener.accept() => {
-                    let (peer_stream, _) = accepted.map_err(|error| {
+                    let (peer_stream, address) = accepted.map_err(|error| {
                         ConnectionFailure::retryable(
                             format!("The Soulseek peer listener stopped: {error}"),
                             "listen_failed",
                         )
                     })?;
+                    self.reachability.incoming(reachability_session.id, address.ip());
                     spawn_direct_peer(
                         peer_stream,
                         self.peer_services(&profile.username, &command_sender),
                         peer_limit.clone(),
+                        child_sender.clone(),
                     );
                 }
                 command = command_receiver.recv() => {
@@ -2749,6 +2861,7 @@ impl ConnectionManager {
         self.local_shares.connection_lost();
         self.people.connection_lost();
         self.distributed.offline();
+        self.reachability.offline();
         self.wanted.connection_lost();
         self.radar.connection_lost();
         if let Some(active) = self
@@ -2840,13 +2953,56 @@ async fn run_distributed_parent_candidate(
     }
 }
 
-fn spawn_direct_peer(stream: TcpStream, services: PeerServices, limit: Arc<Semaphore>) {
+fn spawn_direct_peer(
+    stream: TcpStream,
+    services: PeerServices,
+    limit: Arc<Semaphore>,
+    children: mpsc::Sender<ChildCandidate>,
+) {
     let Ok(permit) = limit.try_acquire_owned() else {
         return;
     };
     tauri::async_runtime::spawn(async move {
         let _permit = permit;
-        let _ = handle_direct_peer(stream, services).await;
+        let _ = handle_direct_peer(stream, services, children).await;
+    });
+}
+
+fn spawn_indirect_child(
+    request: ConnectToPeer,
+    children: mpsc::Sender<ChildCandidate>,
+    limit: Arc<Semaphore>,
+) {
+    if request.port == 0 || request.port > u16::MAX.into() {
+        return;
+    }
+    let Ok(permit) = limit.try_acquire_owned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let _permit = permit;
+        let Ok(Ok(mut stream)) = timeout(
+            PEER_CONNECT_TIMEOUT,
+            TcpStream::connect((request.address, request.port as u16)),
+        )
+        .await
+        else {
+            return;
+        };
+        if !matches!(
+            timeout(
+                PEER_MESSAGE_TIMEOUT,
+                write_raw_frame(&mut stream, &pierce_firewall_frame(request.token))
+            )
+            .await,
+            Ok(Ok(()))
+        ) {
+            return;
+        }
+        let _ = children.try_send(ChildCandidate {
+            username: request.username,
+            stream,
+        });
     });
 }
 
@@ -2896,12 +3052,21 @@ fn spawn_indirect_peer(request: ConnectToPeer, services: PeerServices, limit: Ar
 async fn handle_direct_peer(
     mut stream: TcpStream,
     services: PeerServices,
+    children: mpsc::Sender<ChildCandidate>,
 ) -> Result<(), super::protocol::ProtocolError> {
     let _ = stream.set_nodelay(true);
     let init = timeout(PEER_MESSAGE_TIMEOUT, read_peer_init(&mut stream))
         .await
         .map_err(|_| peer_timeout_error())??;
     match init {
+        PeerInit::Peer {
+            username,
+            connection_type,
+            ..
+        } if connection_type == "D" => {
+            let _ = children.try_send(ChildCandidate { username, stream });
+            Ok(())
+        }
         PeerInit::PierceFirewall { token } => {
             if let Some(ticket) = services.uploads.claim_file(token) {
                 stream.write_u32_le(ticket.transfer_token).await?;
@@ -4239,6 +4404,7 @@ mod tests {
         coordinator.candidates.insert(
             7,
             DistributedCandidateTask {
+                username: "candidate-seven".into(),
                 branch_level: None,
                 branch_root: None,
                 _task: AbortOnDrop(tauri::async_runtime::spawn(std::future::pending())),
@@ -4247,6 +4413,7 @@ mod tests {
         coordinator.candidates.insert(
             8,
             DistributedCandidateTask {
+                username: "candidate-eight".into(),
                 branch_level: Some(3),
                 branch_root: Some("branch-root".to_owned()),
                 _task: AbortOnDrop(tauri::async_runtime::spawn(std::future::pending())),
@@ -4258,6 +4425,20 @@ mod tests {
         assert!(coordinator.accepts_search_from(8));
         assert_eq!(coordinator.candidates.len(), 1);
         assert!(coordinator.close(8));
+        coordinator.candidates.insert(
+            9,
+            DistributedCandidateTask {
+                username: "root-without-root-message".into(),
+                branch_level: None,
+                branch_root: None,
+                _task: AbortOnDrop(tauri::async_runtime::spawn(std::future::pending())),
+            },
+        );
+        coordinator.update_branch_level(9, 0);
+        assert_eq!(
+            coordinator.adopt(9),
+            Some((1, "root-without-root-message".into()))
+        );
     }
 
     #[tokio::test]

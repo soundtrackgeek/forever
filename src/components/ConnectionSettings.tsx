@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { ReachabilitySettings } from "./ReachabilitySettings";
 import {
   ArrowsClockwise,
   BellRinging,
@@ -23,6 +24,7 @@ import type {
   DiagnosticEntry,
   DistributedSnapshot,
   LocalSharesSnapshot,
+  ReachabilitySnapshot,
 } from "../types";
 
 type ConnectionSettingsProps = {
@@ -30,6 +32,8 @@ type ConnectionSettingsProps = {
   hasPassword: boolean;
   snapshot: ConnectionSnapshot;
   searchNetwork: DistributedSnapshot;
+  reachability: ReachabilitySnapshot;
+  onTestReachability: () => Promise<unknown>;
   diagnostics: DiagnosticEntry[];
   diagnosticsPath: string;
   error: string | null;
@@ -106,6 +110,8 @@ export function ConnectionSettings({
   hasPassword,
   snapshot,
   searchNetwork,
+  reachability,
+  onTestReachability,
   diagnostics: initialDiagnostics,
   diagnosticsPath,
   error,
@@ -361,6 +367,9 @@ export function ConnectionSettings({
             </label>
           </div>
 
+          <ReachabilitySettings draft={draft} onChange={setDraft} network={reachability}
+            distributed={searchNetwork} online={snapshot.state === "online"} onTest={onTestReachability} />
+
           {(error || snapshot.state === "error") && (
             <p className="connection-error" role="alert">
               {error || snapshot.message}
@@ -528,7 +537,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.55</h2>
+              <h2>Forever 0.0.56</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="musicbrainz-fallback-field">
                 <span>MusicBrainz fallback tracks</span>

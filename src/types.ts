@@ -635,6 +635,20 @@ export type ConnectionProfile = {
   downloadDirectory: string;
   rememberPassword: boolean;
   autoConnect: boolean;
+  listenPort: number;
+  automaticPortMapping: boolean;
+  allowDistributedChildren: boolean;
+};
+
+export type ReachabilitySnapshot = {
+  status: "unknown" | "reachable" | "firewalled";
+  message: string;
+  listenPort: number | null;
+  advertisedPort: number | null;
+  mapping: string;
+  mappingMessage: string;
+  checking: boolean;
+  incomingConnections: number;
 };
 
 export type ConnectionSnapshot = {
@@ -658,6 +672,10 @@ export type DistributedSnapshot = {
   state: DistributedState;
   message: string;
   branchLevel: number | null;
+  acceptingChildren: boolean;
+  children: number;
+  childCapacity: number;
+  searchesRelayed: number;
   searchesReceived: number;
   searchesMatched: number;
   searchesAnswered: number;
@@ -681,6 +699,7 @@ export type ConnectionBootstrap = {
   hasPassword: boolean;
   snapshot: ConnectionSnapshot;
   searchNetwork: DistributedSnapshot;
+  reachability: ReachabilitySnapshot;
   diagnosticsPath: string;
   diagnostics: DiagnosticEntry[];
 };

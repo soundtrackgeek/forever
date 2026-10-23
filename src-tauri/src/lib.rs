@@ -6,6 +6,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let cleanup_state = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
     tauri::Builder::default()
         .setup(|app| {
             app.manage(connection::initialize(app.handle())?);
@@ -39,6 +40,8 @@ pub fn run() {
             connection::radar_start,
             connection::radar_stop,
             connection::connection_bootstrap,
+            connection::connection_test_reachability,
+            connection::connection_shutdown_network,
             connection::connection_save_profile,
             connection::connection_connect,
             connection::connection_disconnect,
@@ -114,8 +117,28 @@ pub fn run() {
             musicbrainz::album_official_track_count,
             musicbrainz::album_official_tracklist,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(move |app, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                use std::sync::atomic::Ordering;
+                if cleanup_state.load(Ordering::SeqCst) != 2 {
+                    api.prevent_exit();
+                    if cleanup_state.swap(1, Ordering::SeqCst) == 1 {
+                        return;
+                    }
+                    let app = app.clone();
+                    let cleanup_state = cleanup_state.clone();
+                    tauri::async_runtime::spawn(async move {
+                        app.state::<connection::ConnectionManager>()
+                            .shutdown_network()
+                            .await;
+                        cleanup_state.store(2, Ordering::SeqCst);
+                        app.exit(code.unwrap_or(0));
+                    });
+                }
+            }
+        });
 }
 
 #[cfg(test)]

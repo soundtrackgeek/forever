@@ -1,7 +1,7 @@
 {
   "name": "forever",
   "private": true,
-  "version": "0.0.55",
+  "version": "0.0.56",
   "homepage": "https://github.com/soundtrackgeek/forever",
   "repository": {
     "type": "git",
