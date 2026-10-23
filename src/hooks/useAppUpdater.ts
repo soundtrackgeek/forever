@@ -35,15 +35,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.63",
-  version: "0.0.64",
-  body: `## What's new in Forever 0.0.64
+  currentVersion: "0.0.64",
+  version: "0.0.65",
+  body: `## What's new in Forever 0.0.65
 
 ### Changed
 
-- Upload slots rotate fairly between users, with optional favorites and privileged priority.
-- Set per-user file and MB limits in Settings.
-- Pending uploads and user turns survive restarts.`,
+- Shared audio now includes bitrate, duration, sample rate, and bit depth.
+- Unchanged files reuse a persistent local index.
+- Folder changes update shares automatically, with watcher status in Settings.`,
   date: "2026-10-24",
 };
 

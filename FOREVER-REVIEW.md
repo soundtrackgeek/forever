@@ -434,7 +434,21 @@ drops everyone's position.
   (server code 69) first.
 - Persist the queued uploads so positions survive restarts.
 
-### 12. Rich, incremental local share index
+### 12. Rich, incremental local share index - DONE
+
+**Implemented in 0.0.65 (2026-10-24):** bounded Symphonia header reads populate
+duration, sample rate, bit depth, and estimated container-average bitrate in
+search, browse, and folder responses. SQLite WAL persists path/size/mtime header
+results; startup/manual reconciliation reuses unchanged files. Native notify
+events debounce into partial parent-subtree scans, with bounded overflow, watch
+retries, five-minute reconciliation, and Settings status/errors. Serialized scans,
+current-root filtering, junction/symlink guards, and queued-response refresh keep
+permissions and removals consistent; public counts update automatically. Tests
+cover WAV/FLAC/MP3 headers, wire round trips, cache reuse/invalidation/failure,
+file moves/deletions, disabled roots, junctions, and real Windows watcher events.
+Bitrate includes container overhead, VBR is unknown, and equal-size/equal-mtime
+edits evade the cache key. In-memory search maps still rebuild off the UI thread;
+public Soulseek interoperability remains unverified. Original findings follow.
 
 **Today:** Indexed shared files report `bitrate: None` and
 `duration_seconds: None` ([local_shares.rs:94](src-tauri/src/connection/local_shares.rs:94)).

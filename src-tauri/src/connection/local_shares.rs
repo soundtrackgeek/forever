@@ -15,6 +15,13 @@ use std::{
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
+mod cache;
+#[cfg(test)]
+#[path = "local_shares/tests.rs"]
+mod incremental_tests;
+mod watcher;
+use cache::{AudioQuality, IndexCache};
+
 const SHARES_EVENT: &str = "forever://local-shares";
 const STORE_VERSION: u32 = 3;
 const MAX_SHARED_ROOTS: usize = 16;
@@ -80,6 +87,11 @@ pub struct LocalSharesSnapshot {
     pub total_directory_count: u32,
     pub total_size_bytes: u64,
     pub last_scan_at_ms: Option<u64>,
+    pub watching: bool,
+    pub watch_error: Option<String>,
+    pub cache_error: Option<String>,
+    pub reused_file_count: u32,
+    pub inspected_file_count: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -89,6 +101,7 @@ pub struct IndexedFile {
     pub filename: String,
     pub size_bytes: u64,
     pub extension: String,
+    pub quality: AudioQuality,
 }
 
 impl IndexedFile {
@@ -97,11 +110,11 @@ impl IndexedFile {
             filename: self.filename.clone(),
             size_bytes: self.size_bytes,
             extension: self.extension.clone(),
-            bitrate: None,
-            duration_seconds: None,
+            bitrate: self.quality.bitrate,
+            duration_seconds: self.quality.duration_seconds,
             vbr: None,
-            sample_rate: None,
-            bit_depth: None,
+            sample_rate: self.quality.sample_rate,
+            bit_depth: self.quality.bit_depth,
         }
     }
 
@@ -110,17 +123,17 @@ impl IndexedFile {
             filename: self.remote_filename.clone(),
             size_bytes: self.size_bytes,
             extension: self.extension.clone(),
-            bitrate: None,
-            duration_seconds: None,
+            bitrate: self.quality.bitrate,
+            duration_seconds: self.quality.duration_seconds,
             vbr: None,
-            sample_rate: None,
-            bit_depth: None,
+            sample_rate: self.quality.sample_rate,
+            bit_depth: self.quality.bit_depth,
             is_private: false,
         }
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct ShareIndex {
     files: HashMap<String, usize>,
     indexed_files: Vec<IndexedFile>,
@@ -130,6 +143,9 @@ struct ShareIndex {
     total_size_bytes: u64,
     last_scan_at_ms: Option<u64>,
     scanning: bool,
+    cache_error: Option<String>,
+    reused_file_count: u32,
+    inspected_file_count: u32,
 }
 
 // One replaceable snapshot is shared by every peer task. Keep the last valid
@@ -216,6 +232,10 @@ impl ShareIndex {
 
 #[derive(Clone)]
 pub struct LocalSharesHub {
+    inner: Arc<LocalSharesInner>,
+}
+
+pub struct LocalSharesInner {
     app: AppHandle,
     path: JsonFile,
     store: Arc<RwLock<SharingStore>>,
@@ -223,6 +243,15 @@ pub struct LocalSharesHub {
     next_id: Arc<AtomicU64>,
     pending_searches: Arc<Mutex<HashMap<u32, SearchResponseTicket>>>,
     excluded_phrases: ExcludedPhrases,
+    scan_lock: Mutex<()>,
+    watch_status: Mutex<(bool, Option<String>)>,
+}
+
+impl std::ops::Deref for LocalSharesHub {
+    type Target = LocalSharesInner;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -259,22 +288,23 @@ impl LocalSharesHub {
             })
             .collect();
         let hub = Self {
-            app,
-            path,
-            store: Arc::new(RwLock::new(store)),
-            index: Arc::new(RwLock::new(ShareIndex {
-                roots: root_snapshots,
-                scanning: true,
-                ..ShareIndex::default()
-            })),
-            next_id: Arc::new(AtomicU64::new(timestamp_ms())),
-            pending_searches: Arc::new(Mutex::new(HashMap::new())),
-            excluded_phrases: ExcludedPhrases::default(),
+            inner: Arc::new(LocalSharesInner {
+                app,
+                path,
+                store: Arc::new(RwLock::new(store)),
+                index: Arc::new(RwLock::new(ShareIndex {
+                    roots: root_snapshots,
+                    scanning: true,
+                    ..ShareIndex::default()
+                })),
+                next_id: Arc::new(AtomicU64::new(timestamp_ms())),
+                pending_searches: Arc::new(Mutex::new(HashMap::new())),
+                excluded_phrases: ExcludedPhrases::default(),
+                scan_lock: Mutex::new(()),
+                watch_status: Mutex::new((false, None)),
+            }),
         };
-        let scanner = hub.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            let _ = scanner.scan();
-        });
+        watcher::start(Arc::downgrade(&hub.inner));
         Ok(hub)
     }
 
@@ -287,6 +317,11 @@ impl LocalSharesHub {
             .index
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (watching, watch_error) = self
+            .watch_status
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
         LocalSharesSnapshot {
             roots: index.roots.clone(),
             upload_slots: store.upload_slots,
@@ -296,6 +331,11 @@ impl LocalSharesHub {
             total_directory_count: index.directories.len().try_into().unwrap_or(u32::MAX),
             total_size_bytes: index.total_size_bytes,
             last_scan_at_ms: index.last_scan_at_ms,
+            watching,
+            watch_error,
+            cache_error: index.cache_error.clone(),
+            reused_file_count: index.reused_file_count,
+            inspected_file_count: index.inspected_file_count,
         }
     }
 
@@ -342,6 +382,7 @@ impl LocalSharesHub {
     }
 
     pub fn add_root(&self, path: &str) -> Result<LocalSharesSnapshot, LocalSharesError> {
+        let scan = self.scan_lock.lock().unwrap_or_else(|p| p.into_inner());
         let canonical = canonical_directory(path)?;
         let comparison = comparable_path(&canonical);
         let mut store = self
@@ -372,32 +413,40 @@ impl LocalSharesHub {
             "share-{now}-{}",
             self.next_id.fetch_add(1, Ordering::SeqCst)
         );
-        store.roots.push(SharedRootConfig {
+        let mut updated = store.clone();
+        updated.roots.push(SharedRootConfig {
             id,
             path: canonical.to_string_lossy().into_owned(),
             alias,
             enabled: true,
             added_at_ms: now,
         });
+        self.path.save(&updated)?;
+        *store = updated;
         drop(store);
-        self.persist()?;
+        drop(scan);
         self.scan()
     }
 
     pub fn remove_root(&self, id: &str) -> Result<LocalSharesSnapshot, LocalSharesError> {
+        let scan = self.scan_lock.lock().unwrap_or_else(|p| p.into_inner());
         let removed = {
             let mut store = self
                 .store
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let before = store.roots.len();
-            store.roots.retain(|root| root.id != id);
+            let mut updated = store.clone();
+            updated.roots.retain(|root| root.id != id);
+            self.path.save(&updated)?;
+            *store = updated;
             store.roots.len() != before
         };
         if !removed {
             return Err(LocalSharesError::RootNotFound);
         }
-        self.persist()?;
+        self.prune_disabled_roots();
+        drop(scan);
         self.scan()
     }
 
@@ -406,14 +455,18 @@ impl LocalSharesHub {
         id: &str,
         enabled: bool,
     ) -> Result<LocalSharesSnapshot, LocalSharesError> {
+        let scan = self.scan_lock.lock().unwrap_or_else(|p| p.into_inner());
         let found = {
             let mut store = self
                 .store
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            match store.roots.iter_mut().find(|root| root.id == id) {
+            let mut updated = store.clone();
+            match updated.roots.iter_mut().find(|root| root.id == id) {
                 Some(root) => {
                     root.enabled = enabled;
+                    self.path.save(&updated)?;
+                    *store = updated;
                     true
                 }
                 None => false,
@@ -422,7 +475,8 @@ impl LocalSharesHub {
         if !found {
             return Err(LocalSharesError::RootNotFound);
         }
-        self.persist()?;
+        self.prune_disabled_roots();
+        drop(scan);
         self.scan()
     }
 
@@ -443,61 +497,69 @@ impl LocalSharesHub {
     }
 
     pub fn scan(&self) -> Result<LocalSharesSnapshot, LocalSharesError> {
-        {
-            self.index
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .scanning = true;
-        }
-        self.publish();
+        self.scan_paths(None)
+    }
 
+    fn prune_disabled_roots(&self) {
         let roots = self
             .store
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|p| p.into_inner())
             .roots
             .clone();
-        let mut next = ShareIndex {
-            scanning: false,
-            last_scan_at_ms: Some(timestamp_ms()),
-            ..ShareIndex::default()
-        };
-
-        for root in roots {
-            let mut root_snapshot = SharedRootSnapshot {
-                id: root.id.clone(),
-                path: root.path.clone(),
-                alias: root.alias.clone(),
-                enabled: root.enabled,
-                file_count: 0,
-                directory_count: 0,
-                total_size_bytes: 0,
-                error: None,
-            };
-            if root.enabled {
-                if let Err(error) = scan_root(&root, &mut root_snapshot, &mut next) {
-                    root_snapshot.error = Some(error.to_string());
-                }
+        let mut index = self.index.write().unwrap_or_else(|p| p.into_inner());
+        let mut next = ShareIndex::default();
+        for file in &index.indexed_files {
+            if roots
+                .iter()
+                .any(|root| root.enabled && file.local_path.starts_with(&root.path))
+            {
+                insert_file(&mut next, file.clone());
             }
-            next.roots.push(root_snapshot);
         }
-        let ShareIndex {
-            indexed_files,
-            directories,
-            ..
-        } = &mut next;
-        for files in directories.values_mut() {
-            files.sort_by(|left, right| {
-                indexed_files[*left]
-                    .filename
-                    .cmp(&indexed_files[*right].filename)
-            });
-        }
+        next.roots = roots.iter().map(root_snapshot).collect();
+        next.scanning = true;
+        *index = next;
+    }
 
-        *self
-            .index
+    fn scan_paths(
+        &self,
+        paths: Option<&[PathBuf]>,
+    ) -> Result<LocalSharesSnapshot, LocalSharesError> {
+        // Manual, startup and watcher scans have one publisher. Root changes use
+        // the same lock, so an older scan cannot resurrect disabled shares.
+        let _scan = self.scan_lock.lock().unwrap_or_else(|p| p.into_inner());
+        self.index
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
+            .unwrap_or_else(|p| p.into_inner())
+            .scanning = true;
+        self.publish();
+        let roots = self
+            .store
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .roots
+            .clone();
+        let mut cache = IndexCache::open(&self.path.path().with_file_name("share-index.sqlite3"));
+        let previous = {
+            let index = self.index.read().unwrap_or_else(|p| p.into_inner());
+            ShareIndex {
+                indexed_files: index.indexed_files.clone(),
+                roots: index.roots.clone(),
+                ..Default::default()
+            }
+        };
+        let mut next = reconcile(&roots, &previous, paths, &mut cache);
+        drop(previous);
+        cache.finish(
+            next.indexed_files
+                .iter()
+                .map(|file| file.local_path.as_path()),
+        );
+        next.cache_error = cache.error;
+        next.reused_file_count = cache.reused;
+        next.inspected_file_count = cache.inspected;
+        *self.index.write().unwrap_or_else(|p| p.into_inner()) = next;
         self.publish();
         Ok(self.snapshot())
     }
@@ -522,12 +584,17 @@ impl LocalSharesHub {
     }
 
     pub fn search(&self, query: &str) -> Vec<SearchFile> {
+        let store = self.store.read().unwrap_or_else(|p| p.into_inner());
         let phrases = self.excluded_phrases.snapshot();
         let index = self
             .index
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        index.search(query, &phrases)
+        index
+            .search(query, &phrases)
+            .into_iter()
+            .filter(|file| enabled_remote_path(&store, &file.filename))
+            .collect()
     }
 
     pub fn set_excluded_phrases(&self, phrases: Vec<String>) {
@@ -535,10 +602,29 @@ impl LocalSharesHub {
     }
 
     pub fn filter_search_response(&self, files: &mut Vec<SearchFile>) {
+        let store = self.store.read().unwrap_or_else(|p| p.into_inner());
         self.excluded_phrases.retain_search_files(files);
+        // Queued responses may outlive a watcher update or a root removal.
+        let index = self.index.read().unwrap_or_else(|p| p.into_inner());
+        files.retain_mut(|file| {
+            if !enabled_remote_path(&store, &file.filename) {
+                return false;
+            }
+            if let Some(current) = index
+                .files
+                .get(&remote_key(&file.filename))
+                .and_then(|i| index.indexed_files.get(*i))
+            {
+                *file = current.search_file();
+                true
+            } else {
+                false
+            }
+        });
     }
 
     pub fn share_list(&self) -> Vec<ShareListing> {
+        let store = self.store.read().unwrap_or_else(|p| p.into_inner());
         let phrases = self.excluded_phrases.snapshot();
         let index = self
             .index
@@ -547,6 +633,7 @@ impl LocalSharesHub {
         index
             .visible_folders(None, &phrases)
             .into_iter()
+            .filter(|folder| enabled_remote_path(&store, &folder.directory))
             .map(|folder| ShareListing {
                 directory: folder.directory,
                 files: folder.files,
@@ -556,12 +643,17 @@ impl LocalSharesHub {
     }
 
     pub fn folder_list(&self, requested: &str) -> Vec<FolderListing> {
+        let store = self.store.read().unwrap_or_else(|p| p.into_inner());
         let phrases = self.excluded_phrases.snapshot();
         let index = self
             .index
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        index.visible_folders(Some(requested), &phrases)
+        index
+            .visible_folders(Some(requested), &phrases)
+            .into_iter()
+            .filter(|folder| enabled_remote_path(&store, &folder.directory))
+            .collect()
     }
 
     pub fn counts(&self) -> (u32, u32) {
@@ -651,16 +743,181 @@ impl LocalSharesHub {
     }
 }
 
+fn root_snapshot(root: &SharedRootConfig) -> SharedRootSnapshot {
+    SharedRootSnapshot {
+        id: root.id.clone(),
+        path: root.path.clone(),
+        alias: root.alias.clone(),
+        enabled: root.enabled,
+        file_count: 0,
+        directory_count: 0,
+        total_size_bytes: 0,
+        error: None,
+    }
+}
+
+fn enabled_remote_path(store: &SharingStore, path: &str) -> bool {
+    let alias = path.split('\\').next().unwrap_or_default();
+    store
+        .roots
+        .iter()
+        .any(|root| root.enabled && root.alias.eq_ignore_ascii_case(alias))
+}
+
+fn insert_file(index: &mut ShareIndex, file: IndexedFile) {
+    let key = remote_key(&file.remote_filename);
+    if index.files.contains_key(&key) {
+        return;
+    }
+    let Some((directory, _)) = file.remote_filename.rsplit_once('\\') else {
+        return;
+    };
+    let position = index.indexed_files.len();
+    index.files.insert(key, position);
+    for word in search_words(&file.remote_filename) {
+        index.word_index.entry(word).or_default().push(position);
+    }
+    index
+        .directories
+        .entry(directory.to_owned())
+        .or_default()
+        .push(position);
+    index.total_size_bytes = index.total_size_bytes.saturating_add(file.size_bytes);
+    index.indexed_files.push(file);
+}
+
+// Events name files or directories (including both sides of a rename). Scanning
+// their parents also discovers sibling atomic replacements and deleted paths.
+fn scan_scopes(root: &Path, paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut scopes = Vec::new();
+    for path in paths {
+        let scope = if root.starts_with(path) {
+            root
+        } else if path.starts_with(root) {
+            path.parent()
+                .filter(|parent| parent.starts_with(root))
+                .unwrap_or(root)
+        } else {
+            continue;
+        };
+        if scopes
+            .iter()
+            .any(|existing: &PathBuf| scope.starts_with(existing))
+        {
+            continue;
+        }
+        scopes.retain(|existing| !existing.starts_with(scope));
+        scopes.push(scope.to_path_buf());
+    }
+    scopes
+}
+
+fn reconcile(
+    roots: &[SharedRootConfig],
+    previous: &ShareIndex,
+    paths: Option<&[PathBuf]>,
+    cache: &mut IndexCache,
+) -> ShareIndex {
+    let mut next = ShareIndex {
+        last_scan_at_ms: Some(timestamp_ms()),
+        ..Default::default()
+    };
+    // Reserve unaffected files across every root before inserting new entries.
+    if let Some(paths) = paths {
+        for root in roots.iter().filter(|root| root.enabled) {
+            let root_path = Path::new(&root.path);
+            let scopes = scan_scopes(root_path, paths);
+            for file in &previous.indexed_files {
+                if file.local_path.starts_with(root_path)
+                    && !scopes
+                        .iter()
+                        .any(|scope| file.local_path.starts_with(scope))
+                {
+                    insert_file(&mut next, file.clone());
+                }
+            }
+        }
+    }
+    for root in roots {
+        let mut snapshot = root_snapshot(root);
+        if root.enabled {
+            let root_path = Path::new(&root.path);
+            let scopes = paths
+                .map(|paths| scan_scopes(root_path, paths))
+                .unwrap_or_else(|| vec![root_path.to_path_buf()]);
+            if paths.is_some() {
+                snapshot.error = previous
+                    .roots
+                    .iter()
+                    .find(|old| old.id == root.id)
+                    .and_then(|old| old.error.clone());
+            }
+            if !scopes.is_empty() {
+                snapshot.error = None;
+            }
+            for scope in scopes {
+                if let Err(error) = scan_root_at(root, &scope, &mut next, cache) {
+                    snapshot.error = Some(error.to_string());
+                }
+            }
+            for file in next
+                .indexed_files
+                .iter()
+                .filter(|file| file.local_path.starts_with(root_path))
+            {
+                snapshot.file_count += 1;
+                snapshot.total_size_bytes =
+                    snapshot.total_size_bytes.saturating_add(file.size_bytes);
+            }
+            let alias = remote_key(&root.alias);
+            snapshot.directory_count = next
+                .directories
+                .keys()
+                .filter(|directory| {
+                    let key = remote_key(directory);
+                    key == alias || key.starts_with(&format!("{alias}\\"))
+                })
+                .count() as u32;
+        }
+        next.roots.push(snapshot);
+    }
+    for files in next.directories.values_mut() {
+        files.sort_by(|a, b| {
+            next.indexed_files[*a]
+                .filename
+                .cmp(&next.indexed_files[*b].filename)
+        });
+    }
+    next
+}
+
+#[cfg(test)]
 fn scan_root(
     root: &SharedRootConfig,
     snapshot: &mut SharedRootSnapshot,
     index: &mut ShareIndex,
 ) -> Result<(), LocalSharesError> {
+    let mut cache = IndexCache::open(Path::new(":memory:"));
+    *index = reconcile(std::slice::from_ref(root), index, None, &mut cache);
+    *snapshot = index.roots[0].clone();
+    Ok(())
+}
+
+fn scan_root_at(
+    root: &SharedRootConfig,
+    start: &Path,
+    index: &mut ShareIndex,
+    cache: &mut IndexCache,
+) -> Result<(), LocalSharesError> {
     let root_path = PathBuf::from(&root.path);
     if !root_path.is_dir() {
         return Err(LocalSharesError::UnavailableRoot(root.path.clone()));
     }
-    let mut stack = vec![(root_path.clone(), 0_usize)];
+    // Refuse links/junctions anywhere between the root and this partial scope.
+    let Some(depth) = safe_scope_depth(&root_path, start) else {
+        return Ok(());
+    };
+    let mut stack = vec![(start.to_path_buf(), depth)];
     let mut discovered_directories = 1_usize;
     while let Some((directory, depth)) = stack.pop() {
         if depth > MAX_SCAN_DEPTH {
@@ -690,7 +947,7 @@ fn scan_root(
             let Ok(metadata) = entry.metadata() else {
                 continue;
             };
-            if metadata_is_hidden(&metadata) {
+            if metadata_is_hidden(&metadata) || metadata_is_link(&metadata) {
                 continue;
             }
             if file_type.is_dir() {
@@ -744,39 +1001,16 @@ fn scan_root(
                 continue;
             }
             let file = IndexedFile {
+                quality: cache.quality(&path, &metadata),
                 local_path: path,
                 remote_filename: remote_filename.clone(),
                 filename,
                 size_bytes: metadata.len(),
                 extension,
             };
-            let file_index = index.indexed_files.len();
-            index.files.insert(remote_key, file_index);
-            for word in search_words(&remote_filename) {
-                index.word_index.entry(word).or_default().push(file_index);
-            }
-            index.indexed_files.push(file);
-            index
-                .directories
-                .entry(directory)
-                .or_default()
-                .push(file_index);
-            index.total_size_bytes = index.total_size_bytes.saturating_add(metadata.len());
-            snapshot.file_count = snapshot.file_count.saturating_add(1);
-            snapshot.total_size_bytes = snapshot.total_size_bytes.saturating_add(metadata.len());
+            insert_file(index, file);
         }
     }
-    snapshot.directory_count = index
-        .directories
-        .keys()
-        .filter(|directory| {
-            let key = remote_key(directory);
-            let alias = remote_key(&root.alias);
-            key == alias || key.starts_with(&format!("{alias}\\"))
-        })
-        .count()
-        .try_into()
-        .unwrap_or(u32::MAX);
     Ok(())
 }
 
@@ -963,6 +1197,43 @@ fn metadata_is_hidden(_metadata: &fs::Metadata) -> bool {
     false
 }
 
+fn metadata_is_link(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // Includes junctions, not just symbolic links.
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
+
+fn safe_scope_depth(root: &Path, start: &Path) -> Option<usize> {
+    let relative = start.strip_prefix(root).ok()?;
+    let root_metadata = fs::symlink_metadata(root).ok()?;
+    if metadata_is_link(&root_metadata) {
+        return None;
+    }
+    let mut path = root.to_path_buf();
+    let mut depth = 0;
+    for component in relative.components() {
+        if !matches!(component, std::path::Component::Normal(_))
+            || is_hidden_name(component.as_os_str())
+        {
+            return None;
+        }
+        path.push(component);
+        let metadata = fs::symlink_metadata(&path).ok()?;
+        if metadata_is_link(&metadata) || metadata_is_hidden(&metadata) {
+            return None;
+        }
+        depth += 1;
+    }
+    Some(depth)
+}
+
 fn is_temporary_file(path: &Path) -> bool {
     let name = path
         .file_name()
@@ -1033,6 +1304,7 @@ mod tests {
                 filename: filename.into(),
                 size_bytes: 10,
                 extension: "flac".into(),
+                quality: AudioQuality::default(),
             });
         }
         index

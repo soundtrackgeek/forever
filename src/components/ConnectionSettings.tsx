@@ -442,7 +442,7 @@ export function ConnectionSettings({
             </div>
             <div>
               <h2>Your shared releases</h2>
-              <p>Audio, artwork, lyrics, cue sheets, logs, and other release files are indexed. Local paths never leave Forever.</p>
+              <p>Share complete releases with audio quality details. Folder changes are indexed automatically. Local paths never leave Forever.</p>
             </div>
             <span className="sharing-total">
               <strong>{localShares.totalFileCount.toLocaleString()}</strong>
@@ -484,6 +484,12 @@ export function ConnectionSettings({
           </div>
 
           {sharingError ? <p className="connection-error" role="alert">{sharingError}</p> : null}
+          {localShares.watchError ? <p className="connection-error" role="status">{localShares.watchError}</p> : null}
+          {localShares.cacheError ? <p className="connection-error" role="status">{localShares.cacheError}</p> : null}
+          <p className="sharing-index-status" role="status">
+            {localShares.scanning ? "Updating shared files…" : localShares.watching ? "Watching folders for changes" : localShares.roots.some((root) => root.enabled) ? "Periodic rescans active" : "Add or enable a folder to start indexing"}
+            {localShares.lastScanAtMs && !localShares.scanning ? ` · Last update: ${localShares.reusedFileCount.toLocaleString()} cached, ${localShares.inspectedFileCount.toLocaleString()} inspected` : ""}
+          </p>
 
           <div className="sharing-actions">
             <button type="button" className="primary-action" onClick={() => void addSharedFolder()}>
@@ -542,7 +548,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.64</h2>
+              <h2>Forever 0.0.65</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="musicbrainz-fallback-field">
                 <span>MusicBrainz fallback tracks</span>

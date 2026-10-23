@@ -8133,6 +8133,7 @@ form.settings-panel {
 .sharing-total strong { color: #ece9f3; font-size: 17px; font-weight: 480; }
 .sharing-total small, .share-root-counts small, .sharing-scan-time { color: #73798d; font-size: 8px; }
 .share-root-list { display: grid; gap: 7px; margin-top: 17px; }
+.sharing-index-status { color: #949aad; font-size: 10px; line-height: 1.6; margin: 14px 0 0; }
 .share-root-row {
   display: grid; grid-template-columns: 34px minmax(180px, 1.7fr) minmax(150px, .7fr) 32px;
   align-items: center; gap: 12px; min-height: 64px; padding: 9px 11px;

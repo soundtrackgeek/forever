@@ -2036,6 +2036,7 @@ impl ConnectionManager {
                 )
             })?;
         let (shared_directories, shared_files) = self.local_shares.counts();
+        let mut announced_share_counts = (shared_directories, shared_files);
         write_raw_frame(
             &mut stream,
             &shared_counts_frame(shared_directories, shared_files),
@@ -2125,6 +2126,11 @@ impl ConnectionManager {
         loop {
             tokio::select! {
                 _ = download_retry_tick.tick() => {
+                    let counts = self.local_shares.counts();
+                    if counts != announced_share_counts {
+                        announced_share_counts = counts;
+                        let _ = command_sender.send(ConnectionCommand::RefreshSharedCounts);
+                    }
                     self.uploads.retry_save();
                     if self.uploads.queued_count() > 0 && self.uploads.has_free_slot(self.local_shares.upload_slots()) {
                         let _ = command_sender.send(ConnectionCommand::ScheduleUploads);

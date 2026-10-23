@@ -631,6 +631,11 @@ export type LocalSharesSnapshot = {
   totalDirectoryCount: number;
   totalSizeBytes: number;
   lastScanAtMs: number | null;
+  watching: boolean;
+  watchError: string | null;
+  cacheError: string | null;
+  reusedFileCount: number;
+  inspectedFileCount: number;
 };
 
 export type Upload = {

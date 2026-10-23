@@ -899,6 +899,7 @@ mod tests {
             filename: name.into(),
             size_bytes: bytes,
             extension: "flac".into(),
+            quality: Default::default(),
         }
     }
 

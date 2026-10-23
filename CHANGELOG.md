@@ -5,6 +5,24 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.65] - 2026-10-24
+
+### Added
+
+- Header-only audio quality attributes in local search, browse, and folder replies:
+  duration, estimated average bitrate, sample rate, and bit depth when available.
+- A transactional SQLite share index keyed by local path, file size, and modification
+  time, reusing unchanged header results across rescans and application restarts.
+- Debounced native folder watching with partial subtree scans, bounded event bursts,
+  periodic reconciliation, watch retries, and visible watcher/cache health in Settings.
+
+### Fixed
+
+- Changed, renamed, deleted, disabled, and removed shares refresh public listings,
+  queued search replies, upload lookup, and server counts. Concurrent scans serialize.
+- Partial scans reject Windows junctions and symlink ancestors as well as hidden and
+  temporary entries. Cache failures preserve existing data and allow uncached indexing.
+
 ## [0.0.64] - 2026-10-24
 
 ### Added

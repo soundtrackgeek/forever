@@ -12,6 +12,11 @@ const emptyShares: LocalSharesSnapshot = {
   totalDirectoryCount: 0,
   totalSizeBytes: 0,
   lastScanAtMs: null,
+  watching: false,
+  watchError: null,
+  cacheError: null,
+  reusedFileCount: 0,
+  inspectedFileCount: 0,
 };
 
 const previewShares: LocalSharesSnapshot = {
@@ -34,6 +39,11 @@ const previewShares: LocalSharesSnapshot = {
   totalDirectoryCount: 93,
   totalSizeBytes: 71_600_000_000,
   lastScanAtMs: Date.now() - 84_000,
+  watching: true,
+  watchError: null,
+  cacheError: null,
+  reusedFileCount: 1245,
+  inspectedFileCount: 3,
 };
 
 const emptyUploads: UploadQueueSnapshot = {

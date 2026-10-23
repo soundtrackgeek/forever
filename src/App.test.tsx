@@ -971,6 +971,8 @@ describe("Forever shell", () => {
     expect(screen.getByRole("heading", { name: "Your shared releases" })).toBeInTheDocument();
     expect(screen.getByText("Midnight Archive")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Upload slots" })).toHaveValue("1");
+    expect(screen.getByText(/Watching folders for changes/)).toHaveTextContent("Last update: 1,245 cached, 3 inspected");
+    expect(screen.getByRole("button", { name: "Rescan" })).toBeEnabled();
     const notifications = screen.getByRole("checkbox", {
       name: /Private-message alerts/,
     });
@@ -1036,17 +1038,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.64 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.65 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Upload slots rotate fairly between users, with optional favorites and privileged priority.",
+        "Shared audio now includes bitrate, duration, sample rate, and bit depth.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Set per-user file and MB limits in Settings.",
+        "Unchanged files reuse a persistent local index.",
       ),
     ).toBeInTheDocument();
     expect(

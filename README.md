@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.64` adds fair upload scheduling, per-user limits,
-> optional priority tiers, and a durable upload queue.
+> **Status:** pre-alpha. Version `0.0.65` adds audio quality attributes to shares,
+> a persistent incremental index, and automatic folder watching.
 
-If `0.0.16` is installed, download and run the latest `0.0.64` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.65` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -236,6 +236,9 @@ configuration and transfers.
   workspace height
 - Persistent local shared-folder configuration with native selection,
   enable/disable, removal, rescanning, virtual aliases, and indexed totals
+- Cached audio headers publish duration, estimated average bitrate, sample rate,
+  and bit depth in search, browse, and folder responses. Debounced folder watching
+  updates changed subtrees; Settings shows watcher health and cache reuse.
 - Bounded background indexing for complete release folders—including audio,
   artwork, lyrics, cue sheets, logs, booklets, checksums, playlists, archives,
   and extensionless files—while excluding hidden entries, symbolic links,
@@ -696,11 +699,36 @@ selected root a virtual alias, indexes every safe, non-empty regular file in the
 background, and announces the resulting public counts to Soulseek. This keeps
 cover artwork, lyrics, cue sheets, logs, booklets, checksums, playlists, and
 other companion files beside the audio. Disable a root without forgetting it,
-rescan after changing files, and choose one to three outgoing upload slots.
+let folder watching update changed files, and choose one to three outgoing upload slots.
 Incoming browse, folder, global-search, queue, and download requests are then
 served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
+
+Audio headers are read with Symphonia, without decoding or changing files. Known
+duration, sample rate, and bit depth are included in outgoing Soulseek attributes.
+Bitrate is an **estimated container average** (file bytes / duration), which can
+include artwork/tags; it is not a nominal encoder setting. VBR remains unknown.
+Unsupported, malformed, or oversized headers leave attributes unknown while the
+file remains shareable. Header reads are capped at 8 MiB per changed file.
+
+The local `share-index.sqlite3` cache stores paths, sizes, nanosecond modification
+timestamps, and header results in a versioned SQLite WAL database. Startup and
+**Rescan** walk enabled roots but reuse unchanged headers; watcher updates scan
+only affected parent subtrees and rebuild the in-memory search maps in the
+background. New, changed, moved, and removed files update all share responses and
+server counts. Disabled/removed roots stop being advertised, including in queued
+search replies. Hidden entries, symlinks, and Windows junctions remain excluded.
+
+Watcher events settle for 750 ms, with a five-second maximum delay during bursts.
+Bounded event overflow requests full reconciliation. A five-minute reconciliation
+also covers missed events, unavailable/network drives, and watcher failures;
+watch registration is retried every 30 seconds. Settings shows watcher/cache
+errors and the last update's cached/inspected file counts. Manual **Rescan** remains
+available. Cache failures preserve the cache and continue with uncached headers;
+after closing Forever, a damaged cache can be moved aside to rebuild it. The cache
+is disposable and never grants permission to share a root. Source-file edits that
+preserve both size and modification time cannot be detected by this cache key.
 
 **Settings → Your shared releases → Upload fairness** controls outgoing policy.
 Users with fewer active uploads get the next free slot; users at the same level
@@ -820,7 +848,8 @@ configuration, upload-slot count, and per-user upload policy are stored in
 requests, peer usernames, virtual filenames, sizes, and fairness turns are stored
 in `uploads.json`; local file paths and connection tokens are excluded. The
 sharing file contains local folder paths because Forever must reopen those roots,
-but it never leaves the device. Peer IP
+but it never leaves the device. `share-index.sqlite3` beside it holds the derived
+local index; optional `-wal` and `-shm` files are SQLite journals. Peer IP
 addresses, temporary folder listings, cached user share lists, and credentials
 are excluded. Share lists stay in memory only for the current app session.
 Passwords are excluded from both. With “Remember
