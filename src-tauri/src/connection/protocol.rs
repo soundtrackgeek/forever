@@ -36,9 +36,11 @@ pub const ACCEPT_CHILDREN_CODE: u32 = 100;
 pub const POSSIBLE_PARENTS_CODE: u32 = 102;
 pub const PARENT_MIN_SPEED_CODE: u32 = 83;
 pub const PARENT_SPEED_RATIO_CODE: u32 = 84;
+pub const SEND_UPLOAD_SPEED_CODE: u32 = 121;
 pub const BRANCH_LEVEL_CODE: u32 = 126;
 pub const BRANCH_ROOT_CODE: u32 = 127;
 pub const RESET_DISTRIBUTED_CODE: u32 = 130;
+pub const EXCLUDED_SEARCH_PHRASES_CODE: u32 = 160;
 pub const CANT_CONNECT_TO_PEER_CODE: u32 = 1001;
 pub const SHARED_FILE_LIST_REQUEST_CODE: u32 = 4;
 pub const SHARED_FILE_LIST_RESPONSE_CODE: u32 = 5;
@@ -87,6 +89,8 @@ const MAX_ROOM_NAME_BYTES: usize = 24;
 const MAX_ROOM_MESSAGE_BYTES: usize = 4 * 1024;
 const MAX_ROOM_LIST: usize = 5_000;
 const MAX_ROOM_MEMBERS: usize = 5_000;
+const MAX_EXCLUDED_PHRASES: usize = 10_000;
+const MAX_EXCLUDED_PHRASE_BYTES: usize = 4 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Frame {
@@ -334,6 +338,31 @@ pub fn user_stats_frame(username: &str) -> Vec<u8> {
     let mut payload = Vec::with_capacity(username.len() + 4);
     push_string(&mut payload, username);
     encode_message(USER_STATS_CODE, &payload)
+}
+
+pub fn send_upload_speed_frame(speed_bytes_per_second: u32) -> Vec<u8> {
+    encode_message(
+        SEND_UPLOAD_SPEED_CODE,
+        &speed_bytes_per_second.to_le_bytes(),
+    )
+}
+
+pub fn parse_excluded_search_phrases(frame: &Frame) -> Result<Vec<String>, ProtocolError> {
+    expect_code(frame, EXCLUDED_SEARCH_PHRASES_CODE)?;
+    let mut reader = PayloadReader::new(&frame.payload);
+    let count = bounded_count(reader.read_u32()?, MAX_EXCLUDED_PHRASES, "excluded phrases")?;
+    let mut phrases = Vec::with_capacity(count);
+    for _ in 0..count {
+        let length = reader.read_u32()? as usize;
+        if length > MAX_EXCLUDED_PHRASE_BYTES {
+            return Err(ProtocolError::InvalidLength(length));
+        }
+        phrases.push(String::from_utf8(reader.read_bytes(length)?.to_vec())?);
+    }
+    if reader.remaining() != 0 {
+        return Err(ProtocolError::InvalidLength(frame.payload.len()));
+    }
+    Ok(phrases)
 }
 
 pub fn user_interests_frame(username: &str) -> Vec<u8> {
@@ -1987,6 +2016,91 @@ mod tests {
             code: u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
             payload: bytes[8..].to_vec(),
         }
+    }
+
+    #[test]
+    fn upload_speed_frame_uses_code_121_and_one_little_endian_u32() {
+        assert_eq!(
+            send_upload_speed_frame(0x12345678),
+            [8, 0, 0, 0, 121, 0, 0, 0, 0x78, 0x56, 0x34, 0x12]
+        );
+        for speed in [0, u32::MAX] {
+            let frame = decoded_frame(&send_upload_speed_frame(speed));
+            assert_eq!(frame.code, SEND_UPLOAD_SPEED_CODE);
+            assert_eq!(frame.payload, speed.to_le_bytes());
+        }
+    }
+
+    #[test]
+    fn parses_excluded_phrases_and_empty_replacement_list() {
+        let mut payload = 3_u32.to_le_bytes().to_vec();
+        for phrase in ["An Album", "Björk\\Track", ""] {
+            push_string(&mut payload, phrase);
+        }
+        let frame = decoded_frame(&encode_message(EXCLUDED_SEARCH_PHRASES_CODE, &payload));
+        assert_eq!(
+            parse_excluded_search_phrases(&frame).unwrap(),
+            ["An Album", "Björk\\Track", ""]
+        );
+        let empty = Frame {
+            code: EXCLUDED_SEARCH_PHRASES_CODE,
+            payload: 0_u32.to_le_bytes().to_vec(),
+        };
+        assert!(parse_excluded_search_phrases(&empty).unwrap().is_empty());
+    }
+
+    #[test]
+    fn excluded_phrases_reject_malformed_frames_without_partial_results() {
+        let mut valid = 2_u32.to_le_bytes().to_vec();
+        push_string(&mut valid, "first");
+        push_string(&mut valid, "second");
+        for end in 0..valid.len() {
+            assert!(parse_excluded_search_phrases(&Frame {
+                code: EXCLUDED_SEARCH_PHRASES_CODE,
+                payload: valid[..end].to_vec(),
+            })
+            .is_err());
+        }
+        assert!(matches!(
+            parse_excluded_search_phrases(&Frame {
+                code: SEND_UPLOAD_SPEED_CODE,
+                payload: valid.clone(),
+            }),
+            Err(ProtocolError::UnexpectedCode { .. })
+        ));
+        valid.push(0);
+        assert!(parse_excluded_search_phrases(&Frame {
+            code: EXCLUDED_SEARCH_PHRASES_CODE,
+            payload: valid
+        })
+        .is_err());
+
+        for payload in [
+            (MAX_EXCLUDED_PHRASES as u32 + 1).to_le_bytes().to_vec(),
+            [
+                1_u32.to_le_bytes(),
+                (MAX_EXCLUDED_PHRASE_BYTES as u32 + 1).to_le_bytes(),
+            ]
+            .concat(),
+            vec![1, 0, 0, 0, 1, 0, 0, 0, 0xff],
+        ] {
+            assert!(parse_excluded_search_phrases(&Frame {
+                code: EXCLUDED_SEARCH_PHRASES_CODE,
+                payload
+            })
+            .is_err());
+        }
+        let mut boundary = 1_u32.to_le_bytes().to_vec();
+        push_string(&mut boundary, &"x".repeat(MAX_EXCLUDED_PHRASE_BYTES));
+        assert_eq!(
+            parse_excluded_search_phrases(&Frame {
+                code: EXCLUDED_SEARCH_PHRASES_CODE,
+                payload: boundary
+            })
+            .unwrap()[0]
+                .len(),
+            MAX_EXCLUDED_PHRASE_BYTES
+        );
     }
 
     #[test]

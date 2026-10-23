@@ -992,17 +992,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.56 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.57 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "A saved listening port with automatic UPnP, PCP, and NAT-PMP mapping.",
+        "Server excluded phrases now filter search, browse, and folder responses.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Direct-connection testing and live mapping evidence in Settings.",
+        "Completed uploads report measured speed without counting resumed bytes.",
       ),
     ).toBeInTheDocument();
     expect(

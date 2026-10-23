@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.56` adds stable listening ports, automatic
-> router mapping, direct-connection testing, and distributed search branches.
+> **Status:** pre-alpha. Version `0.0.57` honors server-provided excluded phrases
+> in shared-file responses and reports measured upload speeds after completion.
 
-If `0.0.16` is installed, download and run the latest `0.0.56` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.57` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -223,10 +223,21 @@ configuration and transfers.
   recovery, and real search responses from the local share index
 - Indexed global-search matching with required words, `-excluded` words, and
   `*partial` terms, plus bounded deduplication and request-rate controls
+- Server-provided excluded phrases (code 160) filter full virtual file paths,
+  case-insensitively, in server/distributed search results, browse lists, and
+  folder responses. Queued search replies are checked again before sending.
+  Lists replace the previous in-memory set; an empty list clears it. Invalid
+  updates retain the last valid list, also retained across reconnects until
+  replaced. Local files and the share index remain unchanged.
 - Live global-search relay state, branch discovery, request counters, and safe
   connection diagnostics in Settings
 - Real resumable uploads with queue positions, one to three configurable slots,
   progress, speed, ETA, cancellation, failure states, and an Uploads workspace
+- Completed uploads report average bytes per second to the server (code 121),
+  measured from newly sent bytes through the downloader's closing confirmation.
+  Resumed bytes are excluded; cancelled, failed, and zero-byte attempts send no
+  speed sample. Missing confirmation fails after 30 seconds. Reports stay with
+  their originating server session and are never replayed after reconnecting.
 - Safe `.part` files, resumable offsets, exact-size checks, sanitized local
   names, collision-free destinations, and no overwrite of existing files
 - Passwords stored in Windows Credential Manager, or held only in memory when

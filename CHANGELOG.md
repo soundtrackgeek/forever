@@ -5,6 +5,29 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.57] - 2026-10-23
+
+### Fixed
+
+- Handle server ExcludedSearchPhrases (160) with bounded parsing and a shared,
+  atomically replaced set. Full virtual paths are matched case-insensitively in
+  server/distributed search, browse, and folder responses, including a final
+  check of queued search replies. Filtering precedes the search-result limit;
+  fully excluded folders are omitted. Invalid updates keep the last valid list.
+- Send SendUploadSpeed (121) once per successfully completed upload with a
+  measured average in bytes per second, excluding the resume offset and bounded
+  to the protocol's 32-bit field. Cancelled, failed, and zero-byte attempts do
+  not report a sample, and reports cannot leak into a later server session.
+- Wait for the downloader to close the file connection before completing an
+  upload, with a 30-second confirmation timeout and cancellation during I/O.
+
+### Changed
+
+- Mark review item 4 complete, document protocol behavior, and align application,
+  package, Cargo, Tauri, updater preview, Settings, and MusicBrainz versions.
+- Add wire-format, parser-boundary, exclusion-update, response-filtering,
+  upload-resume, completion, cancellation, and failure regression coverage.
+
 ## [0.0.56] - 2026-10-23
 
 ### Added

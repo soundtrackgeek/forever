@@ -178,7 +178,18 @@ relay distributed searches.
 - When the client is reachable and stable, accept distributed children so
   Forever contributes to the network rather than only consuming it.
 
-### 4. Server protocol compliance (codes 160 and 121)
+### 4. Server protocol compliance (codes 160 and 121) - DONE
+
+**Implemented in 0.0.57 (2026-10-23):** bounded code-160 parsing updates one
+shared exclusion set. Case-insensitive full-path filtering covers server and
+distributed search replies, queued replies at send time, browse lists, and
+folder responses; excluded files do not consume the search-result limit.
+Malformed updates preserve the last valid list. Successful uploads report code
+121 using only bytes sent during that attempt and await the downloader's closing
+confirmation. Cancelled, failed, and zero-byte attempts produce no speed sample;
+reports are scoped to the originating server session. Wire-format and local
+stream tests cover these paths. Public Soulseek interoperability has not been
+verified live. The original findings and proposal follow for context.
 
 **Today:** The client does not handle **ExcludedSearchPhrases (160)**. The server
 sends this list of phrases, and Nicotine+'s protocol documentation states that

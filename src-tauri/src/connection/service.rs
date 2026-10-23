@@ -22,25 +22,26 @@ use super::{
         have_no_parent_frame, join_room_frame, leave_room_frame, login_frame, message_acked_frame,
         message_user_frame, parse_cant_connect_token, parse_connect_to_peer,
         parse_distributed_branch_level, parse_distributed_branch_root, parse_distributed_search,
-        parse_embedded_distributed_search, parse_filename, parse_folder_contents_request,
-        parse_folder_contents_response, parse_join_room, parse_leave_room, parse_login_response,
-        parse_peer_address, parse_possible_parents, parse_private_message, parse_queue_position,
-        parse_room_chat_message, parse_room_list, parse_search_response,
-        parse_server_search_request, parse_shared_file_list_response, parse_transfer_request,
-        parse_transfer_response, parse_upload_denied, parse_user_info_response,
-        parse_user_interests, parse_user_joined_room, parse_user_left_room, parse_user_stats,
-        parse_user_status, parse_watch_user, peer_init_frame, pierce_firewall_frame,
-        place_in_queue_request_frame, place_in_queue_response_frame, queue_upload_frame,
-        read_distributed_frame, read_frame, read_peer_frame, read_peer_init, read_profile_frame,
-        room_list_frame, say_chatroom_frame, server_ping_frame, set_online_frame,
-        set_wait_port_frame, shared_counts_frame, shared_file_list_request_frame,
-        shared_file_list_response_frame, transfer_request_frame, transfer_response_frame,
-        unwatch_user_frame, upload_denied_frame, user_info_request_frame, user_info_response_frame,
-        user_interests_frame, user_stats_frame, watch_user_frame, write_raw_frame, ConnectToPeer,
-        DistributedFrame, DistributedSearch, Frame, LoginResponse, ParentCandidate, PeerAddress,
-        PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE,
-        DISTRIBUTED_BRANCH_LEVEL_CODE, DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_EMBEDDED_CODE,
-        DISTRIBUTED_SEARCH_CODE, EMBEDDED_MESSAGE_CODE, FILE_SEARCH_CODE,
+        parse_embedded_distributed_search, parse_excluded_search_phrases, parse_filename,
+        parse_folder_contents_request, parse_folder_contents_response, parse_join_room,
+        parse_leave_room, parse_login_response, parse_peer_address, parse_possible_parents,
+        parse_private_message, parse_queue_position, parse_room_chat_message, parse_room_list,
+        parse_search_response, parse_server_search_request, parse_shared_file_list_response,
+        parse_transfer_request, parse_transfer_response, parse_upload_denied,
+        parse_user_info_response, parse_user_interests, parse_user_joined_room,
+        parse_user_left_room, parse_user_stats, parse_user_status, parse_watch_user,
+        peer_init_frame, pierce_firewall_frame, place_in_queue_request_frame,
+        place_in_queue_response_frame, queue_upload_frame, read_distributed_frame, read_frame,
+        read_peer_frame, read_peer_init, read_profile_frame, room_list_frame, say_chatroom_frame,
+        send_upload_speed_frame, server_ping_frame, set_online_frame, set_wait_port_frame,
+        shared_counts_frame, shared_file_list_request_frame, shared_file_list_response_frame,
+        transfer_request_frame, transfer_response_frame, unwatch_user_frame, upload_denied_frame,
+        user_info_request_frame, user_info_response_frame, user_interests_frame, user_stats_frame,
+        watch_user_frame, write_raw_frame, ConnectToPeer, DistributedFrame, DistributedSearch,
+        Frame, LoginResponse, ParentCandidate, PeerAddress, PeerInit, ProtocolError,
+        CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE, DISTRIBUTED_BRANCH_LEVEL_CODE,
+        DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_EMBEDDED_CODE, DISTRIBUTED_SEARCH_CODE,
+        EMBEDDED_MESSAGE_CODE, EXCLUDED_SEARCH_PHRASES_CODE, FILE_SEARCH_CODE,
         FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE,
         GET_PEER_ADDRESS_CODE, JOIN_ROOM_CODE, LEAVE_ROOM_CODE, MESSAGE_USER_CODE,
         PARENT_MIN_SPEED_CODE, PARENT_SPEED_RATIO_CODE, PLACE_IN_QUEUE_REQUEST_CODE,
@@ -374,6 +375,9 @@ enum ConnectionCommand {
     },
     ScheduleDownloads,
     ScheduleUploads,
+    ReportUploadSpeed {
+        bytes_per_second: u32,
+    },
     OpenUploadFile {
         id: String,
     },
@@ -2112,7 +2116,16 @@ impl ConnectionManager {
                             "relogged",
                         ));
                     }
-                    if frame.code == ROOM_LIST_CODE {
+                    if frame.code == EXCLUDED_SEARCH_PHRASES_CODE {
+                        match parse_excluded_search_phrases(&frame) {
+                            Ok(phrases) => self.local_shares.set_excluded_phrases(phrases),
+                            Err(_) => self.diagnostics.record(
+                                "warning",
+                                "excluded_phrases_invalid",
+                                "The server sent an invalid excluded-phrase list; the last valid list remains active.",
+                            ),
+                        }
+                    } else if frame.code == ROOM_LIST_CODE {
                         if let Ok(rooms) = parse_room_list(&frame) {
                             self.rooms.update_list(rooms);
                         }
@@ -2707,6 +2720,13 @@ impl ConnectionManager {
                                     command_sender.clone(),
                                 );
                             }
+                        }
+                        Some(ConnectionCommand::ReportUploadSpeed { bytes_per_second }) => {
+                            write_raw_frame(&mut server_writer, &send_upload_speed_frame(bytes_per_second))
+                                .await.map_err(|error| ConnectionFailure::retryable(
+                                    format!("The upload speed report could not be sent: {error}"),
+                                    "upload_speed_report_failed",
+                                ))?;
                         }
                         Some(ConnectionCommand::ScheduleUploads) => {
                             loop {
@@ -3334,9 +3354,16 @@ fn spawn_outbound_upload_file_peer(
 
 async fn send_search_response_on_peer(
     stream: &mut TcpStream,
-    ticket: SearchResponseTicket,
+    mut ticket: SearchResponseTicket,
     services: &PeerServices,
 ) -> Result<(), ProtocolError> {
+    // The server may replace its list while the peer connection is opening.
+    services
+        .local_shares
+        .filter_search_response(&mut ticket.files);
+    if ticket.files.is_empty() {
+        return Ok(());
+    }
     let frame = file_search_response_frame(
         &services.own_username,
         ticket.search_token,
@@ -4031,21 +4058,69 @@ fn spawn_file_upload(
     uploads.register_task(plan.id.clone(), cancellation.clone());
     let task_uploads = uploads.clone();
     tauri::async_runtime::spawn(async move {
-        let result = send_file(stream, &plan, task_uploads.clone(), cancellation).await;
-        if let Err(message) = result {
-            task_uploads.fail_id(&plan.id, message);
+        let result = send_file(stream, &plan, cancellation.clone(), |transferred, speed| {
+            task_uploads.update_progress(&plan.id, transferred, speed);
+        })
+        .await;
+        match result {
+            Ok(Some(measurement)) => {
+                if !cancellation.load(Ordering::SeqCst) && task_uploads.complete(&plan.id) {
+                    if let Some(bytes_per_second) = measurement.average_speed() {
+                        // This sender belongs to the originating server session. Never
+                        // replay a completed upload against a different login/session.
+                        let _ = command_sender
+                            .send(ConnectionCommand::ReportUploadSpeed { bytes_per_second });
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(message) => {
+                task_uploads.fail_id(&plan.id, message);
+            }
         }
         task_uploads.unregister_task(&plan.id);
         let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
     });
 }
 
-async fn send_file(
-    mut stream: TcpStream,
+#[derive(Debug)]
+struct UploadMeasurement {
+    bytes_sent: u64,
+    elapsed: Duration,
+}
+
+impl UploadMeasurement {
+    fn average_speed(&self) -> Option<u32> {
+        if self.bytes_sent == 0 || self.elapsed.is_zero() {
+            return None;
+        }
+        let speed = u128::from(self.bytes_sent) * 1_000_000_000 / self.elapsed.as_nanos();
+        Some(speed.clamp(1, u128::from(u32::MAX)) as u32)
+    }
+}
+
+async fn send_file<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: S,
     plan: &UploadTicket,
-    uploads: UploadHub,
     cancellation: Arc<AtomicBool>,
-) -> Result<(), String> {
+    progress: impl FnMut(u64, u64),
+) -> Result<Option<UploadMeasurement>, String> {
+    tokio::select! {
+        biased;
+        _ = async {
+            while !cancellation.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        } => Ok(None),
+        result = send_file_contents(stream, plan, progress) => result.map(Some),
+    }
+}
+
+async fn send_file_contents<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
+    plan: &UploadTicket,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<UploadMeasurement, String> {
     let offset = timeout(PEER_MESSAGE_TIMEOUT, stream.read_u64_le())
         .await
         .map_err(|_| "The downloader did not send a resume offset in time.".to_owned())?
@@ -4062,12 +4137,10 @@ async fn send_file(
 
     let mut transferred = offset;
     let mut last_bytes = transferred;
-    let mut last_update = Instant::now();
+    let started = Instant::now();
+    let mut last_update = started;
     let mut buffer = vec![0_u8; FILE_BUFFER_SIZE];
     while transferred < plan.size_bytes {
-        if cancellation.load(Ordering::SeqCst) {
-            return Ok(());
-        }
         let remaining = plan.size_bytes - transferred;
         let capacity = usize::try_from(remaining.min(FILE_BUFFER_SIZE as u64))
             .expect("bounded file read size fits usize");
@@ -4087,7 +4160,7 @@ async fn send_file(
         if elapsed >= Duration::from_millis(250) || transferred == plan.size_bytes {
             let millis = elapsed.as_millis().max(1) as u64;
             let speed = transferred.saturating_sub(last_bytes).saturating_mul(1_000) / millis;
-            uploads.update_progress(&plan.id, transferred, speed);
+            progress(transferred, speed);
             last_bytes = transferred;
             last_update = Instant::now();
         }
@@ -4096,10 +4169,20 @@ async fn send_file(
         .flush()
         .await
         .map_err(|error| format!("The upload could not be finished: {error}"))?;
-    if !cancellation.load(Ordering::SeqCst) {
-        uploads.complete(&plan.id);
+    // The downloader closes the F connection to signal receipt of the entire
+    // file. Flushing alone only confirms writes to the local socket buffer.
+    let mut acknowledgement = [0_u8; 1];
+    let count = timeout(Duration::from_secs(30), stream.read(&mut acknowledgement))
+        .await
+        .map_err(|_| "The downloader did not close the completed upload in time.".to_owned())?
+        .map_err(|error| format!("The downloader did not confirm the upload: {error}"))?;
+    if count != 0 {
+        return Err("The downloader sent unexpected data after the resume offset.".to_owned());
     }
-    Ok(())
+    Ok(UploadMeasurement {
+        bytes_sent: transferred - offset,
+        elapsed: started.elapsed(),
+    })
 }
 
 async fn receive_file(
@@ -4347,6 +4430,151 @@ pub enum ConnectionServiceError {
 mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
+
+    fn upload_fixture(directory: &Path, bytes: &[u8]) -> UploadTicket {
+        let local_path = directory.join("shared.flac");
+        std::fs::write(&local_path, bytes).unwrap();
+        UploadTicket {
+            id: "upload".into(),
+            username: "downloader".into(),
+            remote_filename: "Music\\shared.flac".into(),
+            size_bytes: bytes.len() as u64,
+            local_path,
+            connection_token: 1,
+            transfer_token: 2,
+        }
+    }
+
+    #[test]
+    fn upload_average_uses_attempt_bytes_and_saturates_the_wire_integer() {
+        for (bytes_sent, elapsed, expected) in [
+            (3_000, Duration::from_secs(2), Some(1_500)),
+            (3_000, Duration::from_millis(500), Some(6_000)),
+            (u64::MAX, Duration::from_nanos(1), Some(u32::MAX)),
+            (1, Duration::from_secs(2), Some(1)),
+            (0, Duration::from_secs(1), None),
+            (1, Duration::ZERO, None),
+        ] {
+            assert_eq!(
+                UploadMeasurement {
+                    bytes_sent,
+                    elapsed
+                }
+                .average_speed(),
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn uploads_measure_only_new_bytes_and_wait_for_downloader_close() {
+        let directory = tempfile::tempdir().unwrap();
+        let bytes = b"01234567";
+        let plan = upload_fixture(directory.path(), bytes);
+        for offset in [0, 3, 8] {
+            let (mut peer, stream) = tokio::io::duplex(64);
+            let mut progress = Vec::new();
+            let mut upload = Box::pin(send_file(
+                stream,
+                &plan,
+                Arc::new(AtomicBool::new(false)),
+                |total, speed| progress.push((total, speed)),
+            ));
+            peer.write_u64_le(offset).await.unwrap();
+            let mut received = vec![0; bytes.len() - offset as usize];
+            tokio::select! {
+                result = upload.as_mut() => panic!("upload completed before the downloader closed: {result:?}"),
+                result = peer.read_exact(&mut received) => { result.unwrap(); }
+            }
+            assert_eq!(received, bytes[offset as usize..]);
+            // Poll the upload while the downloader still owns the open stream.
+            std::future::poll_fn(|cx| {
+                assert!(std::future::Future::poll(upload.as_mut(), cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            peer.shutdown().await.unwrap();
+            let measurement = timeout(Duration::from_secs(5), upload)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(measurement.bytes_sent, plan.size_bytes - offset);
+            assert_eq!(
+                measurement.average_speed().is_some(),
+                offset < plan.size_bytes
+            );
+            if offset < plan.size_bytes {
+                assert_eq!(progress.last().unwrap().0, plan.size_bytes);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_uploads_have_no_completion_measurement() {
+        let directory = tempfile::tempdir().unwrap();
+        let plan = upload_fixture(directory.path(), b"01234567");
+        let cancellation = Arc::new(AtomicBool::new(true));
+        let (_peer, stream) = tokio::io::duplex(64);
+        assert!(send_file(stream, &plan, cancellation.clone(), |_, _| {})
+            .await
+            .unwrap()
+            .is_none());
+
+        cancellation.store(false, Ordering::SeqCst);
+        let (mut peer, stream) = tokio::io::duplex(64);
+        let mut upload = Box::pin(send_file(stream, &plan, cancellation.clone(), |_, _| {}));
+        peer.write_u64_le(0).await.unwrap();
+        let mut received = [0; 8];
+        tokio::select! {
+            result = upload.as_mut() => panic!("completed before close: {result:?}"),
+            result = peer.read_exact(&mut received) => { result.unwrap(); }
+        }
+        cancellation.store(true, Ordering::SeqCst);
+        assert!(timeout(Duration::from_secs(5), upload)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn failed_uploads_have_no_completion_measurement() {
+        let directory = tempfile::tempdir().unwrap();
+        let plan = upload_fixture(directory.path(), b"01234567");
+        for (offset, extra, expected) in [
+            (9, false, "invalid resume offset"),
+            (0, true, "unexpected data"),
+        ] {
+            let (mut peer, stream) = tokio::io::duplex(64);
+            peer.write_u64_le(offset).await.unwrap();
+            if extra {
+                peer.write_all(&[1]).await.unwrap();
+            }
+            let error = send_file(stream, &plan, Arc::new(AtomicBool::new(false)), |_, _| {})
+                .await
+                .unwrap_err();
+            assert!(error.contains(expected), "{error}");
+        }
+        let (mut peer, stream) = tokio::io::duplex(64);
+        peer.write_u64_le(0).await.unwrap();
+        drop(peer);
+        assert!(
+            send_file(stream, &plan, Arc::new(AtomicBool::new(false)), |_, _| {})
+                .await
+                .is_err()
+        );
+
+        std::fs::write(&plan.local_path, b"short").unwrap();
+        let (mut peer, stream) = tokio::io::duplex(64);
+        peer.write_u64_le(0).await.unwrap();
+        assert!(
+            send_file(stream, &plan, Arc::new(AtomicBool::new(false)), |_, _| {})
+                .await
+                .unwrap_err()
+                .contains("ended before")
+        );
+    }
 
     #[test]
     fn reconnect_backoff_caps_at_thirty_seconds() {

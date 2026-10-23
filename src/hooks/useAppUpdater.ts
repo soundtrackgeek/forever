@@ -35,15 +35,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.55",
-  version: "0.0.56",
-  body: `## What's new in Forever 0.0.56
+  currentVersion: "0.0.56",
+  version: "0.0.57",
+  body: `## What's new in Forever 0.0.57
 
-### Added
+### Fixed
 
-- A saved listening port with automatic UPnP, PCP, and NAT-PMP mapping.
-- Direct-connection testing and live mapping evidence in Settings.
-- Bounded global-search branches for reachable, stable connections.`,
+- Server excluded phrases now filter search, browse, and folder responses.
+- Completed uploads report measured speed without counting resumed bytes.
+- Upload completion waits for the downloader's closing confirmation.`,
   date: "2026-10-23",
 };
 

@@ -127,6 +127,88 @@ struct ShareIndex {
     scanning: bool,
 }
 
+// One replaceable snapshot is shared by every peer task. Keep the last valid
+// list across reconnects until the server replaces it (including with an empty
+// list), so reconnecting cannot temporarily expose excluded paths.
+#[derive(Clone, Default)]
+struct ExcludedPhrases {
+    current: Arc<RwLock<Arc<HashSet<String>>>>,
+}
+
+impl ExcludedPhrases {
+    fn replace(&self, phrases: Vec<String>) {
+        let phrases = phrases
+            .into_iter()
+            .filter(|phrase| !phrase.trim().is_empty())
+            .map(|phrase| phrase.replace('/', "\\").to_lowercase())
+            .collect();
+        *self.current.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(phrases);
+    }
+
+    fn snapshot(&self) -> Arc<HashSet<String>> {
+        self.current
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+
+    fn retain_search_files(&self, files: &mut Vec<SearchFile>) {
+        let phrases = self.snapshot();
+        files.retain(|file| path_is_visible(&file.filename, &phrases));
+    }
+}
+
+fn path_is_visible(path: &str, phrases: &HashSet<String>) -> bool {
+    if phrases.is_empty() {
+        return true;
+    }
+    let path = path.replace('/', "\\").to_lowercase();
+    !phrases.iter().any(|phrase| path.contains(phrase))
+}
+
+impl ShareIndex {
+    fn search(&self, query: &str, phrases: &HashSet<String>) -> Vec<SearchFile> {
+        matching_file_indices(self, &SearchTerms::parse(query))
+            .into_iter()
+            .filter_map(|file_index| self.indexed_files.get(file_index))
+            .filter(|file| path_is_visible(&file.remote_filename, phrases))
+            .take(MAX_SEARCH_RESULTS)
+            .map(IndexedFile::search_file)
+            .collect()
+    }
+
+    fn visible_folders(
+        &self,
+        requested: Option<&str>,
+        phrases: &HashSet<String>,
+    ) -> Vec<FolderListing> {
+        let requested = requested.map(|path| remote_key(&normalize_remote_path(path)));
+        self.directories
+            .iter()
+            .filter(|(directory, _)| {
+                path_is_visible(directory, phrases)
+                    && requested.as_ref().is_none_or(|requested| {
+                        let key = remote_key(directory);
+                        key == *requested || key.starts_with(&format!("{requested}\\"))
+                    })
+            })
+            .filter_map(|(directory, files)| {
+                let files: Vec<_> = files
+                    .iter()
+                    .filter_map(|file_index| self.indexed_files.get(*file_index))
+                    .filter(|file| path_is_visible(&file.remote_filename, phrases))
+                    .map(IndexedFile::folder_file)
+                    .collect();
+                // Do not advertise folders whose contents are all excluded.
+                (!files.is_empty()).then(|| FolderListing {
+                    directory: directory.clone(),
+                    files,
+                })
+            })
+            .collect()
+    }
+}
+
 #[derive(Clone)]
 pub struct LocalSharesHub {
     app: AppHandle,
@@ -135,6 +217,7 @@ pub struct LocalSharesHub {
     index: Arc<RwLock<ShareIndex>>,
     next_id: Arc<AtomicU64>,
     pending_searches: Arc<Mutex<HashMap<u32, SearchResponseTicket>>>,
+    excluded_phrases: ExcludedPhrases,
 }
 
 #[derive(Clone, Debug)]
@@ -181,6 +264,7 @@ impl LocalSharesHub {
             })),
             next_id: Arc::new(AtomicU64::new(timestamp_ms())),
             pending_searches: Arc::new(Mutex::new(HashMap::new())),
+            excluded_phrases: ExcludedPhrases::default(),
         };
         let scanner = hub.clone();
         tauri::async_runtime::spawn_blocking(move || {
@@ -392,61 +476,46 @@ impl LocalSharesHub {
     }
 
     pub fn search(&self, query: &str) -> Vec<SearchFile> {
-        let terms = SearchTerms::parse(query);
+        let phrases = self.excluded_phrases.snapshot();
         let index = self
             .index
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        matching_file_indices(&index, &terms)
-            .into_iter()
-            .filter_map(|file_index| index.indexed_files.get(file_index))
-            .map(IndexedFile::search_file)
-            .collect()
+        index.search(query, &phrases)
+    }
+
+    pub fn set_excluded_phrases(&self, phrases: Vec<String>) {
+        self.excluded_phrases.replace(phrases);
+    }
+
+    pub fn filter_search_response(&self, files: &mut Vec<SearchFile>) {
+        self.excluded_phrases.retain_search_files(files);
     }
 
     pub fn share_list(&self) -> Vec<ShareListing> {
+        let phrases = self.excluded_phrases.snapshot();
         let index = self
             .index
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         index
-            .directories
-            .iter()
-            .map(|(directory, files)| ShareListing {
-                directory: directory.clone(),
-                files: files
-                    .iter()
-                    .filter_map(|file_index| index.indexed_files.get(*file_index))
-                    .map(IndexedFile::folder_file)
-                    .collect(),
+            .visible_folders(None, &phrases)
+            .into_iter()
+            .map(|folder| ShareListing {
+                directory: folder.directory,
+                files: folder.files,
                 is_private: false,
             })
             .collect()
     }
 
     pub fn folder_list(&self, requested: &str) -> Vec<FolderListing> {
-        let normalized = normalize_remote_path(requested);
-        let normalized_key = remote_key(&normalized);
+        let phrases = self.excluded_phrases.snapshot();
         let index = self
             .index
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        index
-            .directories
-            .iter()
-            .filter(|(directory, _)| {
-                let key = remote_key(directory);
-                key == normalized_key || key.starts_with(&format!("{normalized_key}\\"))
-            })
-            .map(|(directory, files)| FolderListing {
-                directory: directory.clone(),
-                files: files
-                    .iter()
-                    .filter_map(|file_index| index.indexed_files.get(*file_index))
-                    .map(IndexedFile::folder_file)
-                    .collect(),
-            })
-            .collect()
+        index.visible_folders(Some(requested), &phrases)
     }
 
     pub fn counts(&self) -> (u32, u32) {
@@ -817,7 +886,6 @@ fn matching_file_indices(index: &ShareIndex, terms: &SearchTerms) -> Vec<usize> 
             .remote_filename
             .cmp(&index.indexed_files[*right].remote_filename)
     });
-    matches.truncate(MAX_SEARCH_RESULTS);
     matches
 }
 
@@ -883,6 +951,145 @@ pub enum LocalSharesError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn index_for_paths(paths: &[&str]) -> ShareIndex {
+        let mut index = ShareIndex::default();
+        for path in paths {
+            let (directory, filename) = path.rsplit_once('\\').unwrap();
+            let file_index = index.indexed_files.len();
+            index.files.insert(remote_key(path), file_index);
+            index
+                .directories
+                .entry(directory.into())
+                .or_default()
+                .push(file_index);
+            for word in search_words(path) {
+                index.word_index.entry(word).or_default().push(file_index);
+            }
+            index.indexed_files.push(IndexedFile {
+                local_path: PathBuf::from(path),
+                remote_filename: (*path).into(),
+                filename: filename.into(),
+                size_bytes: 10,
+                extension: "flac".into(),
+            });
+        }
+        index
+    }
+
+    #[test]
+    fn excluded_phrases_filter_full_paths_in_search_browse_and_folders() {
+        let index = index_for_paths(&[
+            "Music\\Blocked Artist\\Song.flac",
+            "Music\\Allowed\\A Forbidden Song.flac",
+            "Music\\Allowed\\Song.flac",
+            "Music\\Allowed\\Live\\Song.flac",
+            "Music\\Only Hidden\\Forbidden Song.flac",
+            "Music\\Allowed Elsewhere\\Song.flac",
+        ]);
+        let excluded = ExcludedPhrases::default();
+        excluded.replace(vec![
+            "BLOCKED ARTIST".into(),
+            "forbidden".into(),
+            "allowed/live".into(),
+        ]);
+        let phrases = excluded.snapshot();
+        let search = index.search("song", &phrases);
+        assert_eq!(search.len(), 2);
+        assert!(search
+            .iter()
+            .all(|file| !file.filename.contains("Forbidden")));
+        let browse = index.visible_folders(None, &phrases);
+        assert_eq!(browse.len(), 2);
+        let folders = index.visible_folders(Some("music/allowed"), &phrases);
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].directory, "Music\\Allowed");
+        assert_eq!(folders[0].files[0].filename, "Song.flac");
+        assert!(index
+            .visible_folders(Some("Music\\Blocked Artist"), &phrases)
+            .is_empty());
+
+        // The compressed wire counts and folder basenames must match filtering.
+        use super::super::protocol::*;
+        let shares: Vec<_> = browse
+            .into_iter()
+            .map(|folder| ShareListing {
+                directory: folder.directory,
+                files: folder.files,
+                is_private: false,
+            })
+            .collect();
+        let encoded = shared_file_list_response_frame(&shares).unwrap();
+        let decoded = parse_shared_file_list_response(&Frame {
+            code: SHARED_FILE_LIST_RESPONSE_CODE,
+            payload: encoded[8..].to_vec(),
+        })
+        .unwrap();
+        assert_eq!(decoded.directories, shares);
+        let encoded = folder_contents_response_frame(7, "Music\\Allowed", &folders).unwrap();
+        let decoded = parse_folder_contents_response(&Frame {
+            code: FOLDER_CONTENTS_RESPONSE_CODE,
+            payload: encoded[8..].to_vec(),
+        })
+        .unwrap();
+        assert_eq!(decoded.folders, folders);
+    }
+
+    #[test]
+    fn phrase_updates_replace_atomically_and_refilter_queued_responses_from_both_origins() {
+        let index = index_for_paths(&["Music\\Björk\\Song.flac", "Music\\Other\\Song.flac"]);
+        let excluded = ExcludedPhrases::default();
+        let peer = excluded.clone();
+        for origin in [
+            SearchResponseOrigin::Server,
+            SearchResponseOrigin::Distributed,
+        ] {
+            excluded.replace(vec![]);
+            let mut ticket = SearchResponseTicket {
+                connection_token: 1,
+                username: "listener".into(),
+                search_token: 2,
+                files: index.search("song", &excluded.snapshot()),
+                origin,
+                queued_at: Instant::now(),
+            };
+            let old = excluded.snapshot();
+            excluded.replace(vec!["BJÖRK".into(), "björk".into(), "".into(), "  ".into()]);
+            assert!(old.is_empty());
+            assert_eq!(peer.snapshot().len(), 1);
+            peer.retain_search_files(&mut ticket.files);
+            assert_eq!(ticket.files.len(), 1);
+            assert_eq!(ticket.files[0].filename, "Music\\Other\\Song.flac");
+            excluded.replace(vec!["song.flac".into()]);
+            peer.retain_search_files(&mut ticket.files);
+            assert!(ticket.files.is_empty());
+            excluded.replace(vec![]);
+            assert_eq!(index.search("song", &peer.snapshot()).len(), 2);
+        }
+        assert_eq!(index.indexed_files.len(), 2);
+    }
+
+    #[test]
+    fn server_exclusions_apply_before_the_search_result_limit() {
+        let paths: Vec<String> = (0..150)
+            .map(|i| format!("Music\\Blocked\\Song {i:03}.flac"))
+            .chain((0..120).map(|i| format!("Music\\Visible\\Song {i:03}.flac")))
+            .collect();
+        let index = index_for_paths(&paths.iter().map(String::as_str).collect::<Vec<_>>());
+        let excluded = ExcludedPhrases::default();
+        excluded.replace(vec!["blocked".into()]);
+        let results = index.search("song", &excluded.snapshot());
+        assert_eq!(results.len(), MAX_SEARCH_RESULTS);
+        assert!(results
+            .iter()
+            .all(|file| file.filename.starts_with("Music\\Visible\\")));
+        assert_eq!(
+            index.visible_folders(None, &excluded.snapshot())[0]
+                .files
+                .len(),
+            120
+        );
+    }
 
     #[test]
     fn corrupt_store_recovers_fixture_and_future_schema_is_write_protected() {
