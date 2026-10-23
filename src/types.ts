@@ -615,9 +615,17 @@ export type SharedRoot = {
   error: string | null;
 };
 
+export type UploadPolicy = {
+  maxFilesPerUser: number;
+  maxMegabytesPerUser: number;
+  prioritizeFavorites: boolean;
+  prioritizePrivileged: boolean;
+};
+
 export type LocalSharesSnapshot = {
   roots: SharedRoot[];
   uploadSlots: number;
+  uploadPolicy: UploadPolicy;
   scanning: boolean;
   totalFileCount: number;
   totalDirectoryCount: number;
@@ -646,6 +654,7 @@ export type UploadQueueSnapshot = {
   activeCount: number;
   queuedCount: number;
   sessionUploadedBytes: number;
+  persistenceError: string | null;
 };
 
 export type ConnectionState =

@@ -20,6 +20,7 @@ mod shares;
 mod soundcheck;
 pub(crate) mod store;
 mod transfer_writer;
+mod upload_policy;
 mod uploads;
 mod wanted;
 
@@ -485,6 +486,16 @@ pub async fn local_shares_set_upload_slots(
 ) -> Result<local_shares::LocalSharesSnapshot, String> {
     manager
         .set_upload_slots(upload_slots)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn local_shares_set_upload_policy(
+    manager: State<'_, ConnectionManager>,
+    policy: upload_policy::UploadPolicy,
+) -> Result<local_shares::LocalSharesSnapshot, String> {
+    manager
+        .set_upload_policy(policy)
         .map_err(|error| error.to_string())
 }
 

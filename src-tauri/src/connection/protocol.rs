@@ -32,6 +32,7 @@ pub const USER_STATS_CODE: u32 = 36;
 pub const RELOGGED_CODE: u32 = 41;
 pub const USER_INTERESTS_CODE: u32 = 57;
 pub const ROOM_LIST_CODE: u32 = 64;
+pub const PRIVILEGED_USERS_CODE: u32 = 69;
 pub const HAVE_NO_PARENT_CODE: u32 = 71;
 pub const EMBEDDED_MESSAGE_CODE: u32 = 93;
 pub const ACCEPT_CHILDREN_CODE: u32 = 100;
@@ -702,6 +703,35 @@ pub fn parse_private_message(frame: &Frame) -> Result<PrivateMessage, ProtocolEr
         message,
         is_new,
     })
+}
+
+pub fn parse_privileged_users(frame: &Frame) -> Result<Vec<String>, ProtocolError> {
+    if frame.code != PRIVILEGED_USERS_CODE {
+        return Err(ProtocolError::UnexpectedCode {
+            expected: PRIVILEGED_USERS_CODE,
+            actual: frame.code,
+        });
+    }
+    let mut reader = PayloadReader::new(&frame.payload);
+    let count = reader.read_u32()? as usize;
+    if count > 100_000 || count > reader.remaining() / 5 {
+        return Err(ProtocolError::InvalidCount {
+            kind: "privileged users",
+            count,
+        });
+    }
+    let mut users = Vec::with_capacity(count);
+    for _ in 0..count {
+        let length = reader.read_u32()? as usize;
+        if length == 0 || length > MAX_NETWORK_USERNAME_BYTES {
+            return Err(ProtocolError::InvalidLength(length));
+        }
+        users.push(String::from_utf8(reader.read_bytes(length)?.to_vec())?);
+    }
+    if reader.remaining() != 0 {
+        return Err(ProtocolError::InvalidLength(reader.remaining()));
+    }
+    Ok(users)
 }
 
 pub fn parse_possible_parents(frame: &Frame) -> Result<Vec<ParentCandidate>, ProtocolError> {
@@ -2019,6 +2049,66 @@ pub enum ProtocolError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn privileged_users_are_bounded_and_malformed_lists_are_rejected() {
+        let mut payload = Vec::new();
+        push_u32(&mut payload, 2);
+        push_string(&mut payload, "Friend");
+        push_string(&mut payload, "Donor");
+        let frame = Frame {
+            code: PRIVILEGED_USERS_CODE,
+            payload,
+        };
+        assert_eq!(parse_privileged_users(&frame).unwrap(), ["Friend", "Donor"]);
+        for end in 0..frame.payload.len() {
+            assert!(parse_privileged_users(&Frame {
+                code: PRIVILEGED_USERS_CODE,
+                payload: frame.payload[..end].to_vec()
+            })
+            .is_err());
+        }
+        assert!(parse_privileged_users(&Frame {
+            code: PRIVILEGED_USERS_CODE,
+            payload: 100_001u32.to_le_bytes().to_vec()
+        })
+        .is_err());
+        let mut trailing = frame.payload.clone();
+        trailing.push(0);
+        assert!(parse_privileged_users(&Frame {
+            code: PRIVILEGED_USERS_CODE,
+            payload: trailing
+        })
+        .is_err());
+        let mut too_long = 1u32.to_le_bytes().to_vec();
+        push_string(&mut too_long, &"x".repeat(101));
+        assert!(parse_privileged_users(&Frame {
+            code: PRIVILEGED_USERS_CODE,
+            payload: too_long
+        })
+        .is_err());
+        assert!(parse_privileged_users(&Frame {
+            code: PRIVILEGED_USERS_CODE,
+            payload: 0u32.to_le_bytes().to_vec()
+        })
+        .unwrap()
+        .is_empty());
+    }
+
+    #[test]
+    fn upload_limit_denials_use_standard_peer_reason_strings() {
+        for reason in ["Too many files", "Too many megabytes"] {
+            let bytes = upload_denied_frame("Music\\track.flac", reason);
+            let frame = Frame {
+                code: u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+                payload: bytes[8..].to_vec(),
+            };
+            assert_eq!(
+                parse_upload_denied(&frame).unwrap(),
+                ("Music\\track.flac".into(), reason.into())
+            );
+        }
+    }
 
     #[test]
     fn wishlist_frames_use_code_103_and_interval_is_exact_u32_seconds() {

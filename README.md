@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.63` adds virtualized search results, advanced filters,
-> sortable columns, and saved filter settings per Dial Memory preset.
+> **Status:** pre-alpha. Version `0.0.64` adds fair upload scheduling, per-user limits,
+> optional priority tiers, and a durable upload queue.
 
-If `0.0.16` is installed, download and run the latest `0.0.63` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.64` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -702,6 +702,36 @@ served from the safe in-memory index. Connection settings shows whether
 Forever has joined the global-search relay and how many requests it has
 received and answered. Follow outgoing activity under **Transfers → Uploads**.
 
+**Settings → Your shared releases → Upload fairness** controls outgoing policy.
+Users with fewer active uploads get the next free slot; users at the same level
+take turns, with FIFO order within each user's files. A new waiting user gets a
+first slot before an already active user gets another. Existing transfers are
+never interrupted to rebalance slots. The global pending cap remains 500 files.
+
+Per-user defaults are **100 files** and **10,000 MB** (decimal: 1 MB = 1,000,000
+bytes). Limits include queued and active files at their full size; resume offsets
+do not reduce the quota. Allowed settings are 1–500 files and 1–1,000,000 MB.
+Repeated requests for the same pending file are idempotent. Excess requests receive
+Soulseek's `Too many files` or `Too many megabytes` denial. Lowering a limit affects
+new requests and preserves already accepted requests.
+
+Both priority switches default off. Favorites can go first within each turn,
+followed by server-reported privileged users when enabled. When both switches are
+on, favorites take precedence. Priority does not give anyone a second turn before
+other waiting users at the same active-slot level. Privilege data comes from server
+code 69, stays in memory, and is cleared on disconnect.
+
+Pending requests and turn history are saved in `uploads.json` using atomic
+replacement, validated backups, and corruption notices. Queued order survives
+restarts under the same policy; interrupted active uploads rejoin the queue and
+renegotiate the downloader's resume offset. Live queue positions can change with
+arrivals, completions, policy changes, and restored active requests. Startup waits
+for indexing and validates the current share and block list before dispatch and
+file send. Removed, disabled, missing, resized, or excluded files are not sent.
+Finished upload history and session totals remain session-only. Save failures are
+shown in Settings and Uploads; new admissions/starts require a successful save,
+and failed saves are retried while connected. Progress updates do not write disk.
+
 Downloads use one file at a time from each source user, while different users
 can transfer in parallel. Set **Settings → Download lanes → Simultaneous users**
 from one to six; the default is three. Transfers labels Forever's reorderable
@@ -736,8 +766,8 @@ and progress checkpoints every five seconds when progress changes. Resume
 offsets still come from the actual `.part` file length. Closing Forever
 (including an idle queue) and Safe Passage updates wait for pending saves;
 save failures are shown and must be resolved before a safe exit can finish.
-All eight JSON stores (`transfers`, `wanted`, `search-queries`, `people`, `messages`, `rooms`,
-`sharing`, and `connection`) now use a shared persistence layer. Saves write a
+The core JSON stores (`transfers`, `uploads`, `wanted`, `search-queries`, `people`,
+`messages`, `rooms`, `sharing`, and `connection`) now use a shared persistence layer. Saves write a
 unique `name.json.tmp-*` in the same directory, flush its contents, atomically
 replace the primary file, and retain the previous validated copy in
 `name.json.bak`. Backup replacement is also atomic and happens before primary
@@ -755,8 +785,8 @@ closed.
 
 Existing version-1 stores migrate to version 2, materializing legacy defaults;
 unversioned connection preferences migrate to a version-1 profile envelope.
-Further migrations bring connection settings to schema 2 and Wanted and
-transfers to schema 3. Existing transfers keep their labels and file state;
+Further migrations bring connection settings to schema 2, sharing and transfers
+to schema 3, and Wanted to schema 4. Existing transfers keep their labels and file state;
 missing structured artist/title metadata is left unknown.
 Migration validates the result and retains the original bytes as the backup.
 Unknown store versions are preserved in place and cannot be overwritten by this
@@ -785,8 +815,11 @@ Room favorites, auto-rejoin choices, and bounded history are stored in
 profile. Live room member lists are session-only;
 profile notes, profile images, interests, country, presence, and statistics
 remain in memory for the current session. Shared-root
-configuration and upload-slot count are stored separately in `sharing.json`;
-the file contains local folder paths because Forever must reopen those roots,
+configuration, upload-slot count, and per-user upload policy are stored in
+`sharing.json` (schema 3; earlier versions receive the defaults). Pending upload
+requests, peer usernames, virtual filenames, sizes, and fairness turns are stored
+in `uploads.json`; local file paths and connection tokens are excluded. The
+sharing file contains local folder paths because Forever must reopen those roots,
 but it never leaves the device. Peer IP
 addresses, temporary folder listings, cached user share lists, and credentials
 are excluded. Share lists stay in memory only for the current app session.

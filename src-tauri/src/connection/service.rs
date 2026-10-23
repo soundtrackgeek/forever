@@ -26,33 +26,33 @@ use super::{
         parse_embedded_distributed_search, parse_excluded_search_phrases, parse_filename,
         parse_folder_contents_request, parse_folder_contents_response, parse_join_room,
         parse_leave_room, parse_login_response, parse_peer_address, parse_possible_parents,
-        parse_private_message, parse_queue_position, parse_room_chat_message, parse_room_list,
-        parse_search_response, parse_server_search_request, parse_shared_file_list_response,
-        parse_transfer_request, parse_transfer_response, parse_upload_denied,
-        parse_user_info_response, parse_user_interests, parse_user_joined_room,
-        parse_user_left_room, parse_user_stats, parse_user_status, parse_watch_user,
-        parse_wishlist_interval, peer_init_frame, pierce_firewall_frame,
-        place_in_queue_request_frame, place_in_queue_response_frame, queue_upload_frame,
-        read_distributed_frame, read_frame, read_peer_frame, read_peer_init, read_profile_frame,
-        room_list_frame, say_chatroom_frame, send_upload_speed_frame, server_ping_frame,
-        set_online_frame, set_wait_port_frame, shared_counts_frame, shared_file_list_request_frame,
-        shared_file_list_response_frame, transfer_request_frame, transfer_response_frame,
-        unwatch_user_frame, upload_denied_frame, user_info_request_frame, user_info_response_frame,
-        user_interests_frame, user_stats_frame, watch_user_frame, wishlist_search_frame,
-        write_raw_frame, ConnectToPeer, DistributedFrame, DistributedSearch, Frame, LoginResponse,
-        ParentCandidate, PeerAddress, PeerInit, ProtocolError, CANT_CONNECT_TO_PEER_CODE,
-        CONNECT_TO_PEER_CODE, DISTRIBUTED_BRANCH_LEVEL_CODE, DISTRIBUTED_BRANCH_ROOT_CODE,
-        DISTRIBUTED_EMBEDDED_CODE, DISTRIBUTED_SEARCH_CODE, EMBEDDED_MESSAGE_CODE,
-        EXCLUDED_SEARCH_PHRASES_CODE, FILE_SEARCH_CODE, FILE_SEARCH_RESPONSE_CODE,
-        FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE, GET_PEER_ADDRESS_CODE,
-        JOIN_ROOM_CODE, LEAVE_ROOM_CODE, MESSAGE_USER_CODE, PARENT_MIN_SPEED_CODE,
-        PARENT_SPEED_RATIO_CODE, PLACE_IN_QUEUE_REQUEST_CODE, PLACE_IN_QUEUE_RESPONSE_CODE,
-        POSSIBLE_PARENTS_CODE, QUEUE_UPLOAD_CODE, RELOGGED_CODE, RESET_DISTRIBUTED_CODE,
-        ROOM_LIST_CODE, SAY_CHATROOM_CODE, SHARED_FILE_LIST_REQUEST_CODE,
-        SHARED_FILE_LIST_RESPONSE_CODE, TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE,
-        UPLOAD_FAILED_CODE, USER_INFO_REQUEST_CODE, USER_INFO_RESPONSE_CODE, USER_INTERESTS_CODE,
-        USER_JOINED_ROOM_CODE, USER_LEFT_ROOM_CODE, USER_STATS_CODE, USER_STATUS_CODE,
-        WATCH_USER_CODE, WISHLIST_INTERVAL_CODE,
+        parse_private_message, parse_privileged_users, parse_queue_position,
+        parse_room_chat_message, parse_room_list, parse_search_response,
+        parse_server_search_request, parse_shared_file_list_response, parse_transfer_request,
+        parse_transfer_response, parse_upload_denied, parse_user_info_response,
+        parse_user_interests, parse_user_joined_room, parse_user_left_room, parse_user_stats,
+        parse_user_status, parse_watch_user, parse_wishlist_interval, peer_init_frame,
+        pierce_firewall_frame, place_in_queue_request_frame, place_in_queue_response_frame,
+        queue_upload_frame, read_distributed_frame, read_frame, read_peer_frame, read_peer_init,
+        read_profile_frame, room_list_frame, say_chatroom_frame, send_upload_speed_frame,
+        server_ping_frame, set_online_frame, set_wait_port_frame, shared_counts_frame,
+        shared_file_list_request_frame, shared_file_list_response_frame, transfer_request_frame,
+        transfer_response_frame, unwatch_user_frame, upload_denied_frame, user_info_request_frame,
+        user_info_response_frame, user_interests_frame, user_stats_frame, watch_user_frame,
+        wishlist_search_frame, write_raw_frame, ConnectToPeer, DistributedFrame, DistributedSearch,
+        Frame, LoginResponse, ParentCandidate, PeerAddress, PeerInit, ProtocolError,
+        CANT_CONNECT_TO_PEER_CODE, CONNECT_TO_PEER_CODE, DISTRIBUTED_BRANCH_LEVEL_CODE,
+        DISTRIBUTED_BRANCH_ROOT_CODE, DISTRIBUTED_EMBEDDED_CODE, DISTRIBUTED_SEARCH_CODE,
+        EMBEDDED_MESSAGE_CODE, EXCLUDED_SEARCH_PHRASES_CODE, FILE_SEARCH_CODE,
+        FILE_SEARCH_RESPONSE_CODE, FOLDER_CONTENTS_REQUEST_CODE, FOLDER_CONTENTS_RESPONSE_CODE,
+        GET_PEER_ADDRESS_CODE, JOIN_ROOM_CODE, LEAVE_ROOM_CODE, MESSAGE_USER_CODE,
+        PARENT_MIN_SPEED_CODE, PARENT_SPEED_RATIO_CODE, PLACE_IN_QUEUE_REQUEST_CODE,
+        PLACE_IN_QUEUE_RESPONSE_CODE, POSSIBLE_PARENTS_CODE, PRIVILEGED_USERS_CODE,
+        QUEUE_UPLOAD_CODE, RELOGGED_CODE, RESET_DISTRIBUTED_CODE, ROOM_LIST_CODE,
+        SAY_CHATROOM_CODE, SHARED_FILE_LIST_REQUEST_CODE, SHARED_FILE_LIST_RESPONSE_CODE,
+        TRANSFER_REQUEST_CODE, UPLOAD_DENIED_CODE, UPLOAD_FAILED_CODE, USER_INFO_REQUEST_CODE,
+        USER_INFO_RESPONSE_CODE, USER_INTERESTS_CODE, USER_JOINED_ROOM_CODE, USER_LEFT_ROOM_CODE,
+        USER_STATS_CODE, USER_STATUS_CODE, WATCH_USER_CODE, WISHLIST_INTERVAL_CODE,
     },
     radar::{RadarAlbumRequest, RadarError, RadarHub, RadarSnapshot},
     reachability::{bind_listener, DirectStatus, ReachabilityHub, ReachabilitySnapshot},
@@ -65,6 +65,7 @@ use super::{
         UserSharesOverview,
     },
     store::{JsonFile, StoreNotice},
+    upload_policy::UploadPolicy,
     uploads::{UploadError, UploadHub, UploadQueueSnapshot, UploadTicket},
     wanted::{
         WantedAlbumRequest, WantedDownloadFulfillmentRequest, WantedError,
@@ -466,6 +467,7 @@ impl ConnectionManager {
             paths.rooms,
             paths.wanted.clone(),
             paths.wanted.with_file_name("search-queries.json"),
+            paths.wanted.with_file_name("uploads.json"),
         ]
         .into_iter()
         .map(JsonFile::new)
@@ -481,10 +483,15 @@ impl ConnectionManager {
         let search = SearchHub::new(app.clone(), queries.clone());
         let transfers = TransferHub::new(app.clone(), store_files[1].clone())?;
         let local_shares = LocalSharesHub::new(app.clone(), store_files[2].clone())?;
-        let uploads = UploadHub::new(app.clone());
+        let uploads = UploadHub::new(
+            app.clone(),
+            store_files[8].clone(),
+            local_shares.upload_policy(),
+        );
         let distributed = DistributedHub::new(app.clone());
         let reachability = ReachabilityHub::new(app.clone());
         let people = PeopleHub::new(app.clone(), store_files[3].clone())?;
+        uploads.set_policy(local_shares.upload_policy(), people.saved_users_to_watch());
         let messages = MessagesHub::new(app.clone(), store_files[4].clone())?;
         let rooms = RoomsHub::new(app.clone(), store_files[5].clone())?;
         let search_governor = SearchGovernor::default();
@@ -1099,6 +1106,11 @@ impl ConnectionManager {
         favorite: bool,
     ) -> Result<PeopleSnapshot, ConnectionServiceError> {
         let snapshot = self.people.set_favorite(username, favorite)?;
+        self.uploads.set_policy(
+            self.local_shares.upload_policy(),
+            self.people.saved_users_to_watch(),
+        );
+        self.schedule_uploads();
         if self.current_snapshot().state == ConnectionState::Online {
             if let Some(sender) = self
                 .command_sender
@@ -1176,6 +1188,19 @@ impl ConnectionManager {
         upload_slots: u8,
     ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
         let snapshot = self.local_shares.set_upload_slots(upload_slots)?;
+        self.schedule_uploads();
+        Ok(snapshot)
+    }
+
+    pub fn set_upload_policy(
+        &self,
+        policy: UploadPolicy,
+    ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
+        let snapshot = self.local_shares.set_upload_policy(policy)?;
+        self.uploads.set_policy(
+            snapshot.upload_policy.clone(),
+            self.people.saved_users_to_watch(),
+        );
         self.schedule_uploads();
         Ok(snapshot)
     }
@@ -1854,6 +1879,7 @@ impl ConnectionManager {
             self.rooms.disconnected();
             self.transfers.connection_lost();
             self.uploads.connection_lost();
+            self.uploads.set_privileged(Vec::new());
             self.folders.connection_lost();
             self.shares.connection_lost();
             self.local_shares.connection_lost();
@@ -2099,6 +2125,10 @@ impl ConnectionManager {
         loop {
             tokio::select! {
                 _ = download_retry_tick.tick() => {
+                    self.uploads.retry_save();
+                    if self.uploads.queued_count() > 0 && self.uploads.has_free_slot(self.local_shares.upload_slots()) {
+                        let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
+                    }
                     let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
                 }
                 _ = keepalive.tick() => {
@@ -2131,7 +2161,16 @@ impl ConnectionManager {
                             "relogged",
                         ));
                     }
-                    if frame.code == WISHLIST_INTERVAL_CODE {
+                    if frame.code == PRIVILEGED_USERS_CODE {
+                        match parse_privileged_users(&frame) {
+                            Ok(users) => {
+                                self.uploads.set_privileged(users);
+                                let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
+                            }
+                            Err(_) => self.diagnostics.record("warning", "privileged_users_invalid",
+                                "Invalid privileged-user list; keeping the last valid list for this session."),
+                        }
+                    } else if frame.code == WISHLIST_INTERVAL_CODE {
                         match parse_wishlist_interval(&frame) {
                             Ok(seconds) => {
                                 self.search_governor.set_wishlist_interval(seconds, Instant::now());
@@ -2748,7 +2787,8 @@ impl ConnectionManager {
                                 ))?;
                         }
                         Some(ConnectionCommand::ScheduleUploads) => {
-                            loop {
+                            // Wait for startup indexing before validating restored requests.
+                            while !self.local_shares.is_scanning() {
                                 let token = self.take_connection_token();
                                 let Some(ticket) = self.uploads.activate_next(
                                     token,
@@ -2756,6 +2796,11 @@ impl ConnectionManager {
                                 ) else {
                                     break;
                                 };
+                                let file = self.local_shares.resolve_file(&ticket.remote_filename);
+                                if self.people.is_blocked(&ticket.username) || file.as_ref().is_none_or(|f| f.size_bytes != ticket.size_bytes) {
+                                    self.uploads.fail_attempt(&ticket.id, ticket.transfer_token, "File is no longer shared or this user is blocked.".into());
+                                    continue;
+                                }
                                 write_raw_frame(
                                     &mut server_writer,
                                     &connect_to_peer_frame(
@@ -3134,7 +3179,14 @@ async fn handle_direct_peer(
             if let Some(ticket) = services.uploads.claim_file(token) {
                 stream.write_u32_le(ticket.transfer_token).await?;
                 stream.flush().await?;
-                spawn_file_upload(stream, ticket, services.uploads, services.command_sender);
+                spawn_file_upload(
+                    stream,
+                    ticket,
+                    services.uploads,
+                    services.local_shares,
+                    services.people,
+                    services.command_sender,
+                );
             } else if let Some(ticket) = services.uploads.claim_control(token) {
                 negotiate_upload_on_peer(&mut stream, ticket, services).await?;
             } else if let Some(ticket) = services.local_shares.claim_search(token) {
@@ -3224,7 +3276,14 @@ async fn handle_indirect_peer(
         if let Some(ticket) = services.uploads.claim_file(request.token) {
             stream.write_u32_le(ticket.transfer_token).await?;
             stream.flush().await?;
-            spawn_file_upload(stream, ticket, services.uploads, services.command_sender);
+            spawn_file_upload(
+                stream,
+                ticket,
+                services.uploads,
+                services.local_shares,
+                services.people,
+                services.command_sender,
+            );
             return Ok(());
         }
         let transfer_token = timeout(PEER_MESSAGE_TIMEOUT, stream.read_u32_le())
@@ -3382,8 +3441,9 @@ fn spawn_outbound_upload_file_peer(
         if stream.write_u32_le(claimed.transfer_token).await.is_err()
             || stream.flush().await.is_err()
         {
-            services.uploads.fail_id(
+            services.uploads.fail_attempt(
                 &claimed.id,
+                claimed.transfer_token,
                 "The upload file connection could not be started.".to_owned(),
             );
             let _ = services
@@ -3391,7 +3451,14 @@ fn spawn_outbound_upload_file_peer(
                 .send(ConnectionCommand::ScheduleUploads);
             return;
         }
-        spawn_file_upload(stream, claimed, services.uploads, services.command_sender);
+        spawn_file_upload(
+            stream,
+            claimed,
+            services.uploads,
+            services.local_shares,
+            services.people,
+            services.command_sender,
+        );
     });
 }
 
@@ -3443,8 +3510,9 @@ async fn negotiate_upload_on_peer(
         .map_err(|_| peer_timeout_error())??;
     let (token, allowed, reason) = parse_transfer_response(&frame)?;
     if token != ticket.transfer_token || !allowed {
-        services.uploads.fail_id(
+        services.uploads.fail_attempt(
             &ticket.id,
+            ticket.transfer_token,
             reason.unwrap_or_else(|| "The downloader declined the upload.".to_owned()),
         );
         let _ = services
@@ -4087,27 +4155,43 @@ fn spawn_file_upload(
     stream: TcpStream,
     ticket: UploadTicket,
     uploads: UploadHub,
+    local_shares: LocalSharesHub,
+    people: PeopleHub,
     command_sender: mpsc::UnboundedSender<ConnectionCommand>,
 ) {
-    let plan = match uploads.begin_file(&ticket.id) {
+    let file = local_shares.resolve_file(&ticket.remote_filename);
+    if people.is_blocked(&ticket.username) || file.is_none() {
+        uploads.fail_attempt(
+            &ticket.id,
+            ticket.transfer_token,
+            "File is no longer shared or this user is blocked.".into(),
+        );
+        let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
+        return;
+    }
+    let plan = match uploads.begin_file(&ticket.id, ticket.transfer_token, file.unwrap()) {
         Ok(plan) => plan,
         Err(error) => {
-            uploads.fail_id(&ticket.id, error.to_string());
+            uploads.fail_attempt(&ticket.id, ticket.transfer_token, error.to_string());
             let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
             return;
         }
     };
     let cancellation = Arc::new(AtomicBool::new(false));
-    uploads.register_task(plan.id.clone(), cancellation.clone());
+    if !uploads.register_task(plan.id.clone(), plan.transfer_token, cancellation.clone()) {
+        return;
+    }
     let task_uploads = uploads.clone();
     tauri::async_runtime::spawn(async move {
         let result = send_file(stream, &plan, cancellation.clone(), |transferred, speed| {
-            task_uploads.update_progress(&plan.id, transferred, speed);
+            task_uploads.update_progress(&plan.id, plan.transfer_token, transferred, speed);
         })
         .await;
         match result {
             Ok(Some(measurement)) => {
-                if !cancellation.load(Ordering::SeqCst) && task_uploads.complete(&plan.id) {
+                if !cancellation.load(Ordering::SeqCst)
+                    && task_uploads.complete(&plan.id, plan.transfer_token)
+                {
                     if let Some(bytes_per_second) = measurement.average_speed() {
                         // This sender belongs to the originating server session. Never
                         // replay a completed upload against a different login/session.
@@ -4118,10 +4202,10 @@ fn spawn_file_upload(
             }
             Ok(None) => {}
             Err(message) => {
-                task_uploads.fail_id(&plan.id, message);
+                task_uploads.fail_attempt(&plan.id, plan.transfer_token, message);
             }
         }
-        task_uploads.unregister_task(&plan.id);
+        task_uploads.unregister_task(&plan.id, plan.transfer_token);
         let _ = command_sender.send(ConnectionCommand::ScheduleUploads);
     });
 }

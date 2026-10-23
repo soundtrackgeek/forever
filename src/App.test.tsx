@@ -940,6 +940,22 @@ describe("Forever shell", () => {
     expect(screen.getByRole("heading", { name: "audiophile92" })).toBeInTheDocument();
   });
 
+  it("retains saved upload policy when returning to Settings", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Files per user" }), { target: { value: "50" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "MB per user" }), { target: { value: "2500" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Favorites first within each turn" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save upload policy" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save upload policy" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("spinbutton", { name: "Files per user" })).toHaveValue(50);
+    expect(screen.getByRole("spinbutton", { name: "MB per user" })).toHaveValue(2500);
+    expect(screen.getByRole("checkbox", { name: "Favorites first within each turn" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Privileged users first within each turn" })).not.toBeChecked();
+  });
+
   it("opens the live connection settings from the sidebar", () => {
     render(<App />);
 
@@ -1020,17 +1036,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.63 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.64 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Large file and album-source lists now render only the visible rows.",
+        "Upload slots rotate fairly between users, with optional favorites and privileged priority.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Filter quality, availability, size, extension, country, and unwanted sources.",
+        "Set per-user file and MB limits in Settings.",
       ),
     ).toBeInTheDocument();
     expect(

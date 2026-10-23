@@ -35,16 +35,16 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.62",
-  version: "0.0.63",
-  body: `## What's new in Forever 0.0.63
+  currentVersion: "0.0.63",
+  version: "0.0.64",
+  body: `## What's new in Forever 0.0.64
 
 ### Changed
 
-- Large file and album-source lists now render only the visible rows.
-- Filter quality, availability, size, extension, country, and unwanted sources.
-- Sort column headers and keep advanced settings in Dial Memory presets.`,
-  date: "2026-10-23",
+- Upload slots rotate fairly between users, with optional favorites and privileged priority.
+- Set per-user file and MB limits in Settings.
+- Pending uploads and user turns survive restarts.`,
+  date: "2026-10-24",
 };
 
 const wait = (duration: number) =>

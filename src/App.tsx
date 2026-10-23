@@ -1306,6 +1306,7 @@ function App() {
             onSetShareEnabled={sharing.setRootEnabled}
             onRescanShares={sharing.rescan}
             onSetUploadSlots={sharing.setUploadSlots}
+            onSetUploadPolicy={sharing.setUploadPolicy}
             maxConcurrentDownloads={transfers.snapshot.maxConcurrentDownloads}
             onSetMaxConcurrentDownloads={transfers.setMaxConcurrentDownloads}
             relaySuggestionMinutes={transfers.snapshot.relaySuggestionMinutes}

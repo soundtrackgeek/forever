@@ -5,6 +5,31 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.64] - 2026-10-24
+
+### Added
+
+- Per-user round-robin uploads with least-active-user slot allocation, preserving
+  each user's file order and optional favorites/privileged priority within turns.
+- Upload fairness settings: default limits of 100 pending files and 10,000 decimal
+  MB per user, including active requests; standard Soulseek over-limit denials.
+- Durable pending uploads and turn history in `uploads.json`, with atomic writes,
+  validated backup recovery, startup notices, and visible save failures/retries.
+
+### Changed
+
+- Sharing schema 3 migrates existing settings to bounded upload limits with both
+  priority switches off. Lower limits preserve requests already accepted.
+- Server code 69 uses bounded parsing and replaces session-only privilege data;
+  malformed lists retain the last valid list and disconnect clears it.
+- Queue positions follow fair scheduling. Interrupted uploads requeue after restart;
+  share indexing, current root permissions, file size, and block-list checks gate sends.
+
+### Fixed
+
+- Stale upload progress, completion, failures, and task cleanup cannot alter a later
+  retry. Duplicate pending requests do not consume per-user quota.
+
 ## [0.0.63] - 2026-10-23
 
 ### Added

@@ -1,3 +1,4 @@
+import { UploadPolicySettings } from "./UploadPolicySettings";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ReachabilitySettings } from "./ReachabilitySettings";
 import {
@@ -24,6 +25,7 @@ import type {
   DiagnosticEntry,
   DistributedSnapshot,
   LocalSharesSnapshot,
+  UploadPolicy,
   ReachabilitySnapshot,
 } from "../types";
 
@@ -56,6 +58,7 @@ type ConnectionSettingsProps = {
   onSetShareEnabled: (id: string, enabled: boolean) => Promise<unknown>;
   onRescanShares: () => Promise<unknown>;
   onSetUploadSlots: (slots: number) => Promise<unknown>;
+  onSetUploadPolicy: (policy: UploadPolicy) => Promise<unknown>;
   maxConcurrentDownloads: number;
   onSetMaxConcurrentDownloads: (maximum: number) => Promise<unknown>;
   relaySuggestionMinutes: number;
@@ -132,6 +135,7 @@ export function ConnectionSettings({
   onSetShareEnabled,
   onRescanShares,
   onSetUploadSlots,
+  onSetUploadPolicy,
   maxConcurrentDownloads,
   onSetMaxConcurrentDownloads,
   relaySuggestionMinutes,
@@ -501,6 +505,7 @@ export function ConnectionSettings({
               {localShares.lastScanAtMs ? `Last indexed ${formatTime(localShares.lastScanAtMs)}` : "Not indexed yet"}
             </small>
           </div>
+          <UploadPolicySettings key={JSON.stringify(localShares.uploadPolicy)} policy={localShares.uploadPolicy} onSave={onSetUploadPolicy} />
         </section>
 
         <div className="settings-lower-grid">
@@ -537,7 +542,7 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.63</h2>
+              <h2>Forever 0.0.64</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="musicbrainz-fallback-field">
                 <span>MusicBrainz fallback tracks</span>

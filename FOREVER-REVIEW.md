@@ -403,7 +403,21 @@ are four sorts.
 - Add a quick "hide users I've banned or ignored" toggle, and a
   "results per user" cap to collapse spammy sources.
 
-### 11. Upload fairness and policy
+### 11. Upload fairness and policy - DONE
+
+**Implemented in 0.0.64 (2026-10-24):** uploads rotate per user, favoring users
+with fewer active slots and preserving file FIFO within each user. Settings adds
+file/decimal-MB limits (100 files / 10,000 MB by default) and opt-in favorites then
+privileged priority within fair turns. Code 69 is bounded and session-scoped;
+standard peer denials enforce limits atomically, including active files. Schema-3
+sharing migration and crash-safe `uploads.json` retain pending requests and turn
+history. Restored active requests requeue, wait for indexing, and revalidate sharing,
+size, and blocks before sending. Save failures surface and prevent unsaved admission
+or activation; progress stays in memory. Regression tests cover concurrency,
+rounds/slots/tiers, restart/recovery, write failures, stale attempts, wire parsing,
+and Settings. Local browser checks cover controls and navigation. Public Soulseek
+interoperation and installed desktop transfers remain unverified. Original findings
+follow for context.
 
 **Today:** Uploads use one global FIFO queue. `activate_next` takes the first
 `Queued` item ([uploads.rs:229](src-tauri/src/connection/uploads.rs:229)), with a

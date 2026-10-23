@@ -1,11 +1,12 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
-import type { LocalSharesSnapshot, UploadQueueSnapshot } from "../types";
+import type { LocalSharesSnapshot, UploadPolicy, UploadQueueSnapshot } from "../types";
 
 const emptyShares: LocalSharesSnapshot = {
   roots: [],
   uploadSlots: 1,
+  uploadPolicy: { maxFilesPerUser: 100, maxMegabytesPerUser: 10_000, prioritizeFavorites: false, prioritizePrivileged: false },
   scanning: false,
   totalFileCount: 0,
   totalDirectoryCount: 0,
@@ -27,6 +28,7 @@ const previewShares: LocalSharesSnapshot = {
     },
   ],
   uploadSlots: 1,
+  uploadPolicy: { maxFilesPerUser: 100, maxMegabytesPerUser: 10_000, prioritizeFavorites: false, prioritizePrivileged: false },
   scanning: false,
   totalFileCount: 1248,
   totalDirectoryCount: 93,
@@ -39,6 +41,7 @@ const emptyUploads: UploadQueueSnapshot = {
   activeCount: 0,
   queuedCount: 0,
   sessionUploadedBytes: 0,
+  persistenceError: null,
 };
 
 const previewUploads: UploadQueueSnapshot = {
@@ -62,6 +65,7 @@ const previewUploads: UploadQueueSnapshot = {
   activeCount: 1,
   queuedCount: 0,
   sessionUploadedBytes: 184_000_000,
+  persistenceError: null,
 };
 
 const errorMessage = (cause: unknown) =>
@@ -145,6 +149,14 @@ export function useLocalSharing() {
     [shareAction],
   );
 
+  const setUploadPolicy = useCallback(async (policy: UploadPolicy) => {
+    if (!native) {
+      setShares((current) => ({ ...current, uploadPolicy: policy }));
+      return;
+    }
+    await shareAction("local_shares_set_upload_policy", { policy });
+  }, [native, shareAction]);
+
   const cancelUpload = useCallback(
     async (id: string) => {
       if (!native) {
@@ -192,12 +204,13 @@ export function useLocalSharing() {
   return {
     shares,
     uploads,
-    error,
+    error: error ?? uploads.persistenceError,
     addRoot,
     removeRoot,
     setRootEnabled,
     rescan,
     setUploadSlots,
+    setUploadPolicy,
     cancelUpload,
     clearFinishedUploads,
     clearError: () => setError(null),

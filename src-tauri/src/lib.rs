@@ -103,6 +103,7 @@ pub fn run() {
             connection::local_shares_set_enabled,
             connection::local_shares_rescan,
             connection::local_shares_set_upload_slots,
+            connection::local_shares_set_upload_policy,
             connection::uploads_snapshot,
             connection::upload_cancel,
             connection::upload_clear_finished,

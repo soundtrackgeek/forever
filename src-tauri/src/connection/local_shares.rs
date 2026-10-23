@@ -1,5 +1,6 @@
 use super::protocol::{FolderFile, FolderListing, SearchFile, ShareListing};
 use super::store::{self, DecodeError, JsonFile};
+use super::upload_policy::UploadPolicy;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -15,7 +16,7 @@ use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
 const SHARES_EVENT: &str = "forever://local-shares";
-const STORE_VERSION: u32 = 2;
+const STORE_VERSION: u32 = 3;
 const MAX_SHARED_ROOTS: usize = 16;
 const MAX_SHARED_FILES: usize = 250_000;
 const MAX_SHARED_DIRECTORIES: usize = 50_000;
@@ -39,6 +40,8 @@ struct SharedRootConfig {
 struct SharingStore {
     version: u32,
     upload_slots: u8,
+    #[serde(default)]
+    upload_policy: UploadPolicy,
     roots: Vec<SharedRootConfig>,
 }
 
@@ -47,6 +50,7 @@ impl Default for SharingStore {
         Self {
             version: STORE_VERSION,
             upload_slots: 1,
+            upload_policy: UploadPolicy::default(),
             roots: Vec::new(),
         }
     }
@@ -70,6 +74,7 @@ pub struct SharedRootSnapshot {
 pub struct LocalSharesSnapshot {
     pub roots: Vec<SharedRootSnapshot>,
     pub upload_slots: u8,
+    pub upload_policy: UploadPolicy,
     pub scanning: bool,
     pub total_file_count: u32,
     pub total_directory_count: u32,
@@ -285,12 +290,46 @@ impl LocalSharesHub {
         LocalSharesSnapshot {
             roots: index.roots.clone(),
             upload_slots: store.upload_slots,
+            upload_policy: store.upload_policy.clone(),
             scanning: index.scanning,
             total_file_count: index.indexed_files.len().try_into().unwrap_or(u32::MAX),
             total_directory_count: index.directories.len().try_into().unwrap_or(u32::MAX),
             total_size_bytes: index.total_size_bytes,
             last_scan_at_ms: index.last_scan_at_ms,
         }
+    }
+
+    pub fn upload_policy(&self) -> UploadPolicy {
+        self.store
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .upload_policy
+            .clone()
+    }
+
+    pub fn set_upload_policy(
+        &self,
+        policy: UploadPolicy,
+    ) -> Result<LocalSharesSnapshot, LocalSharesError> {
+        if !policy.valid() {
+            return Err(LocalSharesError::InvalidUploadPolicy);
+        }
+        {
+            let mut store = self.store.write().unwrap_or_else(|p| p.into_inner());
+            let mut updated = store.clone();
+            updated.upload_policy = policy;
+            self.path.save(&updated)?;
+            *store = updated;
+        }
+        self.publish();
+        Ok(self.snapshot())
+    }
+
+    pub fn is_scanning(&self) -> bool {
+        self.index
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .scanning
     }
 
     pub fn upload_slots(&self) -> usize {
@@ -464,15 +503,22 @@ impl LocalSharesHub {
     }
 
     pub fn resolve_file(&self, remote_filename: &str) -> Option<IndexedFile> {
-        let index = self
-            .index
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        index
+        let store = self.store.read().unwrap_or_else(|p| p.into_inner());
+        let index = self.index.read().unwrap_or_else(|p| p.into_inner());
+        let file = index
             .files
             .get(&remote_key(remote_filename))
-            .and_then(|file_index| index.indexed_files.get(*file_index))
-            .cloned()
+            .and_then(|i| index.indexed_files.get(*i))?;
+        // A scan can still contain a removed/disabled root's old entries.
+        if !store
+            .roots
+            .iter()
+            .any(|root| root.enabled && file.local_path.starts_with(&root.path))
+            || !path_is_visible(&file.remote_filename, &self.excluded_phrases.snapshot())
+        {
+            return None;
+        }
+        Some(file.clone())
     }
 
     pub fn search(&self, query: &str) -> Vec<SearchFile> {
@@ -739,9 +785,16 @@ fn load_store(path: &JsonFile) -> Result<SharingStore, LocalSharesError> {
 }
 
 fn decode_store(bytes: &[u8]) -> Result<SharingStore, DecodeError> {
-    let mut store: SharingStore =
-        store::decode(bytes, STORE_VERSION, None, &[(1, migrate_v1_to_v2)])?;
+    let mut store: SharingStore = store::decode(
+        bytes,
+        STORE_VERSION,
+        None,
+        &[(1, migrate_v1_to_v2), (2, migrate_v2_to_v3)],
+    )?;
     store.upload_slots = store.upload_slots.clamp(1, 3);
+    if !store.upload_policy.valid() {
+        return Err(DecodeError::Invalid("Invalid upload policy.".into()));
+    }
     Ok(store)
 }
 
@@ -750,6 +803,12 @@ fn migrate_v1_to_v2(value: serde_json::Value) -> Result<serde_json::Value, Decod
     let mut store: SharingStore = serde_json::from_value(value)?;
     store.version = 2;
     Ok(serde_json::to_value(store)?)
+}
+
+fn migrate_v2_to_v3(mut value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    value["version"] = 3.into();
+    value["uploadPolicy"] = serde_json::to_value(UploadPolicy::default())?;
+    Ok(value)
 }
 
 fn canonical_directory(path: &str) -> Result<PathBuf, LocalSharesError> {
@@ -928,6 +987,8 @@ fn timestamp_ms() -> u64 {
 
 #[derive(Debug, Error)]
 pub enum LocalSharesError {
+    #[error("Upload limits must be 1–500 files and 1–1,000,000 MB per user.")]
+    InvalidUploadPolicy,
     #[error("Choose an existing folder to share.")]
     InvalidRoot,
     #[error("That folder overlaps another shared root. Choose only its parent or child.")]
@@ -1125,6 +1186,7 @@ mod tests {
         assert_eq!(store.roots[0].alias, "My Music");
         assert!(!store.roots[0].enabled);
         assert_eq!(store.upload_slots, 2);
+        assert_eq!(store.upload_policy, UploadPolicy::default());
         assert!(file.notices().is_empty());
         assert_eq!(
             std::fs::read(dir.path().join("sharing.json.bak")).unwrap(),
@@ -1140,6 +1202,27 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&migrated).unwrap()["version"],
             STORE_VERSION
         );
+    }
+
+    #[test]
+    fn upload_policy_migrates_v2_and_rejects_invalid_current_limits() {
+        let legacy = br#"{"version":2,"uploadSlots":3,"roots":[]}"#;
+        let saved = decode_store(legacy).unwrap();
+        assert_eq!(saved.version, 3);
+        assert_eq!(saved.upload_slots, 3);
+        assert_eq!(saved.upload_policy, UploadPolicy::default());
+        let mut current = serde_json::to_value(saved).unwrap();
+        for (key, bad) in [
+            ("maxFilesPerUser", 0),
+            ("maxFilesPerUser", 501),
+            ("maxMegabytesPerUser", 0),
+            ("maxMegabytesPerUser", 1_000_001),
+        ] {
+            let old = current["uploadPolicy"][key].clone();
+            current["uploadPolicy"][key] = bad.into();
+            assert!(decode_store(&serde_json::to_vec(&current).unwrap()).is_err());
+            current["uploadPolicy"][key] = old;
+        }
     }
 
     #[test]
