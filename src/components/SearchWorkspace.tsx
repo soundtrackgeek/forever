@@ -202,10 +202,11 @@ export function SearchWorkspace({
   const albumId = albumContext?.albumId ?? null;
   const [loadedTracklist, setLoadedTracklist] = useState<{
     albumId: string;
+    loader: typeof onLoadOfficialTracklist;
     tracks: AlbumTrack[];
     state: "ready" | "unavailable";
   } | null>(null);
-  const currentTracklist = loadedTracklist?.albumId === albumId ? loadedTracklist : null;
+  const currentTracklist = loadedTracklist?.albumId === albumId && loadedTracklist.loader === onLoadOfficialTracklist ? loadedTracklist : null;
   const officialTracks = currentTracklist?.tracks ?? emptyOfficialTracks;
   const tracklistState: "idle" | "loading" | "ready" | "unavailable" = !albumId
     ? "idle"
@@ -217,11 +218,11 @@ export function SearchWorkspace({
     void onLoadOfficialTracklist(albumId)
       .then((tracks) => {
         if (!active) return;
-        setLoadedTracklist({ albumId, tracks, state: tracks.length ? "ready" : "unavailable" });
+        setLoadedTracklist({ albumId, loader: onLoadOfficialTracklist, tracks, state: tracks.length ? "ready" : "unavailable" });
       })
       .catch(() => {
         if (!active) return;
-        setLoadedTracklist({ albumId, tracks: [], state: "unavailable" });
+        setLoadedTracklist({ albumId, loader: onLoadOfficialTracklist, tracks: [], state: "unavailable" });
       });
     return () => { active = false; };
   }, [albumId, onLoadOfficialTracklist]);

@@ -35,6 +35,7 @@ pub fn run() {
             connection::wanted_set_paused,
             connection::wanted_set_interval,
             connection::wanted_set_preferences,
+            connection::wanted_set_edition,
             connection::wanted_set_default_preferences,
             connection::wanted_sync_fulfilled,
             connection::wanted_fulfill_downloaded,
@@ -120,6 +121,7 @@ pub fn run() {
             musicbrainz::album_catalog,
             musicbrainz::album_official_track_count,
             musicbrainz::album_official_tracklist,
+            musicbrainz::album_editions,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

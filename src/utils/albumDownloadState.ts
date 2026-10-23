@@ -1,3 +1,4 @@
+import { albumFolder } from "./albumSources";
 import type { AlbumSource, Transfer } from "../types";
 import { groupTransfers, type TransferGroupStatus } from "./transfers";
 
@@ -41,7 +42,7 @@ const normalizeRemoteFilename = (value: string) =>
     .toLocaleLowerCase();
 
 const sourceKey = (username: string, remoteFolder: string) =>
-  `${username.toLocaleLowerCase()}\u0000${normalizeRemoteFilename(remoteFolder)}`;
+  `${username.toLocaleLowerCase()}\u0000${normalizeRemoteFilename(albumFolder(remoteFolder))}`;
 
 const remoteFolder = (remoteFilename: string) => {
   const normalized = normalizeRemoteFilename(remoteFilename);

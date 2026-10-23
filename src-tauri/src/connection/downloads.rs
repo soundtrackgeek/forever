@@ -719,8 +719,14 @@ impl TransferHub {
         let alternatives = request.alternatives.clone();
         let mut release_transfers = Vec::with_capacity(request.files.len());
         for (index, file) in request.files.into_iter().enumerate() {
-            let local_path = unique_target_path(
+            let file_directory = release_file_directory(
                 &release_directory,
+                &request.remote_folder,
+                &file.remote_filename,
+            );
+            fs::create_dir_all(&file_directory)?;
+            let local_path = unique_target_path(
+                &file_directory,
                 &file.remote_filename,
                 &existing
                     .iter()
@@ -2275,7 +2281,8 @@ fn unfinished_release_uses_source(
             .as_deref()
             .is_some_and(|release_id| unfinished_releases.contains(release_id))
             && transfer.username.eq_ignore_ascii_case(&request.username)
-            && remote_parent(&transfer.remote_filename).eq_ignore_ascii_case(&requested_folder)
+            && crate::matching::album_folder(&remote_parent(&transfer.remote_filename))
+                .eq_ignore_ascii_case(&crate::matching::album_folder(&requested_folder))
     })
 }
 
@@ -2656,6 +2663,37 @@ fn preserve_rejected_file(path: &Path) -> Result<(), TransferError> {
     }
     fs::rename(path, candidate)?;
     Ok(())
+}
+
+fn release_file_directory(root: &Path, remote_folder: &str, remote_filename: &str) -> PathBuf {
+    let parent = remote_parent(remote_filename);
+    let album = crate::matching::album_folder(&parent);
+    if album != parent && album.eq_ignore_ascii_case(&normalize_remote_folder(remote_folder)) {
+        root.join(safe_basename(&parent))
+    } else {
+        root.to_owned()
+    }
+}
+
+#[test]
+fn numbered_discs_keep_separate_local_paths_without_accepting_other_descendants() {
+    let root = Path::new("download").join("Album");
+    assert_eq!(
+        release_file_directory(&root, "Music/Album", "Music/Album/CD1/01 Song.flac"),
+        root.join("CD1")
+    );
+    assert_eq!(
+        release_file_directory(&root, "Music/Album", "Music/Album/Disc 2/01 Song.flac"),
+        root.join("Disc 2")
+    );
+    assert_eq!(
+        release_file_directory(&root, "Music/Album", "Music/Album/../Other/01 Song.flac"),
+        root
+    );
+    assert_eq!(
+        release_file_directory(&root, "Music/Album", "Music/Other/CD1/01 Song.flac"),
+        root
+    );
 }
 
 fn unique_target_path(

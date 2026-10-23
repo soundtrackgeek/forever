@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { SearchResult } from "../types";
+import fixture from "../../fixtures/matching.json";
 import {
   albumSourcesMeetingTrackMinimum,
   formatAlbumBytes,
   groupAlbumSources,
+  albumFolder,
 } from "./albumSources";
 
 const result = (
@@ -37,6 +39,23 @@ const result = (
 });
 
 describe("groupAlbumSources", () => {
+  it("matches the Rust disc-folder policy and groups discs without merging editions or peers", () => {
+    for (const entry of fixture.albumFolders) expect(albumFolder(entry.input)).toBe(entry.expected);
+    const disc = result("1", "owner", "Music\\Album\\CD1", "01 Song.flac", "FLAC", 10);
+    const sources = groupAlbumSources([
+      disc, { ...disc, id: "repeated-reply" },
+      result("2", "owner", "Music\\Album\\Disc 2", "01 Song.flac", "FLAC", 20),
+      result("3", "owner", "Music\\Album\\Deluxe", "01 Song.flac", "FLAC", 30),
+      result("4", "another", "Music\\Album\\CD1", "01 Song.flac", "FLAC", 40),
+    ]);
+    expect(sources).toHaveLength(3);
+    expect(sources[0]).toMatchObject({
+      folder: "Music\\Album", folderName: "Album", totalSizeBytes: 30,
+      folders: ["Music\\Album\\CD1", "Music\\Album\\Disc 2"],
+      representative: { folder: "Music\\Album" },
+    });
+    expect(sources[0].tracks).toHaveLength(2);
+  });
   it("groups matching files by user and remote folder", () => {
     const grouped = groupAlbumSources([
       result("1", "archive", "Music/Def Leppard/Hysteria", "02 - Animal.flac", "FLAC", 40_000_000),

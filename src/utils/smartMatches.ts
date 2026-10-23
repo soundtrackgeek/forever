@@ -16,7 +16,7 @@ export function rankingInput(sources: AlbumSource[], preferences: WantedPreferen
   return { sources: sources.map((source) => ({
     id: source.id, owner: source.owner, folder: source.folder,
     slotFree: source.slotFree, averageSpeed: source.averageSpeed, queueLength: source.queueLength,
-    tracks: source.tracks.map((track) => ({ id: track.id, name: track.filename ?? track.title, format: track.format, bitrate: track.bitrate ?? null })),
+    tracks: source.tracks.map((track) => ({ id: track.id, name: track.filename ?? track.title, format: track.format, bitrate: track.bitrate ?? null, durationSeconds: track.durationSeconds ?? null })),
   })), preferences, officialTracks, artist };
 }
 

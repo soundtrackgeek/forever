@@ -554,6 +554,18 @@ export function useWantedAlbums() {
     updatedAtMs: Date.now(),
   })), [invokeOrPreview]);
 
+  const setEdition = useCallback(async (albumId: string, releaseId: string | null) =>
+    await invokeOrPreview("wanted_set_edition", { albumId, releaseId }, (current) => ({
+      ...current,
+      albums: current.albums.map((album) => album.albumId === albumId ? {
+        ...album, selectedReleaseId: releaseId, lastCheckedAtMs: null,
+        sourceCount: 0, matchingSourceCount: 0, readySourceCount: 0, completeSourceCount: 0,
+        newSourceCount: 0, bestFormat: null, bestTrackCount: null, bestSizeBytes: null,
+        bestSpeedBytesPerSecond: null, bestSource: null, error: null,
+      } : album),
+      updatedAtMs: Date.now(),
+    })), [invokeOrPreview]);
+
   const setDefaultPreferences = useCallback(async (
     preferences: WantedPreferences,
   ) => await invokeOrPreview("wanted_set_default_preferences", { preferences }, (current) => ({
@@ -646,10 +658,11 @@ export function useWantedAlbums() {
     setPaused,
     setIntervalMinutes,
     setPreferences,
+    setEdition,
     setDefaultPreferences,
     syncFulfilled,
     check,
     dismissAlert: () => setAlert(null),
     clearError: () => setError(null),
-  }), [add, addMany, alert, byAlbumId, check, error, fulfillDownloaded, ready, remove, restore, setDefaultPreferences, setIntervalMinutes, setPaused, setPreferences, snapshot, syncFulfilled]);
+  }), [add, addMany, alert, byAlbumId, check, error, fulfillDownloaded, ready, remove, restore, setDefaultPreferences, setIntervalMinutes, setPaused, setPreferences, setEdition, snapshot, syncFulfilled]);
 }

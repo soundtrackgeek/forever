@@ -762,6 +762,14 @@ impl ConnectionManager {
         Ok(self.wanted.set_preferences(album_id, preferences)?)
     }
 
+    pub fn set_wanted_edition(
+        &self,
+        album_id: &str,
+        release_id: Option<String>,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.set_edition(album_id, release_id)?)
+    }
+
     pub fn set_default_wanted_preferences(
         &self,
         preferences: WantedPreferences,

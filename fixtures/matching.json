@@ -73,13 +73,15 @@
               "id": "0",
               "name": "Unknown Song.flac",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             },
             {
               "id": "1",
               "name": "Different Tune.flac",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -95,19 +97,22 @@
               "id": "0",
               "name": "Original Sin.flac",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             },
             {
               "id": "1",
               "name": "Melting in the Sun.flac",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             },
             {
               "id": "2",
               "name": "Bonus.flac",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -123,13 +128,15 @@
               "id": "0",
               "name": "Original Sin.flac",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             },
             {
               "id": "1",
               "name": "Unknown.flac",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -145,13 +152,15 @@
               "id": "0",
               "name": "01 - INXS - Original Sin.flac",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             },
             {
               "id": "1",
               "name": "02. Melting in the Sun.flac",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -212,13 +221,15 @@
               "id": "0",
               "name": "First.mp3",
               "format": "MP3",
-              "bitrate": 320
+              "bitrate": 320,
+              "durationSeconds": null
             },
             {
               "id": "1",
               "name": "Second.mp3",
               "format": "MP3",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -234,13 +245,15 @@
               "id": "0",
               "name": "First.mp3",
               "format": "MP3",
-              "bitrate": 320
+              "bitrate": 320,
+              "durationSeconds": null
             },
             {
               "id": "1",
               "name": "Second.mp3",
               "format": "MP3",
-              "bitrate": 320
+              "bitrate": 320,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -280,13 +293,15 @@
               "id": "0",
               "name": "A",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             },
             {
               "id": "1",
               "name": "B",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -302,13 +317,15 @@
               "id": "0",
               "name": "A",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             },
             {
               "id": "1",
               "name": "B",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -348,13 +365,15 @@
               "id": "0",
               "name": "A",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             },
             {
               "id": "1",
               "name": "B",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -370,13 +389,15 @@
               "id": "0",
               "name": "A",
               "format": "mp3",
-              "bitrate": 320
+              "bitrate": 320,
+              "durationSeconds": null
             },
             {
               "id": "1",
               "name": "B",
               "format": "mp3",
-              "bitrate": 320
+              "bitrate": 320,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -416,7 +437,8 @@
               "id": "0",
               "name": "A",
               "format": "FLAC",
-              "bitrate": null
+              "bitrate": null,
+              "durationSeconds": null
             }
           ],
           "slotFree": true,
@@ -440,6 +462,138 @@
       "scores": [
         1090
       ]
+    },
+    {
+      "name": "duration agreement breaks equal title scores and rejects shorter or longer recordings",
+      "artist": "Artist",
+      "preferences": {
+        "formatPreference": "preferLossless",
+        "minimumBitrateKbps": 320,
+        "minimumTrackCount": null
+      },
+      "officialTracks": [
+        {
+          "position": 1,
+          "discNumber": 1,
+          "discPosition": 1,
+          "title": "Song",
+          "durationMs": 180000
+        }
+      ],
+      "sources": [
+        {
+          "folder": "Music\\Album",
+          "slotFree": true,
+          "averageSpeed": 0,
+          "queueLength": 0,
+          "id": "a-unknown",
+          "owner": "a-unknown",
+          "tracks": [
+            {
+              "id": "a-unknown",
+              "name": "01 - Song.flac",
+              "format": "FLAC",
+              "bitrate": null,
+              "durationSeconds": null
+            }
+          ]
+        },
+        {
+          "folder": "Music\\Album",
+          "slotFree": true,
+          "averageSpeed": 0,
+          "queueLength": 0,
+          "id": "b-match",
+          "owner": "b-match",
+          "tracks": [
+            {
+              "id": "b-match",
+              "name": "01 - Song.flac",
+              "format": "FLAC",
+              "bitrate": null,
+              "durationSeconds": 183
+            }
+          ]
+        },
+        {
+          "folder": "Music\\Album",
+          "slotFree": true,
+          "averageSpeed": 0,
+          "queueLength": 0,
+          "id": "c-truncated",
+          "owner": "c-truncated",
+          "tracks": [
+            {
+              "id": "c-truncated",
+              "name": "01 - Song.flac",
+              "format": "FLAC",
+              "bitrate": null,
+              "durationSeconds": 90
+            }
+          ]
+        },
+        {
+          "folder": "Music\\Album",
+          "slotFree": true,
+          "averageSpeed": 0,
+          "queueLength": 0,
+          "id": "d-live",
+          "owner": "d-live",
+          "tracks": [
+            {
+              "id": "d-live",
+              "name": "01 - Song.flac",
+              "format": "FLAC",
+              "bitrate": null,
+              "durationSeconds": 240
+            }
+          ]
+        }
+      ],
+      "ids": [
+        "b-match",
+        "a-unknown",
+        "c-truncated",
+        "d-live"
+      ],
+      "eligible": [
+        true,
+        true,
+        false,
+        false
+      ],
+      "scores": [
+        7010,
+        7010,
+        3510,
+        3510
+      ]
+    }
+  ],
+  "albumFolders": [
+    {
+      "input": "Music/Album/CD1",
+      "expected": "Music\\Album"
+    },
+    {
+      "input": "Music\\Album\\Disc 2",
+      "expected": "Music\\Album"
+    },
+    {
+      "input": "Music\\Album\\disk-03",
+      "expected": "Music\\Album"
+    },
+    {
+      "input": "Music\\Album\\Deluxe",
+      "expected": "Music\\Album\\Deluxe"
+    },
+    {
+      "input": "Music\\Album\\CD1 FLAC",
+      "expected": "Music\\Album\\CD1 FLAC"
+    },
+    {
+      "input": "CD1",
+      "expected": "CD1"
     }
   ]
 }

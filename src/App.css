@@ -4377,6 +4377,7 @@ button:disabled {
 .album-source-confidence-trigger.is-exact,
 .album-source-confidence-trigger.is-completeWithExtras { color: #73ce86; border-color: rgba(73, 151, 88, 0.42); background: rgba(39, 106, 53, 0.1); }
 .album-source-confidence-trigger.is-partial,
+.album-source-confidence-trigger.is-durationMismatch,
 .album-source-confidence-trigger.is-unclear { color: #e28e98; border-color: rgba(151, 65, 76, 0.46); background: rgba(110, 39, 49, 0.13); }
 
 .album-tracklist-detail {
@@ -14141,3 +14142,22 @@ form.settings-panel {
 .reachability-evidence dd { margin: 0; }
 .reachability-evidence > small { display: block; margin-top: 10px; }
 .reachability-evidence button:disabled { opacity: .5; cursor: default; }
+
+
+/* Edition choice and duration evidence share the existing Smart Match dialogs. */
+.album-edition-picker { display: grid; gap: 7px; margin: 16px 20px; min-width: 0; }
+.album-edition-picker label { display: grid; gap: 7px; min-width: 0; color: #d8d4df; font-size: 11px; }
+.album-edition-picker select { width: 100%; min-width: 0; padding: 10px; background: #111625; color: #e4e0e8; border: 1px solid #3b3450; border-radius: 5px; font: inherit; text-overflow: ellipsis; }
+.album-edition-picker small, .album-edition-picker p { margin: 0; color: #989caf; font-size: 10px; line-height: 1.5; }
+.album-edition-picker [role="alert"] { color: #ef9ea5; }
+.album-edition-picker button { color: #c4a6ef; background: none; border: 0; text-decoration: underline; cursor: pointer; }
+.smart-duration-details { margin: 12px 20px; color: #b9b8c5; font-size: 11px; }
+.smart-duration-details summary { cursor: pointer; }
+.smart-duration-details ul { max-height: 180px; overflow: auto; padding: 0; list-style: none; }
+.smart-duration-details li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; }
+.smart-duration-details strong { flex-shrink: 0; font-size: 10px; font-weight: 500; }
+.smart-duration-details .is-mismatch { color: #ef9ea5; }
+.smart-duration-details p { color: #989caf; font-size: 10px; line-height: 1.5; }
+.smart-tracklist-check.is-durationMismatch { color: #e3949c; background: rgba(112, 44, 52, .1); border-color: rgba(172, 70, 80, .3); }
+.smart-tracklist-check small { white-space: normal; }
+.smart-review-dialog, .smart-preferences-dialog { max-height: calc(100vh - 40px); overflow-y: auto; }

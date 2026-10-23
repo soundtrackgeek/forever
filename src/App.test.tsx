@@ -18,6 +18,22 @@ beforeAll(async () => {
 }, 120_000);
 
 describe("Forever shell", () => {
+  it("remembers a review edition and checks its bonus tracks before recommending the folder", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Wanted 3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check A Sonic Holiday now" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Review match" }));
+    await screen.findByText("Exact tracklist", {}, { timeout: 10000 });
+    fireEvent.change(screen.getByRole("combobox", { name: "MusicBrainz edition" }), {
+      target: { value: "preview-deluxe" },
+    });
+    await screen.findByText("1 missing", {}, { timeout: 10000 });
+    expect(screen.queryByRole("button", { name: "Queue complete album" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Smart Match review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit A Sonic Holiday Smart Match profile" }));
+    expect(await screen.findByRole("combobox", { name: "MusicBrainz edition" })).toHaveValue("preview-deluxe");
+  });
   it("saves the listening port and network preferences before reconnecting", async () => {
     vi.useFakeTimers();
     const { unmount } = render(<App />);
@@ -557,7 +573,7 @@ describe("Forever shell", () => {
     expect(await screen.findByText("Folder verified")).toBeInTheDocument();
     expect(screen.getByText("Companion")).toBeInTheDocument();
     expect(await screen.findByText("Exact tracklist")).toBeInTheDocument();
-    expect(screen.getByText("11/11 titles matched")).toBeInTheDocument();
+    expect(screen.getByText(/11\/11 titles matched/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Compare alternatives" }));
     expect(
       screen.getByRole("heading", { name: "A Sonic Holiday — Engine Alley" }),
@@ -1004,7 +1020,7 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.60 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.61 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
@@ -1014,7 +1030,7 @@ describe("Forever shell", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Background checks use official tracklists and show track-count fallbacks.",
+        "Choose an official edition and compare titles and track lengths.",
       ),
     ).toBeInTheDocument();
     expect(

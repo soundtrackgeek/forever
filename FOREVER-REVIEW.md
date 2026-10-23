@@ -311,7 +311,20 @@ match in one place and fail in another.
 - Use `unicode-normalization` (NFKD plus mark stripping) in Rust so behavior
   matches the frontend.
 
-### 8. Duration-aware Tracklist Confidence and edition choice
+### 8. Duration-aware Tracklist Confidence and edition choice - DONE
+
+**Implemented in 0.0.61 (2026-10-23):** shared Rust matching compares track
+lengths within a three-second window, distinguishes unknown lengths, rejects
+known mismatches for recommendations, and breaks equal scores with album
+duration agreement. Review and profiles offer official MusicBrainz editions
+with bounded pagination and explicit truncation; Wanted schema 4 persists the
+selection and invalidates old recommendations. Numbered disc siblings form one
+source, all advertised discs are inspected, and local disc paths are preserved.
+Regression coverage spans the shared matcher, metadata validation, persistence,
+disc grouping/inspection, and rendered review. Duration metadata cannot prove
+audio identity or distinguish pressings with equal titles/lengths. Unadvertised
+discs and public Soulseek peer behavior remain limits. Original findings follow.
+
 
 **Today:** MusicBrainz track lengths are fetched
 ([musicbrainz.rs:470](src-tauri/src/musicbrainz.rs:470)), and Soulseek results

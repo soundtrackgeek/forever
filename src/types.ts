@@ -51,6 +51,23 @@ export type AlbumSource = {
   queueLength: number;
   isPrivate: boolean;
   representative: SearchResult;
+  folders?: string[];
+};
+
+export type AlbumEdition = {
+  id: string;
+  title: string;
+  date: string;
+  country: string | null;
+  disambiguation: string;
+  trackCount: number | null;
+  media: { format: string | null; trackCount: number | null }[];
+};
+
+export type AlbumEditions = {
+  releases: AlbumEdition[];
+  defaultReleaseId: string | null;
+  truncated: boolean;
 };
 
 export type AlbumTrack = {
@@ -81,6 +98,7 @@ export type WantedBestSource = {
   minimumBitrateKbps: number | null;
   score: number;
   tracklistLabel?: string;
+  folders?: string[];
 };
 
 export type WantedFulfillmentSource = "archive" | "download";
@@ -113,6 +131,7 @@ export type WantedAlbum = {
   ownedTrackCount: number | null;
   watchDespiteOwnership?: boolean;
   preferences: WantedPreferences;
+  selectedReleaseId?: string | null;
   addedAtMs: number;
   lastCheckedAtMs: number | null;
   sourceCount: number;

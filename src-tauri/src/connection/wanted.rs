@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
 
 pub const WANTED_EVENT: &str = "forever://wanted";
-const STORE_VERSION: u32 = 3;
+const STORE_VERSION: u32 = 4;
 const DEFAULT_INTERVAL_MINUTES: u32 = 30;
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_WANTED_ALBUMS: usize = 500;
@@ -50,6 +50,8 @@ pub struct WantedBestSource {
     pub score: u32,
     #[serde(default)]
     pub tracklist_label: String,
+    #[serde(default)]
+    pub folders: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -122,6 +124,8 @@ pub struct WantedAlbum {
     pub watch_despite_ownership: bool,
     #[serde(default)]
     pub preferences: WantedPreferences,
+    #[serde(default)]
+    pub selected_release_id: Option<String>,
     pub added_at_ms: u64,
     pub last_checked_at_ms: Option<u64>,
     #[serde(default)]
@@ -204,6 +208,7 @@ impl SourceAggregate {
                 name: file.filename.clone(),
                 format: extension.to_ascii_uppercase(),
                 bitrate: file.bitrate,
+                duration_seconds: file.duration_seconds,
             },
         );
         self.track_count = self.track_count.saturating_add(1);
@@ -231,6 +236,7 @@ struct ActiveSearch {
     plan: AlbumQueryPlan,
     automatic: bool,
     official_tracks: Arc<Mutex<Option<Vec<AlbumTrack>>>>,
+    selected_release_id: Option<String>,
 }
 
 impl ActiveSearch {
@@ -391,6 +397,7 @@ impl WantedHub {
                 owned_track_count: None,
                 watch_despite_ownership: false,
                 preferences,
+                selected_release_id: None,
                 added_at_ms: timestamp_ms(),
                 last_checked_at_ms: None,
                 consecutive_misses: 0,
@@ -599,6 +606,48 @@ impl WantedHub {
         Ok(self.snapshot())
     }
 
+    pub fn set_edition(
+        &self,
+        album_id: &str,
+        release_id: Option<String>,
+    ) -> Result<WantedSnapshot, WantedError> {
+        let album_id = valid_album_id(album_id)?;
+        if release_id
+            .as_deref()
+            .is_some_and(|id| !crate::musicbrainz::is_musicbrainz_id(id))
+        {
+            return Err(WantedError::InvalidAlbum);
+        }
+        let mut runtime = self.runtime.lock().unwrap_or_else(|p| p.into_inner());
+        let mut store = self.store.write().unwrap_or_else(|p| p.into_inner());
+        let mut next = store.clone();
+        let album = next
+            .albums
+            .iter_mut()
+            .find(|a| a.album_id.eq_ignore_ascii_case(album_id))
+            .ok_or(WantedError::AlbumNotFound)?;
+        if album.selected_release_id == release_id {
+            drop(store);
+            drop(runtime);
+            return Ok(self.snapshot());
+        }
+        change_edition(album, release_id);
+        // Persist before publishing the choice; failed saves retain the previous state.
+        self.path.save(&next)?;
+        *store = next;
+        if runtime
+            .active
+            .as_ref()
+            .is_some_and(|a| a.album_id.eq_ignore_ascii_case(album_id))
+        {
+            runtime.active = None;
+        }
+        drop(store);
+        drop(runtime);
+        self.publish();
+        Ok(self.snapshot())
+    }
+
     pub fn set_default_preferences(
         &self,
         preferences: WantedPreferences,
@@ -719,7 +768,7 @@ impl WantedHub {
         if runtime.active.is_some() {
             return Err(WantedError::CheckInProgress);
         }
-        let plan = {
+        let (plan, selected_release_id) = {
             let store = self
                 .store
                 .read()
@@ -735,22 +784,25 @@ impl WantedHub {
             if album.fulfilled {
                 return Err(WantedError::AlbumFulfilled);
             }
-            self.queries
+            let plan = self
+                .queries
                 .plan(&AlbumIdentity {
                     artist: album.artist.clone(),
                     title: album.title.clone(),
                 })
-                .map_err(|_| WantedError::InvalidAlbum)?
+                .map_err(|_| WantedError::InvalidAlbum)?;
+            (plan, album.selected_release_id.clone())
         };
         let query = plan.query().to_owned();
         let official_tracks = Arc::new(Mutex::new(None));
         let result = official_tracks.clone();
         let app = self.app.clone();
         let id = album_id.to_owned();
+        let edition = selected_release_id.clone();
         tauri::async_runtime::spawn(async move {
             let client = app.state::<MusicBrainzClient>();
             let tracks = official_tracks_or_fallback(
-                client.official_tracklist(&id),
+                client.edition_tracklist(&id, edition.as_deref()),
                 Duration::from_secs(45),
             )
             .await;
@@ -765,6 +817,7 @@ impl WantedHub {
             plan,
             automatic: !force,
             official_tracks,
+            selected_release_id,
         });
         drop(runtime);
         self.publish();
@@ -808,7 +861,7 @@ impl WantedHub {
             if !matching::is_audio(&extension) {
                 continue;
             }
-            let folder = parent_folder(&file.filename);
+            let folder = matching::album_folder(parent_folder(&file.filename));
             if folder.is_empty() {
                 continue;
             }
@@ -886,7 +939,10 @@ impl WantedHub {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .albums
             .iter_mut()
-            .find(|album| album.album_id == active.album_id)
+            .find(|album| {
+                album.album_id == active.album_id
+                    && album.selected_release_id == active.selected_release_id
+            })
         {
             album.error = Some(message.to_owned());
         }
@@ -930,14 +986,27 @@ impl WantedHub {
             .unwrap_or_else(|p| p.into_inner())
             .clone()
             .unwrap_or_default();
-        let summary = summarize_ranked_sources(active.sources, &preferences, &tracks, &artist);
+        let selected_unavailable = active.selected_release_id.is_some() && tracks.is_empty();
+        let mut summary = summarize_ranked_sources(active.sources, &preferences, &tracks, &artist);
+        if selected_unavailable {
+            summary.matching_source_count = 0;
+            summary.best_source = None;
+            summary.best_format = None;
+            summary.best_track_count = None;
+            summary.best_size_bytes = None;
+            summary.best_speed_bytes_per_second = None;
+            summary.source_fingerprints.clear();
+        }
         if let Some(album) = self
             .store
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .albums
             .iter_mut()
-            .find(|album| album.album_id == active.album_id)
+            .find(|album| {
+                album.album_id == active.album_id
+                    && album.selected_release_id == active.selected_release_id
+            })
         {
             album.new_source_count = summary
                 .source_fingerprints
@@ -956,7 +1025,9 @@ impl WantedHub {
             album.best_speed_bytes_per_second = summary.best_speed_bytes_per_second;
             album.best_source = summary.best_source;
             record_check_outcome(album, summary.source_count, timestamp_ms());
-            album.error = None;
+            album.error = selected_unavailable.then(|| {
+                "Selected edition tracklist unavailable; try again before reviewing.".into()
+            });
             album.source_fingerprints = summary.source_fingerprints;
         }
         let _ = self.persist();
@@ -1048,6 +1119,16 @@ fn summarize_ranked_sources(
             minimum_bitrate_kbps: rank.minimum_bitrate_kbps,
             score: rank.score,
             tracklist_label: rank.tracklist_confidence.label.clone(),
+            folders: {
+                let mut folders: Vec<_> = source
+                    .tracks
+                    .values()
+                    .map(|t| parent_folder(&t.name).to_owned())
+                    .collect();
+                folders.sort();
+                folders.dedup();
+                folders
+            },
         }
     });
     let mut source_fingerprints: Vec<_> = matching_sources
@@ -1358,6 +1439,7 @@ fn merge_bulk_requests(
                 owned_track_count: None,
                 watch_despite_ownership: false,
                 preferences: album_preferences,
+                selected_release_id: None,
                 added_at_ms,
                 last_checked_at_ms: None,
                 consecutive_misses: 0,
@@ -1412,7 +1494,11 @@ fn decode_store(bytes: &[u8]) -> Result<WantedStore, DecodeError> {
         bytes,
         STORE_VERSION,
         None,
-        &[(1, migrate_v1_to_v2), (2, migrate_v2_to_v3)],
+        &[
+            (1, migrate_v1_to_v2),
+            (2, migrate_v2_to_v3),
+            (3, migrate_v3_to_v4),
+        ],
     )?;
     Ok(store)
 }
@@ -1431,6 +1517,34 @@ fn migrate_v2_to_v3(value: serde_json::Value) -> Result<serde_json::Value, Decod
         album.last_found_at_ms = (album.source_count > 0)
             .then_some(album.last_checked_at_ms)
             .flatten();
+    }
+    Ok(serde_json::to_value(store)?)
+}
+
+fn change_edition(album: &mut WantedAlbum, release_id: Option<String>) {
+    album.selected_release_id = release_id;
+    album.last_checked_at_ms = None;
+    album.consecutive_misses = 0;
+    album.last_found_at_ms = None;
+    album.source_count = 0;
+    album.matching_source_count = 0;
+    album.ready_source_count = 0;
+    album.complete_source_count = 0;
+    album.new_source_count = 0;
+    album.best_format = None;
+    album.best_track_count = None;
+    album.best_size_bytes = None;
+    album.best_speed_bytes_per_second = None;
+    album.best_source = None;
+    album.error = None;
+    album.source_fingerprints.clear();
+}
+
+fn migrate_v3_to_v4(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: WantedStore = serde_json::from_value(value)?;
+    store.version = 4;
+    for album in &mut store.albums {
+        album.selected_release_id = None;
     }
     Ok(serde_json::to_value(store)?)
 }
@@ -1512,6 +1626,7 @@ mod tests {
                 .unwrap(),
                 automatic: false,
                 official_tracks: Arc::new(Mutex::new(Some(vec![]))),
+                selected_release_id: None,
                 sources: HashMap::new(),
             }),
         };
@@ -1554,6 +1669,7 @@ mod tests {
                 sources: HashMap::new(),
                 automatic: true,
                 official_tracks: Arc::new(Mutex::new(Some(vec![]))),
+                selected_release_id: None,
                 plan: AlbumQueryPlan::new(
                     &AlbumIdentity {
                         artist: "Artist".into(),
@@ -1683,7 +1799,7 @@ mod tests {
         album.insert("lastCheckedAtMs".to_owned(), 123.into());
         album.insert("sourceCount".to_owned(), 2.into());
         let migrated = decode_store(&serde_json::to_vec(&value).unwrap()).unwrap();
-        assert_eq!(migrated.version, 3);
+        assert_eq!(migrated.version, STORE_VERSION);
         assert_eq!(migrated.albums[0].last_found_at_ms, Some(123));
         assert_eq!(migrated.albums[0].consecutive_misses, 0);
         assert_eq!(migrated.albums[0].last_checked_at_ms, Some(123));
@@ -1757,6 +1873,7 @@ mod tests {
                         name,
                         format: format.into(),
                         bitrate,
+                        duration_seconds: None,
                     },
                 )
             })
@@ -1831,6 +1948,7 @@ mod tests {
                         name: file.filename.clone(),
                         format: extension.to_ascii_uppercase(),
                         bitrate: file.bitrate,
+                        duration_seconds: file.duration_seconds,
                     },
                 );
                 source.track_count += 1;
@@ -1867,6 +1985,7 @@ mod tests {
             owned_track_count: None,
             watch_despite_ownership: false,
             preferences: WantedPreferences::default(),
+            selected_release_id: None,
             added_at_ms: 1,
             last_checked_at_ms: None,
             consecutive_misses: 0,
@@ -1892,6 +2011,23 @@ mod tests {
             vec!["listener\0Music/Artist/Album"]
         );
         assert_eq!(restored.interval_minutes, DEFAULT_INTERVAL_MINUTES);
+        let original_preferences = restored.albums[0].preferences.clone();
+        let mut album = restored.albums[0].clone();
+        album.matching_source_count = 3;
+        album.last_checked_at_ms = Some(123);
+        let edition = "11111111-1111-1111-1111-111111111111";
+        change_edition(&mut album, Some(edition.into()));
+        assert_eq!(album.matching_source_count, 0);
+        assert!(album.last_checked_at_ms.is_none());
+        assert!(album.source_fingerprints.is_empty());
+        assert_eq!(album.preferences, original_preferences);
+        store.albums[0] = album;
+        JsonFile::new(path.clone()).save(&store).unwrap();
+        let restored = load_store(&JsonFile::new(path)).unwrap();
+        assert_eq!(
+            restored.albums[0].selected_release_id.as_deref(),
+            Some(edition)
+        );
     }
 
     #[test]

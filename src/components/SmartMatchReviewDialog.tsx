@@ -11,7 +11,9 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useState } from "react";
-import type { AlbumTrack, FolderInspection, WantedAlbum } from "../types";
+import { AlbumEditionPicker } from "./AlbumEditionPicker";
+import { durationEvidence } from "../utils/tracklistConfidence";
+import type { AlbumEditions, AlbumTrack, FolderInspection, WantedAlbum } from "../types";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
 import { useInspectionConfidence } from "../hooks/useMatching";
@@ -25,6 +27,8 @@ type SmartMatchReviewDialogProps = {
   error: string | null;
   queued: boolean;
   onConfirm: () => Promise<unknown>;
+  onLoadEditions: (albumId: string) => Promise<AlbumEditions>;
+  onSelectEdition: (releaseId: string | null) => Promise<unknown>;
   onRetry: () => void;
   onCompare: () => void;
   onClose: () => void;
@@ -45,6 +49,8 @@ export function SmartMatchReviewDialog({
   error,
   queued,
   onConfirm,
+  onLoadEditions,
+  onSelectEdition,
   onRetry,
   onCompare,
   onClose,
@@ -58,7 +64,7 @@ export function SmartMatchReviewDialog({
   const check = useInspectionConfidence(inspection, officialTracks, album.artist);
   const tracklistConfidence = check.data;
   const checking = tracklistState === "loading" || check.pending;
-  const tracklistBlocked = Boolean(check.error) || (tracklistState === "ready" && Boolean(tracklistConfidence && !tracklistConfidence.safeToRecommend));
+  const tracklistBlocked = Boolean(check.error) || (Boolean(album.selectedReleaseId) && tracklistState === "unavailable") || (tracklistState === "ready" && Boolean(tracklistConfidence && !tracklistConfidence.safeToRecommend));
 
   const queueAlbum = async () => {
     setQueueing(true);
@@ -87,6 +93,8 @@ export function SmartMatchReviewDialog({
           <button type="button" aria-label="Close Smart Match review" onClick={onClose}><X size={17} /></button>
         </header>
 
+        <AlbumEditionPicker albumId={album.albumId} selectedReleaseId={album.selectedReleaseId}
+          disabled={loading || queueing || queued} onLoad={onLoadEditions} onSelect={onSelectEdition} />
         {source ? (
           <div className="smart-review-source">
             <span><small>User</small><strong>{source.username}</strong><p>{source.slotFree ? "Free upload slot" : `${source.queueLength} people queued`}</p></span>
@@ -121,7 +129,7 @@ export function SmartMatchReviewDialog({
         {check.error ? <p role="alert">Tracklist check failed: {check.error}</p> : null}
         <div className={`smart-tracklist-check ${tracklistState === "ready" && tracklistConfidence ? `is-${tracklistConfidence.state}` : "is-fallback"}`}>
           {checking ? (
-            <><CircleNotch className="search-spinner" size={20} /><span><strong>Checking official titles</strong><small>Comparing the folder filenames with MusicBrainz.</small></span></>
+            <><CircleNotch className="search-spinner" size={20} /><span><strong>Checking titles and lengths</strong><small>Comparing filenames and reported lengths with the selected MusicBrainz edition.</small></span></>
           ) : tracklistState === "ready" && tracklistConfidence ? (
             <>
               {tracklistConfidence.safeToRecommend ? <CheckCircle size={20} weight="fill" /> : <WarningCircle size={20} weight="fill" />}
@@ -131,10 +139,18 @@ export function SmartMatchReviewDialog({
               </span>
             </>
           ) : (
-            <><MusicNotes size={20} /><span><strong>Track-count fallback</strong><small>MusicBrainz has no official title list for this edition, so your existing profile rules remain in charge.</small></span></>
+            <><MusicNotes size={20} /><span><strong>Track-count fallback</strong><small>MusicBrainz tracklist unavailable. A saved edition must load before it can be recommended.</small></span></>
           )}
         </div>
 
+        {tracklistConfidence?.matches.length ? <details className="smart-duration-details">
+          <summary>Track lengths · {tracklistConfidence.durationMismatchCount} differ</summary>
+          <ul>{tracklistConfidence.matches.map((match) => <li key={match.official.position}>
+            <span>{match.official.discNumber}.{match.official.discPosition} · {match.official.title}</span>
+            <strong className={match.durationState === "mismatch" ? "is-mismatch" : ""}>{durationEvidence(match)}</strong>
+          </li>)}</ul>
+          <p>Reported lengths can flag a different recording or a short file. They do not verify audio or identify a pressing.</p>
+        </details> : null}
         <div className="smart-review-policy">
           <small>Your match profile</small>
           <strong>{wantedPreferencesLabel(album.preferences)}</strong>

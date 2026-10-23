@@ -5,6 +5,40 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.61] - 2026-10-23
+
+### Added
+
+- Duration-aware Tracklist Confidence in the shared Rust matcher: per-track
+  differences, a three-second agreement window, explicit unknown lengths, and
+  album duration agreement as a ranking tie-breaker. Known mismatches require
+  review instead of receiving a Smart Match recommendation.
+- Official MusicBrainz edition selection in review and Smart Match profiles,
+  with date, country, edition description, format, and track count. Wanted
+  remembers each choice across restarts; schema 4 migrates existing albums to
+  Automatic. Release lists are paced, cached, paginated up to 500, and labelled
+  when incomplete; selections validate official status and album membership.
+- Multi-disc sources combine exact numbered disc folders for one listener,
+  inspect all advertised discs, and preserve numbered local subdirectories
+  and parent companion files in a single queued release.
+
+### Fixed
+
+- Edition changes clear old recommendations and reject stale metadata results.
+  A saved edition with unavailable metadata cannot silently become a track-count
+  recommendation. Search comparisons and expected download counts use the choice.
+- Duplicate search replies cannot inflate frontend source counts, and multi-disc
+  downloads retain one queued-state identity and duplicate-download guard.
+
+### Tests
+
+- Shared Rust/frontend fixtures cover duration ties, truncation/live mismatches,
+  repeated titles, missing lengths, and disc-folder boundaries. Added edition
+  parsing, membership, persistence/migration, multi-disc inspection/path, and
+  rendered selector/review regression coverage.
+- Duration evidence describes reported metadata, not acoustic verification.
+  Public Soulseek multi-disc interoperability remains unverified.
+
 ## [0.0.60] - 2026-10-23
 
 ### Changed

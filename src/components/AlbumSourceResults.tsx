@@ -1,3 +1,4 @@
+import { durationEvidence } from "../utils/tracklistConfidence";
 import {
   CaretDown,
   CaretUp,
@@ -346,7 +347,7 @@ export function AlbumSourceResults({
                       <div className="album-tracklist-columns">
                         <div>
                           <strong>Matched · {confidence.matches.length}</strong>
-                          {confidence.matches.length ? <ol>{confidence.matches.map((match) => <li key={match.official.position}><b>{match.official.position}</b><span>{match.official.title}<small>{match.sourceName}</small></span></li>)}</ol> : <p>No reliable title matches.</p>}
+                          {confidence.matches.length ? <ol>{confidence.matches.map((match) => <li key={match.official.position}><b>{match.official.position}</b><span>{match.official.title}<small>{match.sourceName}</small><small>{durationEvidence(match)}</small></span></li>)}</ol> : <p>No reliable title matches.</p>}
                         </div>
                         <div>
                           <strong>Missing · {confidence.missingTracks.length}</strong>

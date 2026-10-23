@@ -204,6 +204,22 @@ pub async fn wanted_set_preferences(
 }
 
 #[tauri::command]
+pub async fn wanted_set_edition(
+    manager: State<'_, ConnectionManager>,
+    client: State<'_, crate::musicbrainz::MusicBrainzClient>,
+    album_id: String,
+    release_id: Option<String>,
+) -> Result<wanted::WantedSnapshot, String> {
+    if let Some(id) = release_id.as_deref() {
+        // Validate official status and release-group membership before persisting.
+        client.edition_tracklist(&album_id, Some(id)).await?;
+    }
+    manager
+        .set_wanted_edition(&album_id, release_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn wanted_set_default_preferences(
     manager: State<'_, ConnectionManager>,
     preferences: wanted::WantedPreferences,

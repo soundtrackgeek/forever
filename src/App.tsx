@@ -52,6 +52,7 @@ import type {
   FolderInspection,
   ReleaseAlternativeSource,
   SearchResult,
+  AlbumEditions,
   WantedAlbum,
 } from "./types";
 import { groupAlbumSources } from "./utils/albumSources";
@@ -202,6 +203,8 @@ function App() {
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [onboardingInProgress, setOnboardingInProgress] = useState(false);
   const [preferencesAlbum, setPreferencesAlbum] = useState<WantedAlbum | null>(null);
+  const reviewRequest = useRef(0);
+  const reviewBusy = useRef(false);
   const [reviewAlbum, setReviewAlbum] = useState<WantedAlbum | null>(null);
   const [reviewInspection, setReviewInspection] = useState<FolderInspection | null>(null);
   const [reviewOfficialTracks, setReviewOfficialTracks] = useState<AlbumTrack[]>([]);
@@ -354,8 +357,20 @@ function App() {
     return search.startSearch(sessionId, title, album ?? undefined);
   };
 
-  const loadOfficialTracklist = useCallback((releaseGroupId: string) => {
-    if (native) return invoke<AlbumTrack[]>("album_official_tracklist", { releaseGroupId });
+  const editionSelections = JSON.stringify(Object.fromEntries(wanted.snapshot.albums
+    .filter((album) => album.selectedReleaseId).map((album) => [album.albumId, album.selectedReleaseId])));
+  const loadEditions = useCallback(async (releaseGroupId: string): Promise<AlbumEditions> => {
+    if (native) return invoke("album_editions", { releaseGroupId });
+    return { defaultReleaseId: "preview-original", truncated: false, releases: [
+      { id: "preview-original", title: "Original edition", date: "1992", country: "GB",
+        disambiguation: "Original", trackCount: 11, media: [{ format: "CD", trackCount: 11 }] },
+      { id: "preview-deluxe", title: "Deluxe edition", date: "2002", country: "US",
+        disambiguation: "Deluxe bonus disc", trackCount: 12, media: [{ format: "2×CD", trackCount: 12 }] },
+    ] };
+  }, [native]);
+  const loadOfficialTracklist = useCallback((releaseGroupId: string, edition?: string | null) => {
+    const releaseId = edition === undefined ? (JSON.parse(editionSelections)[releaseGroupId] ?? null) : edition;
+    if (native) return invoke<AlbumTrack[]>("album_official_tracklist", { releaseGroupId, releaseId });
     const previewTitles = releaseGroupId === "preview-waiting"
       ? [
           "Infamy",
@@ -376,6 +391,7 @@ function App() {
             "Gods of War", "Don't Shoot Shotgun", "Run Riot", "Hysteria", "Excitable", "Love and Affection",
           ]
         : [];
+    if (releaseId === "preview-deluxe") previewTitles.push("Bonus recording");
     return Promise.resolve(previewTitles.map((title, index) => ({
       position: index + 1,
       discNumber: 1,
@@ -383,10 +399,10 @@ function App() {
       title,
       durationMs: null,
     })));
-  }, [native]);
+  }, [native, editionSelections]);
 
   const relayReleaseSource = async (releaseId: string, source: AlbumSource) => {
-    const inspection = await folders.inspect(source.representative);
+    const inspection = await folders.inspect(source.representative, source.folders);
     const alternative: ReleaseAlternativeSource = {
       username: source.owner,
       remoteFolder: inspection.requestedFolder,
@@ -495,8 +511,8 @@ function App() {
   const expectedTrackCountFor = async (releaseGroupId: string | null, sourceCount: number) => {
     if (!native || !releaseGroupId) return sourceCount || null;
     try {
-      const official = await invoke<number | null>("album_official_track_count", { releaseGroupId });
-      return Math.max(sourceCount, official ?? 0) || null;
+      const tracks = await loadOfficialTracklist(releaseGroupId);
+      return Math.max(sourceCount, tracks.length) || null;
     } catch {
       return sourceCount || null;
     }
@@ -521,7 +537,7 @@ function App() {
     source: AlbumSource,
     availableSources: AlbumSource[] = [],
   ) => {
-    const inspection = await folders.inspect(source.representative);
+    const inspection = await folders.inspect(source.representative, source.folders);
     const expectedTrackCount = await expectedTrackCountFor(context?.albumId ?? null, source.tracks.length);
     await transfers.enqueueRelease({
       title: albumDownloadTitle(context, source.folderName),
@@ -554,6 +570,8 @@ function App() {
   const inspectSmartMatch = async (album: WantedAlbum) => {
     const source = album.bestSource;
     if (!source) return;
+    const request = ++reviewRequest.current;
+    reviewBusy.current = true;
     setReviewAlbum(album);
     setReviewInspection(null);
     setReviewOfficialTracks([]);
@@ -583,9 +601,11 @@ function App() {
       isPrivate: false,
     };
     const [inspectionResult, tracklistResult] = await Promise.allSettled([
-      folders.inspect(result),
-      loadOfficialTracklist(album.albumId),
+      folders.inspect(result, source.folders),
+      loadOfficialTracklist(album.albumId, album.selectedReleaseId ?? null),
     ]);
+    if (request !== reviewRequest.current) return;
+    reviewBusy.current = false;
     if (inspectionResult.status === "fulfilled") setReviewInspection(inspectionResult.value);
     else setReviewError(inspectionResult.reason instanceof Error ? inspectionResult.reason.message : String(inspectionResult.reason));
     if (tracklistResult.status === "fulfilled" && tracklistResult.value.length > 0) {
@@ -598,8 +618,40 @@ function App() {
     setReviewLoading(false);
   };
 
+  const selectReviewEdition = async (releaseId: string | null) => {
+    if (!reviewAlbum) return;
+    const album = reviewAlbum;
+    const request = ++reviewRequest.current;
+    reviewBusy.current = true;
+    setReviewLoading(true);
+    try {
+      const tracks = await loadOfficialTracklist(album.albumId, releaseId);
+      if (request !== reviewRequest.current) return;
+      await wanted.setEdition(album.albumId, releaseId);
+      if (request !== reviewRequest.current) return;
+      setReviewAlbum({ ...album, selectedReleaseId: releaseId });
+      setReviewOfficialTracks(tracks);
+      setReviewTracklistState(tracks.length ? "ready" : "unavailable");
+    } finally {
+      if (request === reviewRequest.current) {
+        reviewBusy.current = false;
+        setReviewLoading(false);
+      }
+    }
+  };
+
+  const closeReview = () => {
+    ++reviewRequest.current;
+    reviewBusy.current = false;
+    setReviewAlbum(null);
+  };
+
   const queueReviewedSmartMatch = async () => {
-    if (!reviewAlbum || !reviewInspection) return;
+    if (!reviewAlbum || !reviewInspection || reviewBusy.current) return;
+    if (reviewAlbum.selectedReleaseId && reviewTracklistState !== "ready") {
+      throw new Error("Load the selected edition before queueing.");
+    }
+    const request = reviewRequest.current;
     if (reviewOfficialTracks.length > 0) {
       const confidence = await tracklistConfidenceForInspection(
         reviewInspection,
@@ -613,7 +665,8 @@ function App() {
     const inspectedAudioCount = reviewInspection.files.filter((file) => [
       "aac", "aiff", "alac", "ape", "flac", "m4a", "mp3", "ogg", "opus", "wav", "wma", "wv",
     ].includes(file.extension.toLocaleLowerCase())).length;
-    const expectedTrackCount = await expectedTrackCountFor(reviewAlbum.albumId, inspectedAudioCount);
+    const expectedTrackCount = Math.max(reviewOfficialTracks.length, inspectedAudioCount) || null;
+    if (request !== reviewRequest.current || reviewBusy.current) return;
     await transfers.enqueueRelease({
       title: albumDownloadTitle({
         albumId: reviewAlbum.albumId,
@@ -1333,6 +1386,8 @@ function App() {
         <SmartMatchPreferencesDialog
           key={preferencesAlbum.albumId}
           album={wanted.byAlbumId.get(preferencesAlbum.albumId) ?? preferencesAlbum}
+          onLoadEditions={loadEditions}
+          onSelectEdition={(releaseId) => wanted.setEdition(preferencesAlbum.albumId, releaseId)}
           defaultPreferences={wanted.snapshot.defaultPreferences}
           onSave={async (preferences, saveAsDefault) => {
             await wanted.setPreferences(preferencesAlbum.albumId, preferences);
@@ -1344,7 +1399,7 @@ function App() {
 
       {reviewAlbum ? (
         <SmartMatchReviewDialog
-          album={wanted.byAlbumId.get(reviewAlbum.albumId) ?? reviewAlbum}
+          album={reviewAlbum}
           inspection={reviewInspection}
           officialTracks={reviewOfficialTracks}
           tracklistState={reviewTracklistState}
@@ -1352,9 +1407,11 @@ function App() {
           error={reviewError}
           queued={wantedDownloadStateByAlbumId.has(reviewAlbum.albumId)}
           onConfirm={queueReviewedSmartMatch}
+          onLoadEditions={loadEditions}
+          onSelectEdition={selectReviewEdition}
           onRetry={() => void inspectSmartMatch(reviewAlbum)}
           onCompare={() => {
-            setReviewAlbum(null);
+            closeReview();
             openAlbumSources({
               albumId: reviewAlbum.albumId,
               artist: reviewAlbum.artist,
@@ -1364,7 +1421,7 @@ function App() {
               minimumTrackCount: reviewAlbum.preferences.minimumTrackCount,
             });
           }}
-          onClose={() => setReviewAlbum(null)}
+          onClose={closeReview}
         />
       ) : null}
 

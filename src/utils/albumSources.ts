@@ -36,8 +36,16 @@ const resultName = (result: SearchResult) => {
   return path.split(/[\\/]/).filter(Boolean).slice(-1)[0] ?? path;
 };
 
+// Kept in parity with forever_matching::album_folder by shared path fixtures.
+export const albumFolder = (folder: string) => {
+  const normalized = normalizedFolder(folder);
+  const split = normalized.lastIndexOf("\\");
+  return split > 0 && /^(cd|disc|disk)[ ._-]*[0-9]{1,3}$/i.test(normalized.slice(split + 1))
+    ? normalized.slice(0, split) : normalized;
+};
+
 const sourceKey = (result: SearchResult) => {
-  const folder = normalizedFolder(result.folder ?? "");
+  const folder = albumFolder(result.folder ?? "");
   return `${result.owner.toLocaleLowerCase()}\u0000${folder.toLocaleLowerCase() || result.id}`;
 };
 
@@ -59,7 +67,7 @@ export function groupAlbumSources(results: SearchResult[]): AlbumSource[] {
   for (const result of results) {
     const key = sourceKey(result);
     const format = result.format.toUpperCase();
-    const folder = normalizedFolder(result.folder ?? "") || "Shared folder unavailable";
+    const folder = albumFolder(result.folder ?? "") || "Shared folder unavailable";
     const existing = sources.get(key);
 
     if (!existing) {
@@ -77,11 +85,15 @@ export function groupAlbumSources(results: SearchResult[]): AlbumSource[] {
         averageSpeed: result.averageSpeed ?? 0,
         queueLength: result.queueLength ?? 0,
         isPrivate: Boolean(result.isPrivate),
-        representative: result,
+        representative: { ...result, folder },
+        folders: [normalizedFolder(result.folder ?? "")],
       });
       continue;
     }
 
+    if (existing.files.some((file) => (file.filename ?? file.id) === (result.filename ?? result.id))) continue;
+    const actualFolder = normalizedFolder(result.folder ?? "");
+    if (!existing.folders?.includes(actualFolder)) existing.folders?.push(actualFolder);
     existing.files.push(result);
     existing.totalSizeBytes += result.sizeBytes ?? 0;
     existing.slotFree ||= Boolean(result.slotFree);
@@ -99,10 +111,10 @@ export function groupAlbumSources(results: SearchResult[]): AlbumSource[] {
 
   for (const source of sources.values()) {
     source.files.sort((left, right) =>
-      filenameCollator.compare(resultName(left), resultName(right)),
+      filenameCollator.compare(normalizedFolder(left.folder ?? ""), normalizedFolder(right.folder ?? "")) || filenameCollator.compare(resultName(left), resultName(right)),
     );
     source.tracks.sort((left, right) =>
-      filenameCollator.compare(resultName(left), resultName(right)),
+      filenameCollator.compare(normalizedFolder(left.folder ?? ""), normalizedFolder(right.folder ?? "")) || filenameCollator.compare(resultName(left), resultName(right)),
     );
   }
 

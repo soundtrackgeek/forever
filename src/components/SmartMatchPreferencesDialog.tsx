@@ -1,7 +1,8 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Check, SlidersHorizontal, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
-import type { WantedAlbum, WantedFormatPreference, WantedPreferences } from "../types";
+import { AlbumEditionPicker } from "./AlbumEditionPicker";
+import type { AlbumEditions, AlbumTrack, WantedAlbum, WantedFormatPreference, WantedPreferences } from "../types";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
 
 type SmartMatchPreferencesDialogProps = {
@@ -9,6 +10,8 @@ type SmartMatchPreferencesDialogProps = {
   defaultPreferences: WantedPreferences;
   onSave: (preferences: WantedPreferences, saveAsDefault: boolean) => Promise<unknown>;
   onClose: () => void;
+  onLoadEditions: (albumId: string) => Promise<AlbumEditions>;
+  onSelectEdition: (releaseId: string | null) => Promise<unknown>;
 };
 
 const formatOptions: Array<{
@@ -27,6 +30,8 @@ export function SmartMatchPreferencesDialog({
   defaultPreferences,
   onSave,
   onClose,
+  onLoadEditions,
+  onSelectEdition,
 }: SmartMatchPreferencesDialogProps) {
   const [preferences, setPreferences] = useState(album.preferences);
   const [pending, setPending] = useState(false);
@@ -40,7 +45,7 @@ export function SmartMatchPreferencesDialog({
     let mounted = true;
     const load = async () => {
       const count = isTauri()
-        ? await invoke<number | null>("album_official_track_count", { releaseGroupId: album.albumId })
+        ? (await invoke<AlbumTrack[]>("album_official_tracklist", { releaseGroupId: album.albumId, releaseId: album.selectedReleaseId ?? null })).length
         : album.bestTrackCount;
       if (!mounted) return;
       setOfficialTrackCount(count);
@@ -52,7 +57,7 @@ export function SmartMatchPreferencesDialog({
       if (mounted) setTrackCountLoading(false);
     });
     return () => { mounted = false; };
-  }, [album.albumId, album.bestTrackCount]);
+  }, [album.albumId, album.bestTrackCount, album.selectedReleaseId]);
 
   const save = async () => {
     setPending(true);
@@ -82,6 +87,8 @@ export function SmartMatchPreferencesDialog({
           <button type="button" aria-label="Close Smart Match preferences" onClick={onClose}><X size={17} /></button>
         </header>
 
+        <AlbumEditionPicker albumId={album.albumId} selectedReleaseId={album.selectedReleaseId}
+          disabled={pending} onLoad={onLoadEditions} onSelect={onSelectEdition} />
         <fieldset className="smart-format-options">
           <legend>Format priority</legend>
           {formatOptions.map((option) => (
@@ -137,7 +144,7 @@ export function SmartMatchPreferencesDialog({
             <small>{trackCountLoading
               ? "Checking the official MusicBrainz edition…"
               : officialTrackCount
-                ? `MusicBrainz suggests ${officialTrackCount} tracks from the earliest official edition.`
+                ? `MusicBrainz suggests ${officialTrackCount} tracks from the chosen official edition.`
                 : "Leave empty when editions may have different track counts."}</small>
           </label>
         </div>

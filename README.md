@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.60` unifies ranking and title matching in Rust,
-> including official tracklists in background Wanted recommendations.
+> **Status:** pre-alpha. Version `0.0.61` adds duration-aware confidence, saved edition choices,
+> and complete album sources across numbered disc folders.
 
-If `0.0.16` is installed, download and run the latest `0.0.60` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.61` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -59,8 +59,8 @@ configuration and transfers.
   Wanted comparisons hide folders below that album's track minimum and compute
   their file, source, and listener totals from qualifying folders only;
   **Tracklist Confidence** compares normalized filenames with official
-  MusicBrainz titles, ranks exact editions first, and expands into matched,
-  missing, and unexpected-track evidence
+  MusicBrainz titles and durations, with saved edition selection and matched,
+  missing, unexpected-track, and per-track length evidence
 - A dedicated Archive workspace that opens Music Library's
   `music-library.sqlite3` database with SQLite read-only and query-only
   enforcement, reports its latest import and inventory totals, and never adds
@@ -381,8 +381,9 @@ search opens in **Album sources**, grouping returned files by listener and
 folder. Hover or focus the eye control to preview that source's tracks; switch
 to **Individual files** for the original file-by-file results. When an official
 tracklist is available, each album source reports its title match as **Exact**,
-**Complete with extras**, **Missing**, or **Unclear**. Expand that signal to see
-the matched filenames, missing official titles, and unexpected audio files.
+**Complete with extras**, **Missing**, **Duration mismatch**, or **Unclear**.
+Expand that signal to see matched filenames, missing official titles,
+unexpected audio files, and length differences.
 
 Album searches share one Rust query builder across handoffs, Wanted, Shelf
 Radar, and Signal Relay. It folds accents and punctuation, treats `&` and `and`
@@ -548,16 +549,18 @@ Forever groups returned audio by listener and remote folder without disturbing
 the visible Search workspace. Edit a row's **Smart Match profile** to prefer
 lossless, require lossless, require MP3, or accept any format, then optionally
 set minimum bitrate and track-count requirements. Forever suggests the track
-count from the earliest official MusicBrainz edition when available. Select
+count from the chosen official MusicBrainz edition when available. Select
 **Use this as my default profile** to apply the same starting profile to future
 Wanted albums. Qualifying folders are ranked by completeness, format, free
 upload slot, speed, and queue length. One Rust matcher supplies rankings and
 Tracklist Confidence to Wanted, Search, Radar's source drawer, and folder review.
 Background Wanted checks load the same official MusicBrainz title list as review;
-metadata has a 45-second deadline and failure uses a visible **Track count only**
-fallback. Different available files or metadata can still change a later review.
+metadata has a 45-second deadline. Automatic edition lookup failure uses a visible
+**Track count only** fallback; a saved edition must load before it is recommended.
+Different available files or metadata can still change a later review.
 Unknown or zero bitrates in lossy-only folders cannot satisfy a configured minimum.
-Equal scores use a stable listener/folder tie-breaker, independent of reply order.
+Equal scores first compare the proportion of official tracks with agreeing lengths,
+then use stable listener/folder ties, independent of reply order.
 
 Archive ownership, album queries, and track matching share NFKD accent folding,
 punctuation spacing, and `&` → `and` normalization (including Björk/Bjork).
@@ -565,13 +568,41 @@ Track filenames additionally lose audio extensions, track/disc prefixes, and
 conservative remaster suffixes. Official titles retain meaningful dotted words.
 The TypeScript layer contains no scoring or title-matching implementation.
 Shared golden fixtures cover Rust and the real frontend-to-Rust bridge; stale
-asynchronous replies cannot restore an older recommendation. Duration scoring
-and edition selection remain review item 8.
+asynchronous replies cannot restore an older recommendation.
+
+Choose **MusicBrainz edition** in the review dialog or the album's Smart Match
+profile, including when no source is currently recommended. The release list
+shows dates, regions, edition descriptions, media formats, track counts, and a
+short release ID to distinguish otherwise identical entries. **Automatic** uses
+the earliest official edition with the common original-year track count.
+The list is cached for six hours, bounded to 500 releases, and explicitly marked
+when incomplete. Selection validates official status and release-group membership,
+is saved per Wanted album in schema 4, clears old recommendations, and applies to
+background checks and foreground comparisons. Existing Wanted albums migrate to
+Automatic. Edition selection saves immediately; format/bitrate profile defaults
+remain separate.
+
+For each title match, lengths within **±3 seconds** agree. Larger differences
+flag a **Duration mismatch** and prevent a Smart Match recommendation; missing
+or zero lengths are **unknown**, retain title-based eligibility, and never count
+as duration agreement. Review expands per-track differences before queueing.
+Reported metadata can flag live versions or truncated files, but cannot prove
+audio integrity or identify a pressing/remaster with the same titles and lengths.
+
+Sibling folders named exactly **CD1**, **Disc 2**, **disk-03**, etc. are grouped
+under their album parent for the same listener. Other named edition folders stay
+separate. Inspection requests every advertised disc, deduplicates files also
+returned with the parent, keeps parent companions, and fails if a disc cannot
+be verified. Downloads preserve numbered disc subdirectories under one release,
+including repeated filenames. Only advertised discs can be inspected: a search
+that never returns a missing disc cannot establish completeness without an
+official tracklist.
 
 Use **Download best** to inspect the recommended folder before anything is
 queued. The review shows the listener, remote path, format, tracks, aggregate
 size, source speed, the audio/companion-file split, and Tracklist Confidence.
-An exact title match outranks format and speed; a missing or unclear tracklist
+An exact title match with no known length mismatch outranks format and speed;
+a missing, mismatched, or unclear tracklist
 cannot be queued as the recommended source and sends you to **Compare** instead.
 When MusicBrainz has no official title list, Forever keeps using the existing
 track-count and Smart Match profile rules. **Queue complete album**

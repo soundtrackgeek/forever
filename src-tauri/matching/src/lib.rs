@@ -102,9 +102,11 @@ fn format_rank(format: &str) -> u32 {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SourceTitle {
     pub id: String,
     pub name: String,
+    pub duration_seconds: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -113,6 +115,9 @@ pub struct TitleMatch {
     pub official: AlbumTrack,
     pub source_name: String,
     pub similarity: f64,
+    pub source_duration_seconds: Option<u32>,
+    pub duration_delta_ms: Option<i64>,
+    pub duration_state: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -129,6 +134,25 @@ pub struct TracklistConfidence {
     pub matches: Vec<TitleMatch>,
     pub safe_to_recommend: bool,
     pub score: u32,
+    pub duration_matched_count: usize,
+    pub duration_mismatch_count: usize,
+    pub duration_unknown_count: usize,
+    pub duration_agreement: u32,
+}
+
+fn duration_delta(source: Option<u32>, official: Option<u32>) -> Option<i64> {
+    Some(i64::from(source.filter(|v| *v > 0)?) * 1000 - i64::from(official.filter(|v| *v > 0)?))
+}
+
+/// Only an explicitly numbered disc directory can be folded into its album.
+pub fn album_folder(folder: &str) -> String {
+    static DISC: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"(?i)^(cd|disc|disk)[ ._-]*[0-9]{1,3}$").unwrap());
+    let normalized = folder.replace('/', "\\").trim_end_matches('\\').to_owned();
+    match normalized.rsplit_once('\\') {
+        Some((parent, leaf)) if !parent.is_empty() && DISC.is_match(leaf) => parent.to_owned(),
+        _ => normalized,
+    }
 }
 
 fn similarity(left: &str, right: &str) -> f64 {
@@ -204,6 +228,10 @@ pub fn confidence(
             matches: vec![],
             safe_to_recommend: true,
             score: 0,
+            duration_matched_count: 0,
+            duration_mismatch_count: 0,
+            duration_unknown_count: 0,
+            duration_agreement: 0,
         };
     }
     let keys: Vec<_> = official
@@ -222,6 +250,14 @@ pub fn confidence(
     }
     candidates.sort_by(|a, b| {
         b.2.total_cmp(&a.2)
+            .then_with(|| {
+                let delta = |c: &(usize, usize, f64)| {
+                    duration_delta(sources[c.0].duration_seconds, official[c.1].duration_ms)
+                        .map(i64::unsigned_abs)
+                        .unwrap_or(u64::MAX)
+                };
+                delta(a).cmp(&delta(b))
+            })
             .then_with(|| sources[a.0].name.cmp(&sources[b.0].name))
             .then(a.1.cmp(&b.1))
             .then_with(|| sources[a.0].id.cmp(&sources[b.0].id))
@@ -239,6 +275,20 @@ pub fn confidence(
             official: official[oi].clone(),
             source_name: basename(&sources[si].name).into(),
             similarity,
+            source_duration_seconds: sources[si].duration_seconds.filter(|v| *v > 0),
+            duration_delta_ms: duration_delta(
+                sources[si].duration_seconds,
+                official[oi].duration_ms,
+            ),
+            duration_state: match duration_delta(
+                sources[si].duration_seconds,
+                official[oi].duration_ms,
+            ) {
+                Some(delta) if delta.abs() <= 3000 => "matched",
+                Some(_) => "mismatch",
+                None => "unknown",
+            }
+            .into(),
         });
     }
     matches.sort_by_key(|m| m.official.position);
@@ -255,7 +305,18 @@ pub fn confidence(
         .collect();
     let count = matches.len();
     let extras = extra_source_names.len();
-    let state = if count == official.len() {
+    let duration_matched_count = matches
+        .iter()
+        .filter(|m| m.duration_state == "matched")
+        .count();
+    let duration_mismatch_count = matches
+        .iter()
+        .filter(|m| m.duration_state == "mismatch")
+        .count();
+    let duration_unknown_count = count - duration_matched_count - duration_mismatch_count;
+    let state = if count == official.len() && duration_mismatch_count > 0 {
+        "durationMismatch"
+    } else if count == official.len() {
         if extras == 0 {
             "exact"
         } else {
@@ -270,16 +331,25 @@ pub fn confidence(
         "exact" => "Exact tracklist".into(),
         "completeWithExtras" => format!("Complete · {extras} extra"),
         "partial" => format!("{} missing", missing_tracks.len()),
+        "durationMismatch" => format!("{duration_mismatch_count} duration mismatch"),
         _ => "Unclear match".into(),
     };
     let mut summary = format!("{count}/{} titles matched", official.len());
     if state == "completeWithExtras" {
         summary.push_str(&format!(" · {extras} extra"));
     }
+    summary.push_str(&format!(" · {duration_matched_count} lengths agree"));
+    if duration_mismatch_count > 0 {
+        summary.push_str(&format!(" · {duration_mismatch_count} lengths differ"));
+    }
+    if duration_unknown_count > 0 {
+        summary.push_str(&format!(" · {duration_unknown_count} lengths unknown"));
+    }
     let score = match state {
         "exact" => 6000,
         "completeWithExtras" => 5400u32.saturating_sub(extras as u32 * 60).max(4500),
         "partial" => (count as f64 / official.len() as f64 * 2500.0).round() as u32,
+        "durationMismatch" => 2500,
         _ => 0,
     };
     TracklistConfidence {
@@ -292,8 +362,12 @@ pub fn confidence(
         missing_tracks,
         extra_source_names,
         matches,
-        safe_to_recommend: count == official.len(),
+        safe_to_recommend: count == official.len() && duration_mismatch_count == 0,
         score,
+        duration_matched_count,
+        duration_mismatch_count,
+        duration_unknown_count,
+        duration_agreement: (duration_matched_count * 1000 / official.len()) as u32,
     }
 }
 
@@ -304,6 +378,7 @@ pub struct RankingTrack {
     pub name: String,
     pub format: String,
     pub bitrate: Option<u32>,
+    pub duration_seconds: Option<u32>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize)]
@@ -345,6 +420,7 @@ pub fn rank_sources(
                 .map(|t| SourceTitle {
                     id: t.id.clone(),
                     name: t.name.clone(),
+                    duration_seconds: t.duration_seconds,
                 })
                 .collect::<Vec<_>>();
             let confidence = confidence(&titles, official, artist);
@@ -400,7 +476,12 @@ pub fn rank_sources(
             let reason = if !enough {
                 format!("Needs {} tracks", preferences.minimum_track_count.unwrap())
             } else if !confidence.safe_to_recommend {
-                if confidence.state == "partial" {
+                if confidence.duration_mismatch_count > 0 {
+                    format!(
+                        "{} track lengths differ",
+                        confidence.duration_mismatch_count
+                    )
+                } else if confidence.state == "partial" {
                     format!(
                         "{} official tracks missing",
                         confidence.missing_tracks.len()
@@ -449,6 +530,11 @@ pub fn rank_sources(
         br.eligible
             .cmp(&ar.eligible)
             .then(br.score.cmp(&ar.score))
+            .then(
+                br.tracklist_confidence
+                    .duration_agreement
+                    .cmp(&ar.tracklist_confidence.duration_agreement),
+            )
             .then(b.tracks.len().cmp(&a.tracks.len()))
             .then(b.average_speed.cmp(&a.average_speed))
             .then_with(|| a.owner.cmp(&b.owner))
@@ -463,6 +549,48 @@ mod tests {
     use super::*;
     pub fn fixture() -> serde_json::Value {
         serde_json::from_str(include_str!("../../../fixtures/matching.json")).unwrap()
+    }
+
+    #[test]
+    fn disc_folder_fixtures_do_not_merge_editions() {
+        for case in fixture()["albumFolders"].as_array().unwrap() {
+            assert_eq!(
+                album_folder(case["input"].as_str().unwrap()),
+                case["expected"].as_str().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn durations_resolve_repeated_titles_and_keep_missing_lengths_unknown() {
+        let official: Vec<AlbumTrack> = serde_json::from_value(serde_json::json!([
+            {"position":1,"discNumber":1,"discPosition":1,"title":"Song","durationMs":180000},
+            {"position":2,"discNumber":2,"discPosition":1,"title":"Song","durationMs":240000}
+        ]))
+        .unwrap();
+        let mut sources: Vec<SourceTitle> = serde_json::from_value(serde_json::json!([
+            {"id":"disc2","name":"Album/CD2/01 Song.flac","durationSeconds":240},
+            {"id":"disc1","name":"Album/CD1/01 Song.flac","durationSeconds":177}
+        ]))
+        .unwrap();
+        let result = confidence(&sources, &official, "");
+        assert!(result.safe_to_recommend);
+        assert_eq!(result.duration_matched_count, 2);
+        assert_eq!(result.matches[0].duration_delta_ms, Some(-3000));
+        sources[1].duration_seconds = Some(176);
+        assert!(!confidence(&sources, &official, "").safe_to_recommend);
+        sources[1].duration_seconds = Some(0);
+        let result = confidence(&sources, &official, "");
+        assert!(result.safe_to_recommend);
+        assert_eq!(result.duration_unknown_count, 1);
+        let mut no_lengths = official.clone();
+        no_lengths[0].duration_ms = Some(0);
+        sources[1].duration_seconds = Some(u32::MAX);
+        assert_eq!(
+            confidence(&sources, &no_lengths, "").duration_unknown_count,
+            1
+        );
+        assert!(duration_delta(Some(u32::MAX), Some(1)).unwrap() > 0);
     }
 
     #[test]
@@ -560,7 +688,8 @@ mod tests {
         let titles = vec![
             SourceTitle {
                 id: "same-file".into(),
-                name: "Original Sin.flac".into()
+                name: "Original Sin.flac".into(),
+                duration_seconds: None,
             };
             2
         ];

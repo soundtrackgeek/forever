@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { inspectAlbumSource } from "../utils/inspectAlbumSource";
 import { useCallback, useMemo, useState } from "react";
 import type { FolderFile, FolderInspection, SearchResult } from "../types";
 
@@ -90,7 +91,7 @@ export function useSoulseekFolders() {
   const [error, setError] = useState<string | null>(null);
 
   const inspect = useCallback(
-    async (result: SearchResult) => {
+    async (result: SearchResult, sourceFolders: string[] = []) => {
       const folder = result.folder ?? (native ? "" : "Music\\Liminal Structures\\Night Geometry");
       if (!folder) {
         const message = "This search result does not include a source folder.";
@@ -101,10 +102,10 @@ export function useSoulseekFolders() {
       setError(null);
       try {
         const next = native
-          ? await invoke<FolderInspection>("folder_inspect", {
+          ? await inspectAlbumSource(folder, sourceFolders, (requestedFolder) => invoke<FolderInspection>("folder_inspect", {
               username: result.owner,
-              folder,
-            })
+              folder: requestedFolder,
+            }))
           : previewInspection(result);
         setInspection(next);
         return next;

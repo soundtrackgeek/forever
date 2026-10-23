@@ -8,7 +8,7 @@ use tauri::State;
 use tokio::sync::{Mutex, RwLock};
 
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "Forever/0.0.60 (https://github.com/soundtrackgeek/forever)";
+const USER_AGENT: &str = "Forever/0.0.61 (https://github.com/soundtrackgeek/forever)";
 const REQUEST_INTERVAL: Duration = Duration::from_millis(1_050);
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const MAX_CATALOG_PAGES: usize = 3;
@@ -65,25 +65,62 @@ struct ReleaseGroupResponse {
     release_groups: Vec<AlbumReleaseGroup>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-struct OfficialRelease {
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct AlbumEdition {
+    pub id: String,
     #[serde(default)]
-    id: String,
+    pub title: String,
     #[serde(default)]
-    date: String,
-    #[serde(rename = "track-count")]
-    track_count: Option<u32>,
+    pub date: String,
+    pub country: Option<String>,
+    #[serde(default)]
+    pub disambiguation: String,
+    #[serde(rename(deserialize = "track-count", serialize = "trackCount"))]
+    pub track_count: Option<u32>,
+    #[serde(default)]
+    pub media: Vec<EditionMedium>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct EditionMedium {
+    pub format: Option<String>,
+    #[serde(rename(deserialize = "track-count", serialize = "trackCount"))]
+    pub track_count: Option<u32>,
+}
+
+type OfficialRelease = AlbumEdition;
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumEditions {
+    pub releases: Vec<AlbumEdition>,
+    pub default_release_id: Option<String>,
+    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 struct OfficialReleaseResponse {
+    #[serde(rename = "release-count")]
+    count: usize,
+    #[serde(rename = "release-offset", default)]
+    offset: usize,
     releases: Vec<OfficialRelease>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 struct OfficialTracklistResponse {
+    #[serde(rename = "release-group")]
+    release_group: Option<ReleaseGroupIdentity>,
+    status: Option<String>,
     #[serde(default)]
     media: Vec<OfficialMedium>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ReleaseGroupIdentity {
+    id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -124,7 +161,7 @@ pub struct MusicBrainzClient {
     request_gate: Arc<Mutex<Instant>>,
     artist_cache: RwLock<HashMap<String, CacheEntry<Vec<AlbumArtist>>>>,
     catalog_cache: RwLock<HashMap<String, CacheEntry<AlbumCatalog>>>,
-    track_count_cache: RwLock<HashMap<String, CacheEntry<Option<u32>>>>,
+    edition_cache: RwLock<HashMap<String, CacheEntry<AlbumEditions>>>,
     tracklist_cache: RwLock<HashMap<String, CacheEntry<Vec<AlbumTrack>>>>,
 }
 
@@ -149,7 +186,7 @@ impl MusicBrainzClient {
             )),
             artist_cache: RwLock::new(HashMap::new()),
             catalog_cache: RwLock::new(HashMap::new()),
-            track_count_cache: RwLock::new(HashMap::new()),
+            edition_cache: RwLock::new(HashMap::new()),
             tracklist_cache: RwLock::new(HashMap::new()),
         }
     }
@@ -287,109 +324,99 @@ impl MusicBrainzClient {
         Ok(catalog)
     }
 
-    pub async fn official_track_count(
-        &self,
-        release_group_id: &str,
-    ) -> Result<Option<u32>, String> {
-        let release_group_id = release_group_id.trim();
-        if !is_musicbrainz_id(release_group_id) {
-            return Err(
-                "Choose a valid MusicBrainz album before loading its track count.".to_owned(),
-            );
+    pub async fn editions(&self, release_group_id: &str) -> Result<AlbumEditions, String> {
+        let id = release_group_id.trim();
+        if !is_musicbrainz_id(id) {
+            return Err("Choose a valid MusicBrainz album before loading editions.".into());
         }
-        if let Some(cached) = self.track_count_cache.read().await.get(release_group_id) {
-            if cached.stored_at.elapsed() <= CACHE_TTL {
-                return Ok(cached.value);
-            }
-        }
-
-        self.wait_for_request_slot().await;
-        let response = self
-            .client()?
-            .get(format!("{MUSICBRAINZ_API}/release"))
-            .query(&[
-                ("release-group", release_group_id.to_owned()),
-                ("status", "official".to_owned()),
-                ("fmt", "json".to_owned()),
-                ("limit", "100".to_owned()),
-            ])
-            .send()
-            .await
-            .map_err(request_error)?
-            .error_for_status()
-            .map_err(request_error)?
-            .json::<OfficialReleaseResponse>()
-            .await
-            .map_err(request_error)?;
-        let track_count = canonical_track_count(&response.releases);
-        let mut cache = self.track_count_cache.write().await;
-        trim_cache(&mut cache, release_group_id, MAX_TRACK_COUNT_CACHE_ENTRIES);
-        cache.insert(
-            release_group_id.to_owned(),
-            CacheEntry {
-                stored_at: Instant::now(),
-                value: track_count,
-            },
-        );
-        Ok(track_count)
-    }
-
-    pub async fn official_tracklist(
-        &self,
-        release_group_id: &str,
-    ) -> Result<Vec<AlbumTrack>, String> {
-        let release_group_id = release_group_id.trim();
-        if !is_musicbrainz_id(release_group_id) {
-            return Err(
-                "Choose a valid MusicBrainz album before loading its tracklist.".to_owned(),
-            );
-        }
-        if let Some(cached) = self.tracklist_cache.read().await.get(release_group_id) {
+        if let Some(cached) = self.edition_cache.read().await.get(id) {
             if cached.stored_at.elapsed() <= CACHE_TTL {
                 return Ok(cached.value.clone());
             }
         }
+        let mut releases = Vec::new();
+        let mut offset = 0;
+        let mut total = 0;
+        // Bounded browse: at most 500 official editions. Expose incomplete lists.
+        for _ in 0..5 {
+            self.wait_for_request_slot().await;
+            let response = self
+                .client()?
+                .get(format!("{MUSICBRAINZ_API}/release"))
+                .query(&[
+                    ("release-group", id.to_owned()),
+                    ("status", "official".into()),
+                    ("inc", "media".into()),
+                    ("fmt", "json".into()),
+                    ("limit", "100".into()),
+                    ("offset", offset.to_string()),
+                ])
+                .send()
+                .await
+                .map_err(request_error)?
+                .error_for_status()
+                .map_err(request_error)?
+                .json::<OfficialReleaseResponse>()
+                .await
+                .map_err(request_error)?;
+            total = response.count;
+            let empty = response.releases.is_empty();
+            offset = response.offset + response.releases.len();
+            releases.extend(response.releases);
+            if empty || offset >= total {
+                break;
+            }
+        }
+        let editions = prepare_editions(releases, offset < total);
+        let mut cache = self.edition_cache.write().await;
+        trim_cache(&mut cache, id, MAX_TRACK_COUNT_CACHE_ENTRIES);
+        cache.insert(
+            id.into(),
+            CacheEntry {
+                stored_at: Instant::now(),
+                value: editions.clone(),
+            },
+        );
+        Ok(editions)
+    }
 
-        self.wait_for_request_slot().await;
-        let releases = self
-            .client()?
-            .get(format!("{MUSICBRAINZ_API}/release"))
-            .query(&[
-                ("release-group", release_group_id.to_owned()),
-                ("status", "official".to_owned()),
-                ("fmt", "json".to_owned()),
-                ("limit", "100".to_owned()),
-            ])
-            .send()
-            .await
-            .map_err(request_error)?
-            .error_for_status()
-            .map_err(request_error)?
-            .json::<OfficialReleaseResponse>()
-            .await
-            .map_err(request_error)?
-            .releases;
-        let canonical_count = canonical_track_count(&releases);
-        let release = releases
-            .iter()
-            .filter(|release| !release.id.is_empty())
-            .filter(|release| canonical_count.is_none() || release.track_count == canonical_count)
-            .min_by(|left, right| {
-                left.date
-                    .is_empty()
-                    .cmp(&right.date.is_empty())
-                    .then_with(|| left.date.cmp(&right.date))
-                    .then_with(|| left.id.cmp(&right.id))
-            })
-            .ok_or_else(|| {
-                "MusicBrainz has no official tracklist for this album yet.".to_owned()
-            })?;
+    pub async fn official_track_count(
+        &self,
+        release_group_id: &str,
+    ) -> Result<Option<u32>, String> {
+        let editions = self.editions(release_group_id).await?;
+        Ok(canonical_track_count(&editions.releases))
+    }
 
+    pub async fn edition_tracklist(
+        &self,
+        release_group_id: &str,
+        release_id: Option<&str>,
+    ) -> Result<Vec<AlbumTrack>, String> {
+        if !is_musicbrainz_id(release_group_id)
+            || release_id.is_some_and(|id| !is_musicbrainz_id(id))
+        {
+            return Err("Choose a valid MusicBrainz album and edition.".into());
+        }
+        let selected = match release_id {
+            Some(id) => id.to_owned(),
+            None => self
+                .editions(release_group_id)
+                .await?
+                .default_release_id
+                .ok_or("MusicBrainz has no official tracklist for this album yet.")?,
+        };
+        let key = format!("{release_group_id}/{selected}");
+        if let Some(cached) = self.tracklist_cache.read().await.get(&key) {
+            if cached.stored_at.elapsed() <= CACHE_TTL {
+                return Ok(cached.value.clone());
+            }
+        }
         self.wait_for_request_slot().await;
         let response = self
             .client()?
-            .get(format!("{MUSICBRAINZ_API}/release/{}", release.id))
-            .query(&[("inc", "recordings"), ("fmt", "json")])
+            .get(format!("{MUSICBRAINZ_API}/release/{selected}"))
+            .query(&[("inc", "recordings+release-groups"), ("fmt", "json")])
             .send()
             .await
             .map_err(request_error)?
@@ -398,22 +425,72 @@ impl MusicBrainzClient {
             .json::<OfficialTracklistResponse>()
             .await
             .map_err(request_error)?;
+        validate_edition(&response, release_group_id)?;
         let tracks = flatten_official_tracklist(response);
         if tracks.is_empty() {
             return Err(
-                "MusicBrainz returned an empty official tracklist for this album.".to_owned(),
+                "MusicBrainz returned an empty official tracklist for this edition.".into(),
             );
         }
         let mut cache = self.tracklist_cache.write().await;
-        trim_cache(&mut cache, release_group_id, MAX_TRACK_COUNT_CACHE_ENTRIES);
+        trim_cache(&mut cache, &key, MAX_TRACK_COUNT_CACHE_ENTRIES);
         cache.insert(
-            release_group_id.to_owned(),
+            key,
             CacheEntry {
                 stored_at: Instant::now(),
                 value: tracks.clone(),
             },
         );
         Ok(tracks)
+    }
+}
+
+fn validate_edition(response: &OfficialTracklistResponse, group: &str) -> Result<(), String> {
+    if response
+        .release_group
+        .as_ref()
+        .is_none_or(|r| !r.id.eq_ignore_ascii_case(group))
+        || response.status.as_deref() != Some("Official")
+    {
+        return Err("This official edition does not belong to the selected album.".into());
+    }
+    Ok(())
+}
+
+fn prepare_editions(mut releases: Vec<AlbumEdition>, truncated: bool) -> AlbumEditions {
+    for release in &mut releases {
+        if release.track_count.is_none()
+            && !release.media.is_empty()
+            && release.media.iter().all(|m| m.track_count.is_some())
+        {
+            release.track_count = Some(
+                release
+                    .media
+                    .iter()
+                    .filter_map(|m| m.track_count)
+                    .fold(0u32, u32::saturating_add),
+            );
+        }
+    }
+    releases.retain(|r| is_musicbrainz_id(&r.id));
+    releases.sort_by(|a, b| {
+        a.date
+            .is_empty()
+            .cmp(&b.date.is_empty())
+            .then(a.date.cmp(&b.date))
+            .then(a.id.cmp(&b.id))
+    });
+    let mut seen = std::collections::HashSet::new();
+    releases.retain(|r| seen.insert(r.id.clone()));
+    let count = canonical_track_count(&releases);
+    let default_release_id = releases
+        .iter()
+        .find(|r| count.is_none() || r.track_count == count)
+        .map(|r| r.id.clone());
+    AlbumEditions {
+        releases,
+        default_release_id,
+        truncated,
     }
 }
 
@@ -479,7 +556,7 @@ fn trim_cache<T>(cache: &mut HashMap<String, CacheEntry<T>>, incoming: &str, lim
     }
 }
 
-fn is_musicbrainz_id(value: &str) -> bool {
+pub(crate) fn is_musicbrainz_id(value: &str) -> bool {
     let sections: Vec<_> = value.split('-').collect();
     sections.len() == 5
         && sections
@@ -531,13 +608,64 @@ pub async fn album_official_track_count(
 pub async fn album_official_tracklist(
     client: State<'_, MusicBrainzClient>,
     release_group_id: String,
+    release_id: Option<String>,
 ) -> Result<Vec<AlbumTrack>, String> {
-    client.official_tracklist(&release_group_id).await
+    client
+        .edition_tracklist(&release_group_id, release_id.as_deref())
+        .await
+}
+
+#[tauri::command]
+pub async fn album_editions(
+    client: State<'_, MusicBrainzClient>,
+    release_group_id: String,
+) -> Result<AlbumEditions, String> {
+    client.editions(&release_group_id).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edition_catalog_uses_media_counts_and_keeps_region_and_version_labels() {
+        let response: OfficialReleaseResponse = serde_json::from_value(serde_json::json!({
+            "release-count": 501, "release-offset": 100, "releases": [
+                {"id":"11111111-1111-1111-1111-111111111111", "title":"Album", "date":"2001",
+                 "country":"US", "disambiguation":"deluxe remaster",
+                 "media":[{"format":"CD","track-count":10},{"format":"CD","track-count":5}]},
+                {"id":"22222222-2222-2222-2222-222222222222", "title":"Album", "date":"1990",
+                 "country":"GB", "media":[{"format":"CD","track-count":10}]}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(response.offset, 100);
+        assert_eq!(response.count, 501);
+        let catalog = prepare_editions(response.releases, true);
+        assert!(catalog.truncated);
+        assert_eq!(
+            catalog.default_release_id.as_deref(),
+            Some("22222222-2222-2222-2222-222222222222")
+        );
+        assert_eq!(catalog.releases[1].track_count, Some(15));
+        assert_eq!(catalog.releases[1].disambiguation, "deluxe remaster");
+        assert_eq!(
+            serde_json::to_value(&catalog).unwrap()["releases"][1]["trackCount"],
+            15
+        );
+    }
+
+    #[test]
+    fn selected_edition_must_be_official_and_belong_to_the_album() {
+        let mut response: OfficialTracklistResponse = serde_json::from_value(serde_json::json!({
+            "status":"Official", "release-group":{"id":"group"}, "media":[]
+        }))
+        .unwrap();
+        assert!(validate_edition(&response, "group").is_ok());
+        assert!(validate_edition(&response, "another").is_err());
+        response.status = Some("Bootleg".into());
+        assert!(validate_edition(&response, "group").is_err());
+    }
 
     #[test]
     fn parses_musicbrainz_release_groups() {
@@ -596,16 +724,19 @@ mod tests {
                 id: "release-one".to_owned(),
                 date: "1987-08-03".to_owned(),
                 track_count: Some(12),
+                ..Default::default()
             },
             OfficialRelease {
                 id: "release-two".to_owned(),
                 date: "1987-09-01".to_owned(),
                 track_count: Some(12),
+                ..Default::default()
             },
             OfficialRelease {
                 id: "release-three".to_owned(),
                 date: "2006-01-01".to_owned(),
                 track_count: Some(16),
+                ..Default::default()
             },
         ];
         assert_eq!(canonical_track_count(&releases), Some(12));

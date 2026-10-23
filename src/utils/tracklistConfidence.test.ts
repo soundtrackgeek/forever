@@ -19,5 +19,5 @@ it("keeps companion files out of inspected tracklists", async () => {
   ] } as FolderInspection;
   vi.mocked(invoke).mockResolvedValue({ state: "unavailable" });
   await tracklistConfidenceForInspection(inspection, [], "Artist");
-  expect(invoke).toHaveBeenLastCalledWith("tracklist_confidence", { sourceTitles: [{ id: "Album/Song.flac", name: "Song.flac" }], officialTracks: [], artist: "Artist" });
+  expect(invoke).toHaveBeenLastCalledWith("tracklist_confidence", { sourceTitles: [{ id: "Album/Song.flac", name: "Song.flac", durationSeconds: null }], officialTracks: [], artist: "Artist" });
 });
