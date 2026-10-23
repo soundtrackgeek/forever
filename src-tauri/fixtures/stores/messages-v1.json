@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "conversations": [
+    {
+      "username": "Friend",
+      "messages": [
+        {
+          "id": "message-1",
+          "username": "Friend",
+          "body": "Keep this message",
+          "direction": "incoming",
+          "sentAtMs": 5,
+          "unread": true
+        }
+      ],
+      "unreadCount": 1,
+      "updatedAtMs": 5
+    }
+  ]
+}

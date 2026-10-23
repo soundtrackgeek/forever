@@ -37,6 +37,9 @@ function previewBootstrap(): ConnectionBootstrap {
   const profile = showOnboarding ? null : MOCK_PROFILE;
 
   return {
+    storageNotices: new URLSearchParams(window.location.search).get("storageRecovery") === "1"
+      ? [{ store: "transfers.json", message: "Restored the previous saved copy. The most recent changes may be missing. Damaged data was preserved in transfers.json.corrupt-preview." }]
+      : [],
     profile,
     suggestedProfile: {
       ...MOCK_PROFILE,
@@ -421,6 +424,7 @@ export function useSoulseekConnection() {
       searchNetwork,
       diagnosticsPath: bootstrap?.diagnosticsPath ?? "",
       diagnostics: bootstrap?.diagnostics ?? [],
+      storageNotices: bootstrap?.storageNotices ?? [],
       error,
       saveProfile,
       connect,

@@ -1,9 +1,8 @@
 use super::protocol::SearchResponse;
+use super::store::{self, DecodeError, JsonFile};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    fs,
-    path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -11,7 +10,7 @@ use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
 pub const WANTED_EVENT: &str = "forever://wanted";
-const STORE_VERSION: u32 = 1;
+const STORE_VERSION: u32 = 2;
 const DEFAULT_INTERVAL_MINUTES: u32 = 30;
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
 const SEARCH_COOLDOWN: Duration = Duration::from_secs(5);
@@ -226,13 +225,13 @@ struct WantedRuntime {
 #[derive(Clone)]
 pub struct WantedHub {
     app: AppHandle,
-    path: PathBuf,
+    path: JsonFile,
     store: Arc<RwLock<WantedStore>>,
     runtime: Arc<Mutex<WantedRuntime>>,
 }
 
 impl WantedHub {
-    pub fn new(app: AppHandle, path: PathBuf) -> Result<Self, WantedError> {
+    pub fn new(app: AppHandle, path: JsonFile) -> Result<Self, WantedError> {
         Ok(Self {
             app,
             path: path.clone(),
@@ -835,14 +834,11 @@ impl WantedHub {
     }
 
     fn persist(&self) -> Result<(), WantedError> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let store = self
             .store
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        fs::write(&self.path, serde_json::to_vec_pretty(&*store)?)?;
+        self.path.save(&*store)?;
         Ok(())
     }
 
@@ -1262,15 +1258,20 @@ fn valid_text(value: &str, max: usize) -> Result<String, WantedError> {
     }
 }
 
-fn load_store(path: &Path) -> Result<WantedStore, WantedError> {
-    if !path.exists() {
-        return Ok(WantedStore::default());
-    }
-    let store: WantedStore = serde_json::from_slice(&fs::read(path)?)?;
-    if store.version != STORE_VERSION {
-        return Err(WantedError::UnsupportedStore);
-    }
+fn load_store(path: &JsonFile) -> Result<WantedStore, WantedError> {
+    Ok(path.load(WantedStore::default, decode_store))
+}
+
+fn decode_store(bytes: &[u8]) -> Result<WantedStore, DecodeError> {
+    let store: WantedStore = store::decode(bytes, STORE_VERSION, None, &[(1, migrate_v1_to_v2)])?;
     Ok(store)
+}
+
+// Materialize the defaults introduced during v1 so v2 has an explicit schema.
+fn migrate_v1_to_v2(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: WantedStore = serde_json::from_value(value)?;
+    store.version = 2;
+    Ok(serde_json::to_value(store)?)
 }
 
 fn timestamp_ms() -> u64 {
@@ -1306,8 +1307,6 @@ pub enum WantedError {
     TooManyAlbums,
     #[error("Choose between 1 and {MAX_BULK_WANTED_ALBUMS} missing albums at a time.")]
     InvalidBulkCount,
-    #[error("The Wanted data was created by an unsupported Forever version.")]
-    UnsupportedStore,
     #[error("Could not read or save Wanted data: {0}")]
     Io(#[from] std::io::Error),
     #[error("Could not read or save Wanted data: {0}")]
@@ -1317,7 +1316,59 @@ pub enum WantedError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_store_recovers_fixture_and_future_schema_is_write_protected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wanted.json");
+        let bytes = include_bytes!("../../fixtures/stores/wanted-v1.json");
+        std::fs::write(dir.path().join("wanted.json.bak"), bytes).unwrap();
+        std::fs::write(&path, b"{truncated").unwrap();
+        let file = JsonFile::new(path.clone());
+        let recovered = load_store(&file).unwrap();
+        assert_eq!(
+            serde_json::to_value(&recovered).unwrap(),
+            serde_json::to_value(decode_store(bytes).unwrap()).unwrap()
+        );
+        assert_eq!(file.notices().len(), 2);
+        let future = br#"{"version":99,"future":"keep"}"#;
+        std::fs::write(&path, future).unwrap();
+        let file = JsonFile::new(path.clone());
+        let fallback = load_store(&file).unwrap();
+        assert!(file.save(&fallback).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), future);
+    }
+
+    #[test]
+    fn migrates_legacy_fixture_and_keeps_original_backup() {
+        let bytes = include_bytes!("../../fixtures/stores/wanted-v1.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wanted.json");
+        std::fs::write(&path, bytes).unwrap();
+        let file = JsonFile::new(path.clone());
+        let store = load_store(&file).unwrap();
+        assert_eq!(store.version, STORE_VERSION);
+        assert_eq!(store.albums[0].album_id, "legacy-album");
+        assert_eq!(store.albums[0].preferences, WantedPreferences::default());
+        assert!(file.notices().is_empty());
+        assert_eq!(
+            std::fs::read(dir.path().join("wanted.json.bak")).unwrap(),
+            bytes
+        );
+        let migrated = std::fs::read(&path).unwrap();
+        let again = load_store(&JsonFile::new(path)).unwrap();
+        assert_eq!(
+            serde_json::to_value(&store).unwrap(),
+            serde_json::to_value(again).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&migrated).unwrap()["version"],
+            STORE_VERSION
+        );
+    }
+
     use crate::connection::protocol::SearchFile;
+    use std::fs;
 
     fn request(id: &str) -> WantedAlbumRequest {
         WantedAlbumRequest {
@@ -1430,7 +1481,7 @@ mod tests {
             source_fingerprints: vec!["listener\0Music/Artist/Album".to_string()],
         });
         fs::write(&path, serde_json::to_vec_pretty(&store).unwrap()).unwrap();
-        let restored = load_store(&path).unwrap();
+        let restored = load_store(&JsonFile::new(path.clone())).unwrap();
         assert_eq!(restored.albums.len(), 1);
         assert_eq!(
             restored.albums[0].source_fingerprints,
@@ -1469,7 +1520,8 @@ mod tests {
         });
         fs::write(&path, serde_json::to_vec_pretty(&legacy_store).unwrap()).unwrap();
 
-        let restored = load_store(&path).expect("load the 0.0.25 Wanted store");
+        let restored =
+            load_store(&JsonFile::new(path.clone())).expect("load the 0.0.25 Wanted store");
         let album = &restored.albums[0];
         assert_eq!(album.preferences, WantedPreferences::default());
         assert!(!album.fulfilled);

@@ -3,11 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.54` batches live download progress and
-> saves transfer state in the background, keeping progress updates independent
-> of completed-history size on the backend.
+> **Status:** pre-alpha. Version `0.0.55` adds crash-safe JSON stores,
+> automatic legacy migrations, and recovery notices for damaged saved data.
 
-If `0.0.16` is installed, download and run the latest `0.0.54` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.55` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -514,8 +513,38 @@ and progress checkpoints every five seconds when progress changes. Resume
 offsets still come from the actual `.part` file length. Closing Forever
 (including an idle queue) and Safe Passage updates wait for pending saves;
 save failures are shown and must be resolved before a safe exit can finish.
-The existing JSON format remains compatible. Crash-safe replacement and store
-recovery are separate work tracked in review item 2.
+All seven JSON stores (`transfers`, `wanted`, `people`, `messages`, `rooms`,
+`sharing`, and `connection`) now use a shared persistence layer. Saves write a
+unique `name.json.tmp-*` in the same directory, flush its contents, atomically
+replace the primary file, and retain the previous validated copy in
+`name.json.bak`. Backup replacement is also atomic and happens before primary
+replacement. Transfer saves retain the single background writer above.
+
+On invalid JSON or invalid stored settings, Forever preserves the damaged bytes
+in `name.json.corrupt-<timestamp>-<unique suffix>`, restores a valid backup when
+available, or starts that store with empty/default data. A dismissible **Some
+saved data needs attention** notice lists each affected store and preservation
+path; recovery never deletes downloads or touches Music Library or credentials.
+A restored backup may lack the most recent changes. Quarantine files are kept
+for manual recovery and are not automatically deleted. Incomplete `.tmp-*`
+files left by a killed process are ignored and can be removed while Forever is
+closed.
+
+Existing version-1 stores migrate to version 2, materializing legacy defaults;
+unversioned connection preferences migrate to a version-1 profile envelope.
+Migration validates the result and retains the original bytes as the backup.
+Unknown store versions are preserved in place and cannot be overwritten by this
+app version. Read/preservation/migration-write failures also keep the app open
+with a notice and prevent saves to the affected store for that session. Resolve
+the filesystem problem or use a compatible app version, then restart. Other
+stores remain usable. Forgetting connection settings removes both their primary
+file and backup, preventing a forgotten profile from returning on restart.
+
+This protects against interrupted writes; it is not a substitute for an external
+backup. Power-loss durability depends on the filesystem and device honoring
+flushes (Windows has no portable directory-fsync equivalent). WebView
+`localStorage` is outside this JSON-store migration, and moving persistence to
+SQLite remains future work.
 
 Forever writes non-secret account preferences to the Tauri application
 configuration directory and connection events to

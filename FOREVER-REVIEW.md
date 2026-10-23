@@ -109,7 +109,18 @@ async worker threads. The cost grows with history size.
 - Route writes through one coalescing writer task, or `spawn_blocking`, so disk
   I/O never blocks the tokio executor.
 
-### 2. Crash-safe stores and migrations
+### 2. Crash-safe stores and migrations - DONE
+
+**Implemented in 0.0.55 (2026-10-23):** all seven JSON stores share synced,
+atomic replacement with a rotating validated backup. Corrupt data is preserved
+in uniquely named quarantine files before backup/default recovery; startup
+notices explain the outcome. Explicit migrations cover legacy store versions
+and previously unversioned connection settings. Unsupported versions and I/O
+failures preserve files and block writes for the affected store. Tests cover
+migration fixtures, abrupt process exit at save boundaries, corruption,
+concurrency, failed writes, and notice interaction. Power-loss guarantees still
+depend on filesystem/device flush behavior. SQLite and WebView localStorage
+migration remain outside this item. The original findings follow for context.
 
 **Today:** Every store is overwritten in place with `fs::write`. This covers
 `transfers.json`, `wanted.json`, `people.json`, `messages.json`, `rooms.json`,

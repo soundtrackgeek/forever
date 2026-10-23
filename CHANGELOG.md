@@ -5,6 +5,33 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.55] - 2026-10-23
+
+### Added
+
+- Shared crash-safe persistence for all seven JSON stores: synced temporary
+  files, atomic primary and backup replacement, and serialized saves per store.
+- Explicit, fixture-tested migrations from legacy version-1 stores to version 2
+  and from unversioned connection settings to a version-1 profile envelope.
+- Non-blocking startup notices explain backup recovery, empty/default fallback,
+  quarantine paths, and stores protected from writes.
+
+### Fixed
+
+- Corrupt stores no longer prevent startup. Damaged bytes are preserved before
+  recovery, and invalid primaries never replace a valid backup.
+- Unsupported schemas and unreadable or unpreservable stores remain untouched
+  and reject writes for the session. Forgetting connection settings also removes
+  the backup so old preferences cannot be restored on restart.
+- Process-exit tests cover each atomic-save boundary; regression tests cover
+  seven-store migration and recovery, backup rotation, concurrent saves,
+  failures/retry, newer schemas, and notice dismissal with usable navigation.
+
+### Changed
+
+- Application, updater preview, package, Cargo, Tauri, Settings, and MusicBrainz
+  metadata now identify version `0.0.55`.
+
 ## [0.0.54] - 2026-10-23
 
 ### Changed

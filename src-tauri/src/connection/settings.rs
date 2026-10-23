@@ -1,5 +1,6 @@
+use super::store::{self, DecodeError, JsonFile};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use thiserror::Error;
 
 pub const DEFAULT_SERVER_HOST: &str = "server.slsknet.org";
@@ -82,51 +83,75 @@ impl ConnectionProfile {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct ConnectionStore {
+    version: u32,
+    #[serde(deserialize_with = "Option::deserialize")]
+    profile: Option<ConnectionProfile>,
+}
+
+impl Default for ConnectionStore {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            profile: None,
+        }
+    }
+}
+
+fn decode_store(bytes: &[u8]) -> Result<ConnectionStore, DecodeError> {
+    let store: ConnectionStore = store::decode(bytes, 1, Some(0), &[(0, migrate_v0_to_v1)])?;
+    if let Some(profile) = &store.profile {
+        profile
+            .validate()
+            .map_err(|error| DecodeError::Invalid(error.to_string()))?;
+    }
+    Ok(store)
+}
+
+fn migrate_v0_to_v1(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let profile: ConnectionProfile = serde_json::from_value(value)?;
+    Ok(serde_json::to_value(ConnectionStore {
+        version: 1,
+        profile: Some(profile),
+    })?)
+}
+
 #[derive(Clone)]
 pub struct SettingsStore {
-    path: PathBuf,
+    path: JsonFile,
 }
 
 impl SettingsStore {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: JsonFile) -> Self {
         Self { path }
     }
 
     #[cfg(test)]
     pub fn path(&self) -> &Path {
-        &self.path
+        self.path.path()
     }
 
     pub fn load(&self) -> Result<Option<ConnectionProfile>, SettingsError> {
-        if !self.path.exists() {
-            return Ok(None);
-        }
-
-        let contents = std::fs::read_to_string(&self.path)?;
-        let profile = serde_json::from_str::<ConnectionProfile>(&contents)?;
-        profile.validate()?;
-        Ok(Some(profile))
+        Ok(self
+            .path
+            .load(ConnectionStore::default, decode_store)
+            .profile)
     }
 
     pub fn save(&self, profile: &ConnectionProfile) -> Result<(), SettingsError> {
         profile.validate()?;
-
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
         std::fs::create_dir_all(&profile.download_directory)?;
-        let contents = serde_json::to_string_pretty(profile)?;
-        std::fs::write(&self.path, contents)?;
+        self.path.save(&ConnectionStore {
+            version: 1,
+            profile: Some(profile.clone()),
+        })?;
         Ok(())
     }
 
     pub fn delete(&self) -> Result<(), SettingsError> {
-        match std::fs::remove_file(&self.path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.into()),
-        }
+        self.path.delete()?;
+        Ok(())
     }
 }
 
@@ -143,6 +168,56 @@ pub enum SettingsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migrates_unversioned_profile_and_reset_removes_the_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connection.json");
+        let bytes = include_bytes!("../../fixtures/stores/connection-v0.json");
+        std::fs::write(&path, bytes).unwrap();
+        let file = JsonFile::new(path.clone());
+        let settings = SettingsStore::new(file.clone());
+        let profile = settings.load().unwrap().unwrap();
+        assert_eq!(profile.username, "SignalLevel");
+        assert!(!profile.auto_connect);
+        assert!(file.notices().is_empty());
+        assert_eq!(
+            std::fs::read(dir.path().join("connection.json.bak")).unwrap(),
+            bytes
+        );
+        assert_eq!(settings.load().unwrap(), Some(profile));
+        settings.delete().unwrap();
+        assert!(!path.exists());
+        assert!(!dir.path().join("connection.json.bak").exists());
+        assert_eq!(settings.load().unwrap(), None);
+    }
+
+    #[test]
+    fn invalid_profile_recovers_valid_legacy_backup_without_touching_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connection.json");
+        let bytes = include_bytes!("../../fixtures/stores/connection-v0.json");
+        std::fs::write(dir.path().join("connection.json.bak"), bytes).unwrap();
+        let mut invalid: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        invalid["serverPort"] = 0.into();
+        std::fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        let file = JsonFile::new(path);
+        let settings = SettingsStore::new(file.clone());
+        assert_eq!(settings.load().unwrap().unwrap().server_port, 2242);
+        assert_eq!(file.notices().len(), 2);
+    }
+
+    #[test]
+    fn future_connection_schema_cannot_be_overwritten_or_forgotten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connection.json");
+        let bytes = br#"{"version":99,"profile":{"future":"data"}}"#;
+        std::fs::write(&path, bytes).unwrap();
+        let settings = SettingsStore::new(JsonFile::new(path.clone()));
+        assert_eq!(settings.load().unwrap(), None);
+        assert!(settings.delete().is_err());
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
 
     #[test]
     fn rejects_invalid_usernames() {
@@ -164,7 +239,7 @@ mod tests {
     #[test]
     fn round_trips_profile_without_a_password() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        let store = SettingsStore::new(directory.path().join("connection.json"));
+        let store = SettingsStore::new(JsonFile::new(directory.path().join("connection.json")));
         let mut profile = ConnectionProfile::suggested(&directory.path().join("downloads"));
         profile.username = "SignalLevel".to_owned();
 

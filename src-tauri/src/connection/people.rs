@@ -1,10 +1,9 @@
 use super::protocol::{UserInfoResponse, UserInterests, UserStats, WatchedUser};
+use super::store::{self, DecodeError, JsonFile};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    fs,
-    path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -13,7 +12,7 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 
 pub const PEOPLE_EVENT: &str = "forever://people";
-const STORE_VERSION: u32 = 1;
+const STORE_VERSION: u32 = 2;
 const MAX_FAVORITES: usize = 200;
 const MAX_BLOCKED: usize = 500;
 const MAX_IGNORED: usize = 500;
@@ -178,13 +177,13 @@ struct PeopleRuntime {
 #[derive(Clone)]
 pub struct PeopleHub {
     app: AppHandle,
-    path: PathBuf,
+    path: JsonFile,
     store: Arc<RwLock<PeopleStore>>,
     runtime: Arc<Mutex<PeopleRuntime>>,
 }
 
 impl PeopleHub {
-    pub fn new(app: AppHandle, path: PathBuf) -> Result<Self, PeopleError> {
+    pub fn new(app: AppHandle, path: JsonFile) -> Result<Self, PeopleError> {
         let store = load_store(&path)?;
         let hub = Self {
             app,
@@ -725,14 +724,11 @@ impl PeopleHub {
     }
 
     fn persist(&self) -> Result<(), PeopleError> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let store = self
             .store
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        fs::write(&self.path, serde_json::to_vec_pretty(&*store)?)?;
+        self.path.save(&*store)?;
         Ok(())
     }
 
@@ -775,15 +771,20 @@ fn ensure_saved_profiles(store: &PeopleStore, runtime: &mut PeopleRuntime) {
     }
 }
 
-fn load_store(path: &Path) -> Result<PeopleStore, PeopleError> {
-    if !path.exists() {
-        return Ok(PeopleStore::default());
-    }
-    let store: PeopleStore = serde_json::from_slice(&fs::read(path)?)?;
-    if store.version != STORE_VERSION {
-        return Err(PeopleError::UnsupportedStore);
-    }
+fn load_store(path: &JsonFile) -> Result<PeopleStore, PeopleError> {
+    Ok(path.load(PeopleStore::default, decode_store))
+}
+
+fn decode_store(bytes: &[u8]) -> Result<PeopleStore, DecodeError> {
+    let store: PeopleStore = store::decode(bytes, STORE_VERSION, None, &[(1, migrate_v1_to_v2)])?;
     Ok(store)
+}
+
+// Materialize the defaults introduced during v1 so v2 has an explicit schema.
+fn migrate_v1_to_v2(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: PeopleStore = serde_json::from_value(value)?;
+    store.version = 2;
+    Ok(serde_json::to_value(store)?)
 }
 
 fn valid_username(value: &str) -> Option<String> {
@@ -858,8 +859,6 @@ pub enum PeopleError {
     Unavailable,
     #[error("{0}")]
     Request(String),
-    #[error("The people configuration was created by an unsupported Forever version.")]
-    UnsupportedStore,
     #[error("Could not read or save people data: {0}")]
     Io(#[from] std::io::Error),
     #[error("Could not read or save people data: {0}")]
@@ -869,6 +868,57 @@ pub enum PeopleError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_store_recovers_fixture_and_future_schema_is_write_protected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("people.json");
+        let bytes = include_bytes!("../../fixtures/stores/people-v1.json");
+        std::fs::write(dir.path().join("people.json.bak"), bytes).unwrap();
+        std::fs::write(&path, b"{truncated").unwrap();
+        let file = JsonFile::new(path.clone());
+        let recovered = load_store(&file).unwrap();
+        assert_eq!(
+            serde_json::to_value(&recovered).unwrap(),
+            serde_json::to_value(decode_store(bytes).unwrap()).unwrap()
+        );
+        assert_eq!(file.notices().len(), 2);
+        let future = br#"{"version":99,"future":"keep"}"#;
+        std::fs::write(&path, future).unwrap();
+        let file = JsonFile::new(path.clone());
+        let fallback = load_store(&file).unwrap();
+        assert!(file.save(&fallback).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), future);
+    }
+
+    #[test]
+    fn migrates_legacy_fixture_and_keeps_original_backup() {
+        let bytes = include_bytes!("../../fixtures/stores/people-v1.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("people.json");
+        std::fs::write(&path, bytes).unwrap();
+        let file = JsonFile::new(path.clone());
+        let store = load_store(&file).unwrap();
+        assert_eq!(store.version, STORE_VERSION);
+        assert_eq!(store.favorites, vec!["Friend"]);
+        assert_eq!(store.blocked, vec!["Blocked"]);
+        assert!(store.ignored.is_empty());
+        assert!(file.notices().is_empty());
+        assert_eq!(
+            std::fs::read(dir.path().join("people.json.bak")).unwrap(),
+            bytes
+        );
+        let migrated = std::fs::read(&path).unwrap();
+        let again = load_store(&JsonFile::new(path)).unwrap();
+        assert_eq!(
+            serde_json::to_value(&store).unwrap(),
+            serde_json::to_value(again).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&migrated).unwrap()["version"],
+            STORE_VERSION
+        );
+    }
 
     #[test]
     fn country_profile_picture_accepts_only_safe_raster_formats() {

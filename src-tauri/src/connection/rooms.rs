@@ -1,9 +1,8 @@
 use super::protocol::{RoomJoin, RoomListing, RoomMemberData, UserStats};
+use super::store::{self, DecodeError, JsonFile};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    fs,
-    path::{Path, PathBuf},
     sync::{Arc, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -12,7 +11,7 @@ use thiserror::Error;
 
 pub const ROOMS_EVENT: &str = "forever://rooms";
 pub const MAX_ROOM_MESSAGE_BYTES: usize = 4 * 1024;
-const STORE_VERSION: u32 = 1;
+const STORE_VERSION: u32 = 2;
 const MAX_STORED_ROOMS: usize = 64;
 const MAX_MESSAGES_PER_ROOM: usize = 250;
 
@@ -125,12 +124,12 @@ struct RoomsState {
 #[derive(Clone)]
 pub struct RoomsHub {
     app: AppHandle,
-    path: PathBuf,
+    path: JsonFile,
     state: Arc<RwLock<RoomsState>>,
 }
 
 impl RoomsHub {
-    pub fn new(app: AppHandle, path: PathBuf) -> Result<Self, RoomsError> {
+    pub fn new(app: AppHandle, path: JsonFile) -> Result<Self, RoomsError> {
         Ok(Self {
             app,
             path: path.clone(),
@@ -548,23 +547,26 @@ fn room_key(value: &str) -> String {
     value.to_ascii_lowercase()
 }
 
-fn load_store(path: &Path) -> Result<RoomsStore, RoomsError> {
-    if !path.exists() {
-        return Ok(RoomsStore::default());
-    }
-    let mut store: RoomsStore = serde_json::from_slice(&fs::read(path)?)?;
-    if store.version != STORE_VERSION {
-        return Err(RoomsError::UnsupportedStore);
-    }
+fn load_store(path: &JsonFile) -> Result<RoomsStore, RoomsError> {
+    Ok(path.load(RoomsStore::default, decode_store))
+}
+
+fn decode_store(bytes: &[u8]) -> Result<RoomsStore, DecodeError> {
+    let mut store: RoomsStore =
+        store::decode(bytes, STORE_VERSION, None, &[(1, migrate_v1_to_v2)])?;
     trim_store(&mut store);
     Ok(store)
 }
 
-fn persist(path: &Path, store: &RoomsStore) -> Result<(), RoomsError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, serde_json::to_vec_pretty(store)?)?;
+// Materialize the defaults introduced during v1 so v2 has an explicit schema.
+fn migrate_v1_to_v2(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: RoomsStore = serde_json::from_value(value)?;
+    store.version = 2;
+    Ok(serde_json::to_value(store)?)
+}
+
+fn persist(path: &JsonFile, store: &RoomsStore) -> Result<(), RoomsError> {
+    path.save(store)?;
     Ok(())
 }
 
@@ -585,8 +587,6 @@ pub enum RoomsError {
     InvalidMessage,
     #[error("The room message contained an invalid username.")]
     InvalidUsername,
-    #[error("The room history was created by an unsupported Forever version.")]
-    UnsupportedStore,
     #[error("Could not read or save room state: {0}")]
     Io(#[from] std::io::Error),
     #[error("Could not read or save room state: {0}")]
@@ -596,6 +596,56 @@ pub enum RoomsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_store_recovers_fixture_and_future_schema_is_write_protected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rooms.json");
+        let bytes = include_bytes!("../../fixtures/stores/rooms-v1.json");
+        std::fs::write(dir.path().join("rooms.json.bak"), bytes).unwrap();
+        std::fs::write(&path, b"{truncated").unwrap();
+        let file = JsonFile::new(path.clone());
+        let recovered = load_store(&file).unwrap();
+        assert_eq!(
+            serde_json::to_value(&recovered).unwrap(),
+            serde_json::to_value(decode_store(bytes).unwrap()).unwrap()
+        );
+        assert_eq!(file.notices().len(), 2);
+        let future = br#"{"version":99,"future":"keep"}"#;
+        std::fs::write(&path, future).unwrap();
+        let file = JsonFile::new(path.clone());
+        let fallback = load_store(&file).unwrap();
+        assert!(file.save(&fallback).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), future);
+    }
+
+    #[test]
+    fn migrates_legacy_fixture_and_keeps_original_backup() {
+        let bytes = include_bytes!("../../fixtures/stores/rooms-v1.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rooms.json");
+        std::fs::write(&path, bytes).unwrap();
+        let file = JsonFile::new(path.clone());
+        let store = load_store(&file).unwrap();
+        assert_eq!(store.version, STORE_VERSION);
+        assert_eq!(store.rooms[0].messages[0].body, "Keep room history");
+        assert!(store.rooms[0].auto_join);
+        assert!(file.notices().is_empty());
+        assert_eq!(
+            std::fs::read(dir.path().join("rooms.json.bak")).unwrap(),
+            bytes
+        );
+        let migrated = std::fs::read(&path).unwrap();
+        let again = load_store(&JsonFile::new(path)).unwrap();
+        assert_eq!(
+            serde_json::to_value(&store).unwrap(),
+            serde_json::to_value(again).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&migrated).unwrap()["version"],
+            STORE_VERSION
+        );
+    }
 
     #[test]
     fn room_names_and_messages_are_bounded() {

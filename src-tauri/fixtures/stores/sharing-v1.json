@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "uploadSlots": 2,
+  "roots": [
+    {
+      "id": "root-1",
+      "path": "C:\\Music",
+      "alias": "My Music",
+      "enabled": false,
+      "addedAtMs": 3
+    }
+  ]
+}

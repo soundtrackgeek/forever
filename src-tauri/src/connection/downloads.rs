@@ -1,4 +1,5 @@
 use super::soundcheck::{inspect_file, SoundcheckResult, SoundcheckStatus};
+use super::store::{self, DecodeError, JsonFile};
 use super::transfer_writer::TransferWriter;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -19,7 +20,7 @@ const PROGRESS_EVENT: &str = "forever://transfer-progress";
 const STORE_ERROR_EVENT: &str = "forever://transfer-store-error";
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
-const STORE_VERSION: u32 = 1;
+const STORE_VERSION: u32 = 2;
 const MAX_AUTOMATIC_RETRIES: u32 = 3;
 const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u8 = 3;
 const MAX_CONCURRENT_DOWNLOADS: u8 = 6;
@@ -423,7 +424,7 @@ pub struct TransferHub {
 }
 
 impl TransferHub {
-    pub fn new(app: AppHandle, path: PathBuf) -> Result<Self, TransferError> {
+    pub fn new(app: AppHandle, path: JsonFile) -> Result<Self, TransferError> {
         let store = load_store(&path)?;
         let mut transfers = store.transfers;
         for transfer in &mut transfers {
@@ -441,10 +442,7 @@ impl TransferHub {
         let writer = TransferWriter::new(
             move |store: TransferStore| {
                 (|| -> Result<(), TransferError> {
-                    if let Some(parent) = path.parent() {
-                        fs::create_dir_all(parent)?;
-                    }
-                    fs::write(&path, serde_json::to_vec_pretty(&store)?)?;
+                    path.save(&store)?;
                     Ok(())
                 })()
                 .map_err(|error| error.to_string())
@@ -2370,27 +2368,39 @@ fn next_download_index(
     })
 }
 
-fn load_store(path: &Path) -> Result<TransferStore, TransferError> {
-    if !path.exists() {
-        return Ok(TransferStore {
+fn load_store(path: &JsonFile) -> Result<TransferStore, TransferError> {
+    Ok(path.load(
+        || TransferStore {
             version: STORE_VERSION,
             max_concurrent_downloads: DEFAULT_MAX_CONCURRENT_DOWNLOADS,
             relay_suggestion_minutes: DEFAULT_RELAY_SUGGESTION_MINUTES,
             soundcheck_enabled: true,
             transfers: Vec::new(),
-        });
-    }
-    let store = serde_json::from_slice::<TransferStore>(&fs::read(path)?)?;
-    if store.version != STORE_VERSION {
-        return Err(TransferError::UnsupportedStoreVersion(store.version));
-    }
+        },
+        decode_store,
+    ))
+}
+
+fn decode_store(bytes: &[u8]) -> Result<TransferStore, DecodeError> {
+    let store: TransferStore = store::decode(bytes, STORE_VERSION, None, &[(1, migrate_v1_to_v2)])?;
     if !(1..=MAX_CONCURRENT_DOWNLOADS).contains(&store.max_concurrent_downloads) {
-        return Err(TransferError::InvalidConcurrentDownloads);
+        return Err(DecodeError::Invalid(
+            TransferError::InvalidConcurrentDownloads.to_string(),
+        ));
     }
     if !RELAY_SUGGESTION_MINUTES.contains(&store.relay_suggestion_minutes) {
-        return Err(TransferError::InvalidRelaySuggestionMinutes);
+        return Err(DecodeError::Invalid(
+            TransferError::InvalidRelaySuggestionMinutes.to_string(),
+        ));
     }
     Ok(store)
+}
+
+// Materialize the defaults introduced during v1 so v2 has an explicit schema.
+fn migrate_v1_to_v2(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: TransferStore = serde_json::from_value(value)?;
+    store.version = 2;
+    Ok(serde_json::to_value(store)?)
 }
 
 fn refresh_partial_size(transfer: &mut TransferSnapshot) {
@@ -2830,8 +2840,6 @@ pub enum TransferError {
         "The partial file is larger than the expected Soulseek file. Remove it before retrying."
     )]
     PartialTooLarge,
-    #[error("Transfer data uses an unsupported format version ({0}).")]
-    UnsupportedStoreVersion(u32),
     #[error("Could not read or save transfer data: {0}")]
     Io(#[from] std::io::Error),
     #[error("Transfer data is not valid JSON: {0}")]
@@ -2843,6 +2851,57 @@ pub enum TransferError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_store_recovers_fixture_and_future_schema_is_write_protected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transfers.json");
+        let bytes = include_bytes!("../../fixtures/stores/transfers-v1.json");
+        std::fs::write(dir.path().join("transfers.json.bak"), bytes).unwrap();
+        std::fs::write(&path, b"{truncated").unwrap();
+        let file = JsonFile::new(path.clone());
+        let recovered = load_store(&file).unwrap();
+        assert_eq!(
+            serde_json::to_value(&recovered).unwrap(),
+            serde_json::to_value(decode_store(bytes).unwrap()).unwrap()
+        );
+        assert_eq!(file.notices().len(), 2);
+        let future = br#"{"version":99,"future":"keep"}"#;
+        std::fs::write(&path, future).unwrap();
+        let file = JsonFile::new(path.clone());
+        let fallback = load_store(&file).unwrap();
+        assert!(file.save(&fallback).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), future);
+    }
+
+    #[test]
+    fn migrates_legacy_fixture_and_keeps_original_backup() {
+        let bytes = include_bytes!("../../fixtures/stores/transfers-v1.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transfers.json");
+        std::fs::write(&path, bytes).unwrap();
+        let file = JsonFile::new(path.clone());
+        let store = load_store(&file).unwrap();
+        assert_eq!(store.version, STORE_VERSION);
+        assert_eq!(store.transfers[0].id, "resume-1");
+        assert_eq!(store.transfers[0].transferred_bytes, 37);
+        assert!(store.soundcheck_enabled);
+        assert!(file.notices().is_empty());
+        assert_eq!(
+            std::fs::read(dir.path().join("transfers.json.bak")).unwrap(),
+            bytes
+        );
+        let migrated = std::fs::read(&path).unwrap();
+        let again = load_store(&JsonFile::new(path)).unwrap();
+        assert_eq!(
+            serde_json::to_value(&store).unwrap(),
+            serde_json::to_value(again).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&migrated).unwrap()["version"],
+            STORE_VERSION
+        );
+    }
 
     fn release_transfer(
         id: &str,
@@ -3217,7 +3276,10 @@ mod tests {
         assert!(!raw.contains("connectionToken"));
         assert!(!raw.contains("transferToken"));
         assert_eq!(
-            load_store(&store_path).unwrap().transfers[0].transferred_bytes,
+            load_store(&JsonFile::new(store_path.clone()))
+                .unwrap()
+                .transfers[0]
+                .transferred_bytes,
             37
         );
     }

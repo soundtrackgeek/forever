@@ -8,6 +8,16 @@ import { MESSAGE_DRAFTS_STORAGE_KEY } from "./components/MessagesWorkspace";
 import { MUSICBRAINZ_FALLBACK_TRACK_COUNT_STORAGE_KEY } from "./utils/musicbrainzFallback";
 
 describe("Forever shell", () => {
+  it("keeps navigation usable after storage recovery and lets the notice be dismissed", () => {
+    window.history.replaceState({}, "", "/?storageRecovery=1");
+    render(<App />);
+    expect(screen.getByRole("status", { name: "Saved data notice" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(screen.getByRole("heading", { name: "Across the network" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("status", { name: "Saved data notice" })).not.toBeInTheDocument();
+  });
+
   it("opens The Listening Post first and routes every live signal to its exact workspace", () => {
     render(<App />);
 
@@ -952,17 +962,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.54 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.55 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Live download progress arrives in small batches four times per second.",
+        "All seven JSON stores use atomic saves with a previous-copy backup.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "A coalescing background writer saves queue changes and five-second progress checkpoints.",
+        "Damaged saved data recovers from backup or defaults with a non-blocking notice.",
       ),
     ).toBeInTheDocument();
     expect(

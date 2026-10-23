@@ -2623,6 +2623,31 @@ button:disabled {
   background-clip: content-box;
 }
 
+.storage-notices {
+  position: fixed;
+  z-index: 220;
+  top: 44px;
+  right: 18px;
+  width: min(520px, calc(100vw - 36px));
+  max-height: 45vh;
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid #806432;
+  border-radius: 10px;
+  background: #211c18;
+  box-shadow: 0 8px 32px #0008;
+  color: #efdfc3;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.storage-notices-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.storage-notices button { color: inherit; padding: 4px 8px; border: 1px solid #806432; border-radius: 5px; background: transparent; cursor: pointer; }
+.storage-notices summary { margin-top: 6px; cursor: pointer; }
+.storage-notices ul { padding-left: 18px; margin: 10px 0 0; }
+.storage-notices li + li { margin-top: 8px; }
+
 .app-frame {
   position: relative;
   display: grid;

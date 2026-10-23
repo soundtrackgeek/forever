@@ -1,0 +1,8 @@
+{
+  "username": "SignalLevel",
+  "serverHost": "server.slsknet.org",
+  "serverPort": 2242,
+  "downloadDirectory": "C:\\Downloads\\Forever",
+  "rememberPassword": true,
+  "autoConnect": false
+}

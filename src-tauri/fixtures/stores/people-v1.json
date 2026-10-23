@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "favorites": [
+    "Friend"
+  ],
+  "blocked": [
+    "Blocked"
+  ],
+  "recent": [
+    {
+      "username": "Recent",
+      "interactedAtMs": 12
+    }
+  ]
+}

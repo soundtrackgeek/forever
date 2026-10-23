@@ -1,4 +1,5 @@
 use super::protocol::{FolderFile, FolderListing, SearchFile, ShareListing};
+use super::store::{self, DecodeError, JsonFile};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -14,7 +15,7 @@ use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
 const SHARES_EVENT: &str = "forever://local-shares";
-const STORE_VERSION: u32 = 1;
+const STORE_VERSION: u32 = 2;
 const MAX_SHARED_ROOTS: usize = 16;
 const MAX_SHARED_FILES: usize = 250_000;
 const MAX_SHARED_DIRECTORIES: usize = 50_000;
@@ -129,7 +130,7 @@ struct ShareIndex {
 #[derive(Clone)]
 pub struct LocalSharesHub {
     app: AppHandle,
-    path: PathBuf,
+    path: JsonFile,
     store: Arc<RwLock<SharingStore>>,
     index: Arc<RwLock<ShareIndex>>,
     next_id: Arc<AtomicU64>,
@@ -153,7 +154,7 @@ pub enum SearchResponseOrigin {
 }
 
 impl LocalSharesHub {
-    pub fn new(app: AppHandle, path: PathBuf) -> Result<Self, LocalSharesError> {
+    pub fn new(app: AppHandle, path: JsonFile) -> Result<Self, LocalSharesError> {
         let store = load_store(&path)?;
         let root_snapshots = store
             .roots
@@ -522,14 +523,11 @@ impl LocalSharesHub {
     }
 
     fn persist(&self) -> Result<(), LocalSharesError> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let store = self
             .store
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        fs::write(&self.path, serde_json::to_vec_pretty(&*store)?)?;
+        self.path.save(&*store)?;
         Ok(())
     }
 
@@ -667,17 +665,22 @@ fn scan_root(
     Ok(())
 }
 
-fn load_store(path: &Path) -> Result<SharingStore, LocalSharesError> {
-    if !path.exists() {
-        return Ok(SharingStore::default());
-    }
-    let bytes = fs::read(path)?;
-    let mut store: SharingStore = serde_json::from_slice(&bytes)?;
-    if store.version != STORE_VERSION {
-        return Err(LocalSharesError::UnsupportedStore);
-    }
+fn load_store(path: &JsonFile) -> Result<SharingStore, LocalSharesError> {
+    Ok(path.load(SharingStore::default, decode_store))
+}
+
+fn decode_store(bytes: &[u8]) -> Result<SharingStore, DecodeError> {
+    let mut store: SharingStore =
+        store::decode(bytes, STORE_VERSION, None, &[(1, migrate_v1_to_v2)])?;
     store.upload_slots = store.upload_slots.clamp(1, 3);
     Ok(store)
+}
+
+// Materialize the defaults introduced during v1 so v2 has an explicit schema.
+fn migrate_v1_to_v2(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: SharingStore = serde_json::from_value(value)?;
+    store.version = 2;
+    Ok(serde_json::to_value(store)?)
 }
 
 fn canonical_directory(path: &str) -> Result<PathBuf, LocalSharesError> {
@@ -871,8 +874,6 @@ pub enum LocalSharesError {
     IndexLimit,
     #[error("The shared folder is unavailable: {0}")]
     UnavailableRoot(String),
-    #[error("The sharing configuration was created by an unsupported Forever version.")]
-    UnsupportedStore,
     #[error("Could not read or save sharing configuration: {0}")]
     Io(#[from] std::io::Error),
     #[error("Sharing configuration is not valid JSON: {0}")]
@@ -882,6 +883,57 @@ pub enum LocalSharesError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_store_recovers_fixture_and_future_schema_is_write_protected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sharing.json");
+        let bytes = include_bytes!("../../fixtures/stores/sharing-v1.json");
+        std::fs::write(dir.path().join("sharing.json.bak"), bytes).unwrap();
+        std::fs::write(&path, b"{truncated").unwrap();
+        let file = JsonFile::new(path.clone());
+        let recovered = load_store(&file).unwrap();
+        assert_eq!(
+            serde_json::to_value(&recovered).unwrap(),
+            serde_json::to_value(decode_store(bytes).unwrap()).unwrap()
+        );
+        assert_eq!(file.notices().len(), 2);
+        let future = br#"{"version":99,"future":"keep"}"#;
+        std::fs::write(&path, future).unwrap();
+        let file = JsonFile::new(path.clone());
+        let fallback = load_store(&file).unwrap();
+        assert!(file.save(&fallback).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), future);
+    }
+
+    #[test]
+    fn migrates_legacy_fixture_and_keeps_original_backup() {
+        let bytes = include_bytes!("../../fixtures/stores/sharing-v1.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sharing.json");
+        std::fs::write(&path, bytes).unwrap();
+        let file = JsonFile::new(path.clone());
+        let store = load_store(&file).unwrap();
+        assert_eq!(store.version, STORE_VERSION);
+        assert_eq!(store.roots[0].alias, "My Music");
+        assert!(!store.roots[0].enabled);
+        assert_eq!(store.upload_slots, 2);
+        assert!(file.notices().is_empty());
+        assert_eq!(
+            std::fs::read(dir.path().join("sharing.json.bak")).unwrap(),
+            bytes
+        );
+        let migrated = std::fs::read(&path).unwrap();
+        let again = load_store(&JsonFile::new(path)).unwrap();
+        assert_eq!(
+            serde_json::to_value(&store).unwrap(),
+            serde_json::to_value(again).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&migrated).unwrap()["version"],
+            STORE_VERSION
+        );
+    }
 
     #[test]
     fn aliases_are_safe_and_unique() {

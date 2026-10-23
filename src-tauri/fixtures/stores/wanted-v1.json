@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "interval_minutes": 30,
+  "albums": [
+    {
+      "albumId": "legacy-album",
+      "artist": "Def Leppard",
+      "title": "High 'n' Dry",
+      "firstReleaseDate": "1981",
+      "coverArtUrl": null,
+      "paused": false,
+      "addedAtMs": 1,
+      "lastCheckedAtMs": null,
+      "sourceCount": 2,
+      "readySourceCount": 1,
+      "completeSourceCount": 1,
+      "newSourceCount": 0,
+      "bestFormat": "FLAC",
+      "bestTrackCount": 10,
+      "bestSizeBytes": 500000000,
+      "bestSpeedBytesPerSecond": 5000000,
+      "error": null,
+      "sourceFingerprints": []
+    }
+  ]
+}

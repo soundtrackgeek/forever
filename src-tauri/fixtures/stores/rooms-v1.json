@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "rooms": [
+    {
+      "name": "Music",
+      "autoJoin": true,
+      "favorite": true,
+      "messages": [
+        {
+          "id": "room-1",
+          "room": "Music",
+          "username": "Friend",
+          "body": "Keep room history",
+          "sentAtMs": 6,
+          "own": false,
+          "unread": true,
+          "mention": false
+        }
+      ]
+    }
+  ]
+}

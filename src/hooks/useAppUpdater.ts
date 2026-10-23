@@ -35,19 +35,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.53",
-  version: "0.0.54",
-  body: `## What’s new in Forever 0.0.54
-
-### Changed
-
-- Live download progress arrives in small batches four times per second.
-- A coalescing background writer saves queue changes and five-second progress checkpoints.
+  currentVersion: "0.0.54",
+  version: "0.0.55",
+  body: `## What's new in Forever 0.0.55
 
 ### Fixed
 
-- Delayed progress cannot overwrite newer transfer states.
-- Closing and updating wait for pending transfer saves and report save failures.`,
+- All seven JSON stores use atomic saves with a previous-copy backup.
+- Damaged saved data recovers from backup or defaults with a non-blocking notice.
+- Older stores migrate automatically; unsupported schemas stay protected from writes.`,
   date: "2026-10-23",
 };
 

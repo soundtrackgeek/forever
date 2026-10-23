@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "transfers": [
+    {
+      "id": "resume-1",
+      "title": "Track.flac",
+      "username": "peer",
+      "remoteFilename": "Music\\Track.flac",
+      "sizeBytes": 100,
+      "transferredBytes": 37,
+      "speedBytesPerSecond": 0,
+      "status": "paused",
+      "localPath": "C:\\Downloads\\Forever\\Track.flac",
+      "createdAtMs": 1,
+      "updatedAtMs": 2
+    }
+  ]
+}

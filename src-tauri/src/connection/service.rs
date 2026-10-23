@@ -57,6 +57,7 @@ use super::{
         ShareFolderSnapshot, ShareSearchSnapshot, SharesError, SharesHub, SharesTicket,
         UserSharesOverview,
     },
+    store::{JsonFile, StoreNotice},
     uploads::{UploadError, UploadHub, UploadQueueSnapshot, UploadTicket},
     wanted::{
         WantedAlbumRequest, WantedDownloadFulfillmentRequest, WantedError,
@@ -167,6 +168,7 @@ pub struct ConnectionBootstrap {
     pub diagnostics_path: String,
     pub diagnostics: Vec<DiagnosticEntry>,
     pub search_network: DistributedSnapshot,
+    pub storage_notices: Vec<StoreNotice>,
 }
 
 #[derive(Deserialize)]
@@ -384,6 +386,7 @@ enum PeerMessagePurpose {
 pub struct ConnectionManager {
     app: AppHandle,
     settings: SettingsStore,
+    store_files: Vec<JsonFile>,
     vault: CredentialVault,
     diagnostics: Diagnostics,
     suggested_profile: ConnectionProfile,
@@ -425,7 +428,19 @@ impl ConnectionManager {
         paths: ConnectionPaths,
         download_directory: PathBuf,
     ) -> Result<Self, ConnectionServiceError> {
-        let settings = SettingsStore::new(paths.settings);
+        let store_files: Vec<_> = [
+            paths.settings,
+            paths.transfers,
+            paths.sharing,
+            paths.people,
+            paths.messages,
+            paths.rooms,
+            paths.wanted,
+        ]
+        .into_iter()
+        .map(JsonFile::new)
+        .collect();
+        let settings = SettingsStore::new(store_files[0].clone());
         let diagnostics = Diagnostics::new(paths.diagnostics)?;
         let profile = settings.load()?;
         let snapshot = profile
@@ -433,19 +448,20 @@ impl ConnectionManager {
             .map(ConnectionSnapshot::offline)
             .unwrap_or_else(ConnectionSnapshot::unconfigured);
         let search = SearchHub::new(app.clone());
-        let transfers = TransferHub::new(app.clone(), paths.transfers)?;
-        let local_shares = LocalSharesHub::new(app.clone(), paths.sharing)?;
+        let transfers = TransferHub::new(app.clone(), store_files[1].clone())?;
+        let local_shares = LocalSharesHub::new(app.clone(), store_files[2].clone())?;
         let uploads = UploadHub::new(app.clone());
         let distributed = DistributedHub::new(app.clone());
-        let people = PeopleHub::new(app.clone(), paths.people)?;
-        let messages = MessagesHub::new(app.clone(), paths.messages)?;
-        let rooms = RoomsHub::new(app.clone(), paths.rooms)?;
-        let wanted = WantedHub::new(app.clone(), paths.wanted)?;
+        let people = PeopleHub::new(app.clone(), store_files[3].clone())?;
+        let messages = MessagesHub::new(app.clone(), store_files[4].clone())?;
+        let rooms = RoomsHub::new(app.clone(), store_files[5].clone())?;
+        let wanted = WantedHub::new(app.clone(), store_files[6].clone())?;
         let radar = RadarHub::new(app.clone());
 
         Ok(Self {
             app,
             settings,
+            store_files,
             vault: CredentialVault::default(),
             diagnostics,
             suggested_profile: ConnectionProfile::suggested(&download_directory),
@@ -490,6 +506,11 @@ impl ConnectionManager {
             diagnostics_path: self.diagnostics.path().to_string_lossy().into_owned(),
             diagnostics: self.diagnostics.recent(),
             search_network: self.distributed.snapshot(),
+            storage_notices: self
+                .store_files
+                .iter()
+                .flat_map(JsonFile::notices)
+                .collect(),
         })
     }
 

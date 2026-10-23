@@ -672,7 +672,10 @@ export type DiagnosticEntry = {
   message: string;
 };
 
+export type StoreNotice = { store: string; message: string };
+
 export type ConnectionBootstrap = {
+  storageNotices: StoreNotice[];
   profile: ConnectionProfile | null;
   suggestedProfile: ConnectionProfile;
   hasPassword: boolean;

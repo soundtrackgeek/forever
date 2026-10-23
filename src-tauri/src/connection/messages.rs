@@ -1,7 +1,6 @@
+use super::store::{self, DecodeError, JsonFile};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
-    path::{Path, PathBuf},
     sync::{Arc, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -9,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
 pub const MESSAGES_EVENT: &str = "forever://messages";
-const STORE_VERSION: u32 = 1;
+const STORE_VERSION: u32 = 2;
 const MAX_CONVERSATIONS: usize = 100;
 const MAX_MESSAGES_PER_CONVERSATION: usize = 500;
 pub const MAX_PRIVATE_MESSAGE_BYTES: usize = 8 * 1024;
@@ -83,12 +82,12 @@ impl Default for MessagesStore {
 #[derive(Clone)]
 pub struct MessagesHub {
     app: AppHandle,
-    path: PathBuf,
+    path: JsonFile,
     store: Arc<RwLock<MessagesStore>>,
 }
 
 impl MessagesHub {
-    pub fn new(app: AppHandle, path: PathBuf) -> Result<Self, MessagesError> {
+    pub fn new(app: AppHandle, path: JsonFile) -> Result<Self, MessagesError> {
         Ok(Self {
             app,
             path: path.clone(),
@@ -497,22 +496,24 @@ fn clean_error(value: &str) -> String {
         .to_owned()
 }
 
-fn load_store(path: &Path) -> Result<MessagesStore, MessagesError> {
-    if !path.exists() {
-        return Ok(MessagesStore::default());
-    }
-    let store: MessagesStore = serde_json::from_slice(&fs::read(path)?)?;
-    if store.version != STORE_VERSION {
-        return Err(MessagesError::UnsupportedStore);
-    }
+fn load_store(path: &JsonFile) -> Result<MessagesStore, MessagesError> {
+    Ok(path.load(MessagesStore::default, decode_store))
+}
+
+fn decode_store(bytes: &[u8]) -> Result<MessagesStore, DecodeError> {
+    let store: MessagesStore = store::decode(bytes, STORE_VERSION, None, &[(1, migrate_v1_to_v2)])?;
     Ok(store)
 }
 
-fn persist(path: &Path, store: &MessagesStore) -> Result<(), MessagesError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, serde_json::to_vec_pretty(store)?)?;
+// Materialize the defaults introduced during v1 so v2 has an explicit schema.
+fn migrate_v1_to_v2(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: MessagesStore = serde_json::from_value(value)?;
+    store.version = 2;
+    Ok(serde_json::to_value(store)?)
+}
+
+fn persist(path: &JsonFile, store: &MessagesStore) -> Result<(), MessagesError> {
+    path.save(store)?;
     Ok(())
 }
 
@@ -535,8 +536,6 @@ pub enum MessagesError {
     MessageNotFound,
     #[error("That private conversation is no longer available.")]
     ConversationNotFound,
-    #[error("The private-message history was created by an unsupported Forever version.")]
-    UnsupportedStore,
     #[error("Could not read or save private messages: {0}")]
     Io(#[from] std::io::Error),
     #[error("Could not read or save private messages: {0}")]
@@ -546,6 +545,60 @@ pub enum MessagesError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_store_recovers_fixture_and_future_schema_is_write_protected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("messages.json");
+        let bytes = include_bytes!("../../fixtures/stores/messages-v1.json");
+        std::fs::write(dir.path().join("messages.json.bak"), bytes).unwrap();
+        std::fs::write(&path, b"{truncated").unwrap();
+        let file = JsonFile::new(path.clone());
+        let recovered = load_store(&file).unwrap();
+        assert_eq!(
+            serde_json::to_value(&recovered).unwrap(),
+            serde_json::to_value(decode_store(bytes).unwrap()).unwrap()
+        );
+        assert_eq!(file.notices().len(), 2);
+        let future = br#"{"version":99,"future":"keep"}"#;
+        std::fs::write(&path, future).unwrap();
+        let file = JsonFile::new(path.clone());
+        let fallback = load_store(&file).unwrap();
+        assert!(file.save(&fallback).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), future);
+    }
+
+    #[test]
+    fn migrates_legacy_fixture_and_keeps_original_backup() {
+        let bytes = include_bytes!("../../fixtures/stores/messages-v1.json");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("messages.json");
+        std::fs::write(&path, bytes).unwrap();
+        let file = JsonFile::new(path.clone());
+        let store = load_store(&file).unwrap();
+        assert_eq!(store.version, STORE_VERSION);
+        assert_eq!(store.conversations[0].messages[0].body, "Keep this message");
+        assert!(store.conversations[0].messages[0].unread);
+        assert_eq!(
+            store.conversations[0].messages[0].delivery,
+            MessageDelivery::Sent
+        );
+        assert!(file.notices().is_empty());
+        assert_eq!(
+            std::fs::read(dir.path().join("messages.json.bak")).unwrap(),
+            bytes
+        );
+        let migrated = std::fs::read(&path).unwrap();
+        let again = load_store(&JsonFile::new(path)).unwrap();
+        assert_eq!(
+            serde_json::to_value(&store).unwrap(),
+            serde_json::to_value(again).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&migrated).unwrap()["version"],
+            STORE_VERSION
+        );
+    }
 
     #[test]
     fn private_messages_are_trimmed_and_bounded() {
