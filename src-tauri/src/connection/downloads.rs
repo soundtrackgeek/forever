@@ -1,4 +1,5 @@
 use super::soundcheck::{inspect_file, SoundcheckResult, SoundcheckStatus};
+use super::transfer_writer::TransferWriter;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -8,12 +9,16 @@ use std::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
         Arc, Mutex, RwLock,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
 const TRANSFER_EVENT: &str = "forever://transfers";
+const PROGRESS_EVENT: &str = "forever://transfer-progress";
+const STORE_ERROR_EVENT: &str = "forever://transfer-store-error";
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
+const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
 const STORE_VERSION: u32 = 1;
 const MAX_AUTOMATIC_RETRIES: u32 = 3;
 const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u8 = 3;
@@ -207,6 +212,8 @@ pub struct TransferSnapshot {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferQueueSnapshot {
+    pub revision: u64,
+    pub persistence_error: Option<String>,
     pub transfers: Vec<TransferSnapshot>,
     pub active_count: usize,
     pub max_concurrent_downloads: u8,
@@ -262,6 +269,130 @@ pub struct DownloadPlan {
     pub final_path: PathBuf,
     pub size_bytes: u64,
     pub offset: u64,
+    pub transfer_token: u32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransferProgress {
+    id: String,
+    transferred_bytes: u64,
+    speed_bytes_per_second: u64,
+    eta_seconds: Option<u64>,
+    updated_at_ms: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransferProgressBatch {
+    revision: u64,
+    updates: Vec<TransferProgress>,
+}
+
+struct LiveProgress {
+    transfer_token: u32,
+    size_bytes: u64,
+    progress: TransferProgress,
+    dirty: bool,
+}
+
+struct TransferTelemetry {
+    active: HashMap<String, LiveProgress>,
+    checkpoint_dirty: bool,
+    last_checkpoint: Instant,
+}
+
+impl Default for TransferTelemetry {
+    fn default() -> Self {
+        Self {
+            active: HashMap::new(),
+            checkpoint_dirty: false,
+            last_checkpoint: Instant::now(),
+        }
+    }
+}
+
+impl TransferTelemetry {
+    fn checkpoint_due(&mut self, now: Instant) -> bool {
+        if now.duration_since(self.last_checkpoint) < CHECKPOINT_INTERVAL {
+            return false;
+        }
+        self.last_checkpoint = now;
+        std::mem::take(&mut self.checkpoint_dirty)
+    }
+
+    fn begin(&mut self, plan: &DownloadPlan) {
+        self.active.insert(
+            plan.id.clone(),
+            LiveProgress {
+                transfer_token: plan.transfer_token,
+                size_bytes: plan.size_bytes,
+                progress: TransferProgress {
+                    id: plan.id.clone(),
+                    transferred_bytes: plan.offset,
+                    speed_bytes_per_second: 0,
+                    eta_seconds: None,
+                    updated_at_ms: timestamp_ms(),
+                },
+                dirty: false,
+            },
+        );
+    }
+
+    fn update(&mut self, id: &str, token: u32, transferred: u64, speed: u64) {
+        let Some(live) = self.active.get_mut(id) else {
+            return;
+        };
+        if live.transfer_token != token {
+            return;
+        }
+        let bytes = transferred.min(live.size_bytes);
+        if bytes < live.progress.transferred_bytes {
+            return;
+        }
+        live.progress.transferred_bytes = bytes;
+        live.progress.speed_bytes_per_second = speed;
+        live.progress.eta_seconds =
+            (speed > 0).then(|| live.size_bytes.saturating_sub(bytes).div_ceil(speed));
+        live.progress.updated_at_ms = timestamp_ms();
+        live.dirty = true;
+        self.checkpoint_dirty = true;
+    }
+
+    fn take_updates(&mut self) -> Vec<TransferProgress> {
+        self.active
+            .values_mut()
+            .filter_map(|live| {
+                if !std::mem::take(&mut live.dirty) {
+                    return None;
+                }
+                Some(live.progress.clone())
+            })
+            .collect()
+    }
+
+    fn overlay(&mut self, transfers: &mut [TransferSnapshot]) {
+        let active: HashSet<_> = transfers
+            .iter()
+            .filter(|t| t.status == TransferStatus::Downloading)
+            .map(|t| (t.id.as_str(), t.transfer_token))
+            .collect();
+        self.active
+            .retain(|id, live| active.contains(&(id.as_str(), Some(live.transfer_token))));
+        if self.active.is_empty() {
+            // The lifecycle save already includes the final bytes. Do not start
+            // a redundant checkpoint after Safe Passage has drained the writer.
+            self.checkpoint_dirty = false;
+        }
+        for transfer in transfers {
+            if let Some(live) = self.active.get(&transfer.id) {
+                transfer.transferred_bytes = live.progress.transferred_bytes;
+                transfer.speed_bytes_per_second = live.progress.speed_bytes_per_second;
+                transfer.eta_seconds = live.progress.eta_seconds;
+                transfer.updated_at_ms = live.progress.updated_at_ms;
+            }
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -279,7 +410,9 @@ struct TransferStore {
 #[derive(Clone)]
 pub struct TransferHub {
     app: AppHandle,
-    path: PathBuf,
+    writer: Arc<TransferWriter<TransferStore>>,
+    telemetry: Arc<Mutex<TransferTelemetry>>,
+    publication: Arc<Mutex<u64>>,
     transfers: Arc<RwLock<Vec<TransferSnapshot>>>,
     max_concurrent_downloads: Arc<AtomicU8>,
     relay_suggestion_minutes: Arc<AtomicU32>,
@@ -304,9 +437,27 @@ impl TransferHub {
             }
         }
 
+        let error_app = app.clone();
+        let writer = TransferWriter::new(
+            move |store: TransferStore| {
+                (|| -> Result<(), TransferError> {
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(&path, serde_json::to_vec_pretty(&store)?)?;
+                    Ok(())
+                })()
+                .map_err(|error| error.to_string())
+            },
+            move |error| {
+                let _ = error_app.emit(STORE_ERROR_EVENT, error);
+            },
+        )?;
         let hub = Self {
             app,
-            path,
+            writer: Arc::new(writer),
+            telemetry: Arc::new(Mutex::new(TransferTelemetry::default())),
+            publication: Arc::new(Mutex::new(0)),
             transfers: Arc::new(RwLock::new(transfers)),
             max_concurrent_downloads: Arc::new(AtomicU8::new(store.max_concurrent_downloads)),
             relay_suggestion_minutes: Arc::new(AtomicU32::new(store.relay_suggestion_minutes)),
@@ -316,20 +467,36 @@ impl TransferHub {
             next_id: Arc::new(AtomicU64::new(timestamp_ms())),
         };
         hub.persist()?;
+        hub.start_progress_publisher();
         Ok(hub)
     }
 
     pub fn snapshot(&self) -> TransferQueueSnapshot {
+        let mut revision = self.publication.lock().unwrap_or_else(|p| p.into_inner());
+        self.snapshot_at(&mut revision)
+    }
+
+    // All IPC snapshots and batches share an ordering, including command replies.
+    fn snapshot_at(&self, revision: &mut u64) -> TransferQueueSnapshot {
         let transfers = self
             .transfers
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut current = transfers.clone();
+        self.telemetry
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .overlay(&mut current);
+        drop(transfers);
+        let transfers = current;
         let active_count = transfers
             .iter()
             .filter(|transfer| transfer.status.occupies_slot())
             .count();
+        *revision += 1;
         TransferQueueSnapshot {
+            revision: *revision,
+            persistence_error: self.writer.error(),
             transfers,
             active_count,
             max_concurrent_downloads: self.max_concurrent_downloads.load(Ordering::SeqCst),
@@ -1557,34 +1724,29 @@ impl TransferHub {
             transfer.eta_seconds = None;
             transfer.waiting_since_ms = None;
             transfer.updated_at_ms = timestamp_ms();
-            DownloadPlan {
+            let plan = DownloadPlan {
                 id: transfer.id.clone(),
                 partial_path,
                 final_path,
                 size_bytes: transfer.size_bytes,
                 offset,
-            }
+                transfer_token,
+            };
+            self.telemetry
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .begin(&plan);
+            plan
         };
         self.persist_and_publish()?;
         Ok(plan)
     }
 
-    pub fn update_progress(&self, id: &str, transferred: u64, speed: u64) {
-        let _ = self.mutate(|transfers| {
-            if let Some(transfer) = transfers.iter_mut().find(|transfer| transfer.id == id) {
-                if transfer.status == TransferStatus::Downloading {
-                    transfer.transferred_bytes = transferred.min(transfer.size_bytes);
-                    transfer.speed_bytes_per_second = speed;
-                    transfer.eta_seconds = (speed > 0).then(|| {
-                        transfer
-                            .size_bytes
-                            .saturating_sub(transfer.transferred_bytes)
-                            .div_ceil(speed)
-                    });
-                    transfer.updated_at_ms = timestamp_ms();
-                }
-            }
-        });
+    pub fn update_progress(&self, id: &str, token: u32, transferred: u64, speed: u64) {
+        self.telemetry
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .update(id, token, transferred, speed);
     }
 
     pub fn complete(&self, id: &str) -> Result<(), TransferError> {
@@ -1772,6 +1934,12 @@ impl TransferHub {
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let before = transfers.len();
+            // Fold the latest bytes into a lifecycle transition (not every tick),
+            // so pause retains progress while completion/reset can replace it.
+            self.telemetry
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .overlay(&mut transfers);
             mutation(&mut transfers);
             if transfers.len() == before && transfers.is_empty() {
                 return Ok(false);
@@ -1782,28 +1950,92 @@ impl TransferHub {
     }
 
     fn persist_and_publish(&self) -> Result<(), TransferError> {
-        self.persist()?;
-        let _ = self.app.emit(TRANSFER_EVENT, self.snapshot());
+        let mut revision = self.publication.lock().unwrap_or_else(|p| p.into_inner());
+        let snapshot = self.snapshot_at(&mut revision);
+        self.queue_store(&snapshot);
+        let _ = self.app.emit(TRANSFER_EVENT, snapshot);
         Ok(())
     }
 
     fn persist(&self) -> Result<(), TransferError> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let store = TransferStore {
-            version: STORE_VERSION,
-            max_concurrent_downloads: self.max_concurrent_downloads.load(Ordering::SeqCst),
-            relay_suggestion_minutes: self.relay_suggestion_minutes.load(Ordering::SeqCst),
-            soundcheck_enabled: self.soundcheck_enabled.load(Ordering::SeqCst),
-            transfers: self
-                .transfers
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clone(),
-        };
-        fs::write(&self.path, serde_json::to_vec_pretty(&store)?)?;
+        let mut revision = self.publication.lock().unwrap_or_else(|p| p.into_inner());
+        self.queue_store(&self.snapshot_at(&mut revision));
         Ok(())
+    }
+
+    fn queue_store(&self, snapshot: &TransferQueueSnapshot) {
+        self.writer.submit(TransferStore {
+            version: STORE_VERSION,
+            max_concurrent_downloads: snapshot.max_concurrent_downloads,
+            relay_suggestion_minutes: snapshot.relay_suggestion_minutes,
+            soundcheck_enabled: snapshot.soundcheck_enabled,
+            transfers: snapshot.transfers.clone(),
+        });
+    }
+
+    pub async fn flush_store(&self) -> Result<(), TransferError> {
+        let writer = self.writer.clone();
+        tauri::async_runtime::spawn_blocking(move || writer.flush())
+            .await
+            .map_err(|error| TransferError::StoreWrite(error.to_string()))?
+            .map_err(TransferError::StoreWrite)
+    }
+
+    fn start_progress_publisher(&self) {
+        let weak_transfers = Arc::downgrade(&self.transfers);
+        let weak_writer = Arc::downgrade(&self.writer);
+        let app = self.app.clone();
+        let telemetry = self.telemetry.clone();
+        let publication = self.publication.clone();
+        let max_concurrent_downloads = self.max_concurrent_downloads.clone();
+        let relay_suggestion_minutes = self.relay_suggestion_minutes.clone();
+        let soundcheck_enabled = self.soundcheck_enabled.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut interval = tokio::time::interval(PROGRESS_INTERVAL);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                let (Some(transfers), Some(writer)) =
+                    (weak_transfers.upgrade(), weak_writer.upgrade())
+                else {
+                    break;
+                };
+                let mut revision = publication.lock().unwrap_or_else(|p| p.into_inner());
+                let updates = telemetry
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .take_updates();
+                if !updates.is_empty() {
+                    *revision += 1;
+                    let _ = app.emit(
+                        PROGRESS_EVENT,
+                        TransferProgressBatch {
+                            revision: *revision,
+                            updates,
+                        },
+                    );
+                }
+                let checkpoint_due = telemetry
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .checkpoint_due(Instant::now());
+                if checkpoint_due {
+                    let transfers = transfers.read().unwrap_or_else(|p| p.into_inner());
+                    let mut current = transfers.clone();
+                    telemetry
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .overlay(&mut current);
+                    writer.submit(TransferStore {
+                        version: STORE_VERSION,
+                        max_concurrent_downloads: max_concurrent_downloads.load(Ordering::SeqCst),
+                        relay_suggestion_minutes: relay_suggestion_minutes.load(Ordering::SeqCst),
+                        soundcheck_enabled: soundcheck_enabled.load(Ordering::SeqCst),
+                        transfers: current,
+                    });
+                }
+            }
+        });
     }
 }
 
@@ -2604,6 +2836,8 @@ pub enum TransferError {
     Io(#[from] std::io::Error),
     #[error("Transfer data is not valid JSON: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Could not save transfer data: {0}")]
+    StoreWrite(String),
 }
 
 #[cfg(test)]
@@ -2661,6 +2895,148 @@ mod tests {
         assert_eq!(safe_basename("../../CON.mp3"), "_CON.mp3");
         assert_eq!(safe_basename("folder\\bad<name>?.wav"), "bad_name__.wav");
         assert_eq!(safe_basename("folder\\..."), "download");
+    }
+
+    fn progress_plan(id: &str, token: u32) -> DownloadPlan {
+        DownloadPlan {
+            id: id.into(),
+            partial_path: PathBuf::new(),
+            final_path: PathBuf::new(),
+            size_bytes: 100_000,
+            offset: 0,
+            transfer_token: token,
+        }
+    }
+
+    #[test]
+    fn six_lanes_batch_without_history_work_and_checkpoint_only_every_five_seconds() {
+        let mut telemetry = TransferTelemetry::default();
+        let started = telemetry.last_checkpoint;
+        let mut history: Vec<_> = (0..10_000)
+            .map(|i| {
+                release_transfer(
+                    &format!("history-{i}"),
+                    "history",
+                    "user",
+                    "track.flac",
+                    TransferStatus::Completed,
+                    1,
+                )
+            })
+            .collect();
+        for lane in 0..6 {
+            telemetry.begin(&progress_plan(&format!("lane-{lane}"), lane));
+            let mut transfer = release_transfer(
+                &format!("lane-{lane}"),
+                "active",
+                "user",
+                "track.flac",
+                TransferStatus::Downloading,
+                1,
+            );
+            transfer.transfer_token = Some(lane);
+            history.push(transfer);
+        }
+        let mut checkpoint_count = 0;
+        for tick in 1..=80 {
+            for lane in 0..6 {
+                // More than one sample per lane still sends only its latest value.
+                telemetry.update(&format!("lane-{lane}"), lane, tick * 100 - 1, 400);
+                telemetry.update(&format!("lane-{lane}"), lane, tick * 100, 400);
+            }
+            let updates = telemetry.take_updates();
+            assert_eq!(updates.len(), 6);
+            assert!(updates.iter().all(|u| u.transferred_bytes == tick * 100));
+            let payload = serde_json::to_vec(&TransferProgressBatch {
+                revision: tick,
+                updates,
+            })
+            .unwrap();
+            assert!(payload.len() < 1_200, "history must not enter progress IPC");
+            assert!(telemetry.take_updates().is_empty());
+            if telemetry.checkpoint_due(started + Duration::from_millis(tick * 250)) {
+                checkpoint_count += 1;
+                let mut checkpoint = history.clone();
+                telemetry.overlay(&mut checkpoint);
+                assert!(checkpoint[10_000..]
+                    .iter()
+                    .all(|t| t.transferred_bytes == tick * 100));
+                assert!(checkpoint[..10_000]
+                    .iter()
+                    .all(|t| t.transferred_bytes == 0));
+            }
+        }
+        assert_eq!(checkpoint_count, 4);
+        assert!(!telemetry.checkpoint_due(started + Duration::from_secs(25)));
+        assert_eq!(telemetry.active.len(), 6);
+        assert!(history.iter().all(|t| t.transferred_bytes == 0));
+    }
+
+    #[test]
+    fn telemetry_ignores_old_attempts_and_is_retired_on_lifecycle_changes() {
+        let mut telemetry = TransferTelemetry::default();
+        let mut plan = progress_plan("live", 7);
+        plan.size_bytes = 100;
+        telemetry.begin(&plan);
+        telemetry.update("live", 6, 80, 10);
+        assert!(telemetry.take_updates().is_empty());
+        telemetry.update("live", 7, 60, 0);
+        let mut transfers = vec![release_transfer(
+            "live",
+            "release",
+            "user",
+            "track.flac",
+            TransferStatus::Downloading,
+            1,
+        )];
+        transfers[0].transfer_token = Some(7);
+        telemetry.overlay(&mut transfers);
+        assert_eq!(transfers[0].transferred_bytes, 60);
+        assert_eq!(transfers[0].eta_seconds, None);
+        telemetry.update("live", 7, 50, 10);
+        assert_eq!(telemetry.take_updates()[0].transferred_bytes, 60);
+        transfers[0].status = TransferStatus::Paused;
+        transfers[0].speed_bytes_per_second = 0;
+        telemetry.overlay(&mut transfers);
+        telemetry.update("live", 7, 99, 10);
+        assert!(telemetry.active.is_empty());
+        assert_eq!(transfers[0].transferred_bytes, 60);
+        assert!(!telemetry.checkpoint_due(telemetry.last_checkpoint + CHECKPOINT_INTERVAL));
+        // A new connection can restart from a shorter .part file.
+        plan.transfer_token = 8;
+        plan.offset = 20;
+        telemetry.begin(&plan);
+        telemetry.update("live", 7, 100, 10);
+        assert!(telemetry.take_updates().is_empty());
+        telemetry.update("live", 8, 500, 40);
+        let update = &telemetry.take_updates()[0];
+        assert_eq!(update.transferred_bytes, 100);
+        assert_eq!(update.eta_seconds, Some(0));
+        transfers[0].status = TransferStatus::Completed;
+        transfers[0].transferred_bytes = 100;
+        telemetry.overlay(&mut transfers);
+        assert_eq!(transfers[0].transferred_bytes, 100);
+        assert!(telemetry.active.is_empty());
+    }
+
+    #[test]
+    fn restart_uses_partial_file_length_even_when_the_checkpoint_is_stale() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut transfer = release_transfer(
+            "live",
+            "release",
+            "user",
+            "track.flac",
+            TransferStatus::Downloading,
+            1,
+        );
+        let final_path = directory.path().join("track.flac");
+        transfer.local_path = final_path.to_string_lossy().into_owned();
+        transfer.transferred_bytes = 10;
+        fs::write(partial_path(&final_path), [0_u8; 73]).unwrap();
+        reconcile_transfer_after_restart(&mut transfer);
+        assert_eq!(transfer.status, TransferStatus::Queued);
+        assert_eq!(transfer.transferred_bytes, 73);
     }
 
     #[test]

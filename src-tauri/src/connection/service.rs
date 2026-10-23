@@ -736,7 +736,9 @@ impl ConnectionManager {
         while self.transfers.active_task_count() > 0 {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        Ok(self.transfers.finish_restart_preparation()?)
+        let snapshot = self.transfers.finish_restart_preparation()?;
+        self.transfers.flush_store().await?;
+        Ok(snapshot)
     }
 
     pub fn cancel_restart_preparation(
@@ -3968,7 +3970,7 @@ async fn receive_file(
         if elapsed >= Duration::from_millis(250) || transferred == plan.size_bytes {
             let millis = elapsed.as_millis().max(1) as u64;
             let speed = transferred.saturating_sub(last_bytes).saturating_mul(1_000) / millis;
-            transfers.update_progress(&plan.id, transferred, speed);
+            transfers.update_progress(&plan.id, plan.transfer_token, transferred, speed);
             last_bytes = transferred;
             last_update = Instant::now();
         }

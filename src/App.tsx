@@ -230,14 +230,37 @@ function App() {
       : transfers.snapshot.activeCount;
   }, [safeExitPreview, transfers.snapshot.activeCount]);
 
+  const prepareTransfersForExit = transfers.prepareForRestart;
+  const cancelExitPreparation = useRef(transfers.cancelRestartPreparation);
+  useEffect(() => {
+    cancelExitPreparation.current = transfers.cancelRestartPreparation;
+  }, [transfers.cancelRestartPreparation]);
   useEffect(() => {
     if (!native) return;
     let dispose: (() => void) | undefined;
     let mounted = true;
-    void getCurrentWindow().onCloseRequested((event) => {
-      if (allowNextClose.current || activeTransferCount.current === 0) return;
+    let preparingClose = false;
+    void getCurrentWindow().onCloseRequested(async (event) => {
+      if (allowNextClose.current) return;
       event.preventDefault();
-      setSafeExitOpen(true);
+      if (preparingClose) return;
+      if (activeTransferCount.current > 0) {
+        setSafeExitOpen(true);
+        return;
+      }
+      // Even an idle queue can have a metadata save in flight.
+      preparingClose = true;
+      try {
+        await prepareTransfersForExit("pauseNow");
+        allowNextClose.current = true;
+        await getCurrentWindow().close();
+      } catch {
+        allowNextClose.current = false;
+        await cancelExitPreparation.current().catch(() => undefined);
+        setSafeExitOpen(true);
+      } finally {
+        preparingClose = false;
+      }
     }).then((unlisten) => {
       if (mounted) dispose = unlisten;
       else unlisten();
@@ -246,7 +269,7 @@ function App() {
       mounted = false;
       dispose?.();
     };
-  }, [native]);
+  }, [native, prepareTransfersForExit]);
 
   const pauseSafelyAndExit = async () => {
     if (safeExitPreparing) return;
@@ -1294,6 +1317,7 @@ function App() {
         open={safeExitOpen}
         activeCount={safeExitPreview ? Math.max(1, transfers.snapshot.activeCount) : transfers.snapshot.activeCount}
         preparing={safeExitPreparing}
+        error={transfers.error}
         onKeepRunning={() => setSafeExitOpen(false)}
         onPauseAndExit={() => void pauseSafelyAndExit()}
       />

@@ -5,6 +5,34 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.54] - 2026-10-23
+
+### Changed
+
+- Download progress updates now touch only an in-memory map of active transfers.
+  One `forever://transfer-progress` batch publishes changed bytes, speed, and ETA
+  at most every 250 ms; lifecycle, metadata, and settings changes publish full
+  queue snapshots.
+- Transfer JSON serialization and writes now run on one background thread with
+  one replaceable pending snapshot. State changes request saves immediately;
+  changing progress requests a checkpoint every five seconds.
+- Closing an idle queue and Safe Passage exit/update preparation wait for the
+  pending transfer save. Save failures stay visible until the writer recovers.
+- Application, updater preview, package, Cargo, Tauri, Settings, and MusicBrainz
+  metadata now identify version `0.0.54`.
+
+### Fixed
+
+- Ordered queue/progress events and command responses prevent delayed telemetry
+  from replacing newer pause, completion, and history-removal state. Unchanged
+  frontend transfer objects retain their identity during progress merges.
+- Pausing retains the latest sampled byte count, while restart/resume continues
+  to recover exact progress from `.part` files even with an older checkpoint.
+- Initial history loading no longer triggers completion notifications.
+- Regression coverage exercises six lanes with 10,000 historical entries,
+  checkpoint cadence, stale attempts, writer coalescing/failure/recovery,
+  frontend event races, listener cleanup, and failed-exit messaging.
+
 ## [0.0.53] - 2026-07-28
 
 ### Added

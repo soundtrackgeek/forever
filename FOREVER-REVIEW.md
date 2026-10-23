@@ -76,6 +76,15 @@ one platform and one library source.
 
 ### 1. Transfer progress hot path
 
+**Implemented in 0.0.54 (2026-10-23):** active-transfer telemetry is held in
+memory and published in small, ordered batches at most every 250 ms. State
+changes and five-second progress checkpoints go through one coalescing
+background writer. Safe Passage and idle-window close await saves and surface
+failures; resume still uses `.part` length. Regression coverage includes six
+lanes with 10,000 historical entries, stale events/attempts, writer failures,
+and listener cleanup. The original findings and proposal follow for context.
+Atomic replacement, corruption recovery, and migrations remain item 2.
+
 **Today:** `receive_file` reports progress every 250 ms
 ([service.rs:3917](src-tauri/src/connection/service.rs:3917)). That calls
 `TransferHub::update_progress`

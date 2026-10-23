@@ -3,11 +3,11 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.53` adds MusicBrainz-backed Tracklist
-> Confidence so complete-looking but mislabeled album folders cannot become the
-> recommended source.
+> **Status:** pre-alpha. Version `0.0.54` batches live download progress and
+> saves transfer state in the background, keeping progress updates independent
+> of completed-history size on the backend.
 
-If `0.0.16` is installed, download and run the latest `0.0.53` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.54` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -505,6 +505,17 @@ enabled or disabled in the same settings panel. Room alerts have a separate
 toggle and notify only for direct mentions or new messages in starred rooms.
 
 ## Connection data and privacy
+
+Download bytes, speed, and ETA stay in an active-transfer memory map. The UI
+receives one small progress batch at most every 250 ms; full queue snapshots
+are sent for lifecycle, metadata, and settings changes. A single background
+writer coalesces pending saves to `transfers.json`, saving state transitions
+and progress checkpoints every five seconds when progress changes. Resume
+offsets still come from the actual `.part` file length. Closing Forever
+(including an idle queue) and Safe Passage updates wait for pending saves;
+save failures are shown and must be resolved before a safe exit can finish.
+The existing JSON format remains compatible. Crash-safe replacement and store
+recovery are separate work tracked in review item 2.
 
 Forever writes non-secret account preferences to the Tauri application
 configuration directory and connection events to

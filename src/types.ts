@@ -556,12 +556,23 @@ export type ArchiveCachedCatalog = {
 };
 
 export type TransferQueueSnapshot = {
+  revision?: number;
+  persistenceError?: string | null;
   transfers: Transfer[];
   activeCount: number;
   maxConcurrentDownloads: number;
   relaySuggestionMinutes: number;
   soundcheckEnabled: boolean;
   safetyState: "running" | "draining" | "pausedForRestart";
+};
+
+export type TransferProgress = Pick<Transfer,
+  "id" | "transferredBytes" | "speedBytesPerSecond" | "etaSeconds" | "updatedAtMs"
+>;
+
+export type TransferProgressBatch = {
+  revision: number;
+  updates: TransferProgress[];
 };
 
 export type SharedRoot = {

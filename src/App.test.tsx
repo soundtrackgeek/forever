@@ -952,17 +952,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.53 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.54 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Tracklist Confidence compares Soulseek filenames with the official MusicBrainz titles.",
+        "Live download progress arrives in small batches four times per second.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Exact tracklists outrank faster but mislabeled folders in Wanted Compare.",
+        "A coalescing background writer saves queue changes and five-second progress checkpoints.",
       ),
     ).toBeInTheDocument();
     expect(

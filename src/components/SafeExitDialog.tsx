@@ -4,6 +4,7 @@ type SafeExitDialogProps = {
   open: boolean;
   activeCount: number;
   preparing: boolean;
+  error?: string | null;
   onKeepRunning: () => void;
   onPauseAndExit: () => void;
 };
@@ -12,6 +13,7 @@ export function SafeExitDialog({
   open,
   activeCount,
   preparing,
+  error,
   onKeepRunning,
   onPauseAndExit,
 }: SafeExitDialogProps) {
@@ -38,11 +40,11 @@ export function SafeExitDialog({
         </header>
         <div>
           <small>Safe Passage</small>
-          <h2 id="safe-exit-title">Downloads are still moving.</h2>
-          <p>
+          <h2 id="safe-exit-title">{error ? "Transfers could not be secured." : "Downloads are still moving."}</h2>
+          {error ? <p role="alert">{error} Keep Forever open and try saving again before closing.</p> : <p>
             {activeCount} active {activeCount === 1 ? "file is" : "files are"} writing to disk.
             Forever can secure their partial progress before closing.
-          </p>
+          </p>}
           <ul>
             <li>Stop download workers cooperatively</li>
             <li>Flush partial files and save their exact size</li>
@@ -65,7 +67,7 @@ export function SafeExitDialog({
             disabled={preparing}
           >
             <Pause size={17} weight="fill" />
-            {preparing ? "Securing downloads…" : "Pause safely & exit"}
+            {preparing ? "Securing downloads…" : error ? "Retry save & exit" : "Pause safely & exit"}
           </button>
         </footer>
       </section>

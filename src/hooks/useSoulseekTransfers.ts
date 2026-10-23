@@ -6,15 +6,17 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type SetStateAction } from "react";
 import type {
   FolderFile,
   ReleaseAlternativeSource,
   SearchResult,
   Transfer,
+  TransferProgressBatch,
   TransferQueueSnapshot,
 } from "../types";
 import { groupTransfers } from "../utils/transfers";
+import { acceptTransferSnapshot, applyTransferProgress } from "../utils/transferProgress";
 
 const previewNames = [
   "01 - Thresholds.flac",
@@ -289,11 +291,15 @@ export type TransferActivityNotice = {
 
 export function useSoulseekTransfers() {
   const native = isTauri();
-  const [snapshot, setSnapshot] = useState<TransferQueueSnapshot>(
+  const [snapshot, setSnapshot] = useReducer(
+    (current: TransferQueueSnapshot, next: SetStateAction<TransferQueueSnapshot>) => typeof next === "function"
+      ? next(current)
+      : acceptTransferSnapshot(current, next),
     native ? emptySnapshot : withCount(previewTransfers),
   );
   const [ready, setReady] = useState(!native);
   const [error, setError] = useState<string | null>(null);
+  const [storeError, setStoreError] = useState<string | null>(null);
   const [completionNotice, setCompletionNotice] = useState<TransferCompletionNotice | null>(null);
   const [activityNotice, setActivityNotice] = useState<TransferActivityNotice | null>(null);
   const completionState = useRef<Map<string, string>>(new Map());
@@ -304,21 +310,50 @@ export function useSoulseekTransfers() {
   useEffect(() => {
     if (!native) return;
     let mounted = true;
-    let unlisten: (() => void) | undefined;
-
-    void listen<TransferQueueSnapshot>("forever://transfers", (event) => {
-      if (mounted) setSnapshot(event.payload);
-    }).then((dispose) => {
-      if (mounted) unlisten = dispose;
+    let initialized = false;
+    const unlisteners: (() => void)[] = [];
+    let receivedStoreStatus = false;
+    const pending: (TransferQueueSnapshot | TransferProgressBatch)[] = [];
+    const apply = (event: TransferQueueSnapshot | TransferProgressBatch) => {
+      if (!mounted) return;
+      if (!initialized) { pending.push(event); return; }
+      setSnapshot((current) => "updates" in event
+        ? applyTransferProgress(current, event)
+        : acceptTransferSnapshot(current, event));
+    };
+    const register = (subscription: Promise<() => void>) => subscription.then((dispose) => {
+      if (mounted) unlisteners.push(dispose);
       else dispose();
     });
 
-    void invoke<TransferQueueSnapshot>("transfers_snapshot")
+    // Subscribe before reading the initial queue; replay only events newer than
+    // that snapshot so an in-flight bootstrap cannot erase a progress batch.
+    void Promise.all([
+      register(listen<TransferQueueSnapshot>("forever://transfers", (event) => apply(event.payload))),
+      register(listen<TransferProgressBatch>("forever://transfer-progress", (event) => apply(event.payload))),
+      register(listen<string | null>("forever://transfer-store-error", (event) => {
+        if (mounted) {
+          receivedStoreStatus = true;
+          setStoreError(event.payload);
+        }
+      })),
+    ])
+      .then(() => mounted ? invoke<TransferQueueSnapshot>("transfers_snapshot") : null)
       .then((next) => {
-        if (mounted) setSnapshot(next);
+        if (!mounted || !next) return;
+        if (!receivedStoreStatus) setStoreError(next.persistenceError ?? null);
+        setSnapshot(next);
+        initialized = true;
+        pending.sort((a, b) => (a.revision ?? 0) - (b.revision ?? 0)).forEach(apply);
+        pending.length = 0;
       })
       .catch((cause) => {
-        if (mounted) setError(errorMessage(cause));
+        if (mounted) {
+          setError(errorMessage(cause));
+          initialized = true;
+          pending.forEach(apply);
+          pending.length = 0;
+        }
       })
       .finally(() => {
         if (mounted) setReady(true);
@@ -326,11 +361,12 @@ export function useSoulseekTransfers() {
 
     return () => {
       mounted = false;
-      unlisten?.();
+      unlisteners.forEach((dispose) => dispose());
     };
-  }, [native]);
+  }, [native, setSnapshot]);
 
   useEffect(() => {
+    if (!ready) return;
     const groups = groupTransfers(snapshot.transfers);
     if (completionReady.current && native) {
       for (const group of groups) {
@@ -368,7 +404,7 @@ export function useSoulseekTransfers() {
       groups.map((group) => [group.id, group.status]),
     );
     completionReady.current = true;
-  }, [native, snapshot.transfers]);
+  }, [native, ready, snapshot.transfers]);
 
   useEffect(() => {
     if (!ready) return;
@@ -1369,7 +1405,7 @@ export function useSoulseekTransfers() {
     () => ({
       ready,
       snapshot,
-      error,
+      error: storeError ?? error,
       enqueue,
       enqueueRelease,
       pause,
@@ -1414,6 +1450,7 @@ export function useSoulseekTransfers() {
       enqueue,
       enqueueRelease,
       error,
+      storeError,
       pause,
       pauseRelease,
       ready,

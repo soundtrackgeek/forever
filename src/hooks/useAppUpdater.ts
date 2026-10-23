@@ -35,20 +35,20 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.52",
-  version: "0.0.53",
-  body: `## What’s new in Forever 0.0.53
-
-### Added
-
-- Tracklist Confidence compares Soulseek filenames with the official MusicBrainz titles.
-- Expand any source to see matched, missing, and unexpected tracks before downloading.
+  currentVersion: "0.0.53",
+  version: "0.0.54",
+  body: `## What’s new in Forever 0.0.54
 
 ### Changed
 
-- Exact tracklists outrank faster but mislabeled folders in Wanted Compare.
-- Questionable folders require an explicit Download anyway confirmation and cannot be queued as Smart Match recommendations.`,
-  date: "2026-07-28",
+- Live download progress arrives in small batches four times per second.
+- A coalescing background writer saves queue changes and five-second progress checkpoints.
+
+### Fixed
+
+- Delayed progress cannot overwrite newer transfer states.
+- Closing and updating wait for pending transfer saves and report save failures.`,
+  date: "2026-10-23",
 };
 
 const wait = (duration: number) =>
