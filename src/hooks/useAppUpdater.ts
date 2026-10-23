@@ -35,15 +35,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.60",
-  version: "0.0.61",
-  body: `## What's new in Forever 0.0.61
+  currentVersion: "0.0.61",
+  version: "0.0.62",
+  body: `## What's new in Forever 0.0.62
 
 ### Changed
 
-- Smart Match and Wanted share one Rust ranking and title matcher.
-- Choose an official edition and compare titles and track lengths.
-- Archive and search share accent and ampersand normalization.`,
+- Archive ownership checks saved release-group MBID links before titles.
+- Choose a Music Library database or restore automatic detection.
+- Owned badges explain MBID and normalized artist/title matches.`,
   date: "2026-10-23",
 };
 

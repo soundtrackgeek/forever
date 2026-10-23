@@ -278,6 +278,9 @@ describe("TransfersWorkspace signal order", () => {
   });
 
   it("shows Archive-owned missing audio as freshly checked and filed away", () => {
+    // Mount well after module evaluation, as when opening Transfers later in a session.
+    const now = Date.now() + 3_600_000;
+    vi.spyOn(Date, "now").mockReturnValue(now);
     const checkedAt = Date.now() - 121_000;
     const audio = releaseTransfer(
       "archive-release",

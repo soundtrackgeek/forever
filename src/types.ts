@@ -532,6 +532,8 @@ export type AlbumCatalog = {
 
 export type ArchiveStatus = {
   path: string;
+  pathSource: "automatic" | "custom";
+  settingsNotice: string | null;
   connected: boolean;
   readOnly: boolean;
   albumCount: number | null;
@@ -546,6 +548,8 @@ export type ArchiveOwnership = "owned" | "notOwned" | "unknown";
 export type ArchiveAlbumMatch = {
   albumId: string;
   ownership: ArchiveOwnership;
+  matchMethod: "releaseGroupMbid" | "normalizedTitle" | null;
+  matchedReleaseGroupId: string | null;
   localAlbumId: string | null;
   localTitle: string | null;
   localArtist: string | null;

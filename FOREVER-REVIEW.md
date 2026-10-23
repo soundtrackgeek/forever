@@ -342,7 +342,19 @@ edition/pressing lookup as out of scope.
   album.
 - Handle multi-disc folder layouts (`CD1/`, `Disc 2/`) as one source.
 
-### 9. MBID-first Archive ownership
+### 9. MBID-first Archive ownership - DONE
+
+**Implemented in 0.0.62 (2026-10-23):** saved include decisions linked to live
+local albums and verified artist identities supply MBID-first ownership; cached
+catalogs alone never imply ownership. Unicode title fallback remains available
+for older/unlinked catalogs, with original-year and stable-ID ties. Badges and
+shelf rows expose the reason. Library source offers a validated file picker,
+automatic-location badge/reset, durable recoverable settings, and stale-response
+invalidation across discovery, Wanted, transfers, and Missing Shelf. Tests cover
+identity conflicts, missing/untrusted links, read-only integrity, source settings,
+and frontend interaction/races. MBID coverage depends on saved links in Music
+Library; this does not establish ownership of a particular pressing. Original
+findings follow for context.
 
 **Today:** The Archive path is hard-coded to
 `%APPDATA%\com.local.musiclibrary\music-library.sqlite3`

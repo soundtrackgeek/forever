@@ -5,6 +5,39 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.62] - 2026-10-23
+
+### Added
+
+- MBID-first Archive ownership from Music Library's saved include decisions
+  linked to existing local albums and verified, non-ignored artist identities.
+  Owned badges show MBID or title evidence, with local album details on hover;
+  Missing Shelf and fulfilled Wanted rows also explain their match.
+- A database picker in Archive's Library source view, an automatic-detection
+  badge, and a reset to the automatic location. Custom sources are validated
+  read-only before saving; Forever's versioned `archive.json` uses atomic
+  replacement, backup recovery, and visible recovery notices.
+
+### Fixed
+
+- Known, conflicting local release-group identities cannot claim another album
+  through a title match. Cached discographies alone never establish ownership;
+  databases without saved identity links retain Unicode-aware title fallback.
+- Transfer ownership uses the retained MusicBrainz release-group identity while
+  keeping the download ID for correlation. Source changes invalidate ownership
+  results and Missing Shelf caches, including late replies from the old source.
+- Title tie-breaking uses original album year before reissue year and stable
+  local IDs. Rejected database selections preserve the configured source.
+- Transfer verification ages start from the time the view opens, avoiding
+  stale initial ages after a long session.
+
+### Tests
+
+- SQLite fixtures cover MBID priority, conflicting/dangling/unverified links,
+  older schemas, Unicode fallback, original years, and byte-for-byte read-only
+  preservation. Settings and rendered frontend tests cover selection, reset,
+  cancellation, failure, match reasons, transfer identities, and stale replies.
+
 ## [0.0.61] - 2026-10-23
 
 ### Added

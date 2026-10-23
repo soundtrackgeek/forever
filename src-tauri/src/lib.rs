@@ -11,6 +11,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(connection::initialize(app.handle())?);
+            app.manage(archive::initialize(app.handle())?);
             app.manage(musicbrainz::MusicBrainzClient::new());
             Ok(())
         })
@@ -24,6 +25,7 @@ pub fn run() {
             matching::tracklist_confidence,
             matching::normalize_title,
             archive::archive_status,
+            archive::settings::archive_set_database_path,
             archive::archive_artists,
             archive::archive_cached_catalog,
             archive::archive_match_albums,

@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.61` adds duration-aware confidence, saved edition choices,
-> and complete album sources across numbered disc folders.
+> **Status:** pre-alpha. Version `0.0.62` adds MBID-first Archive ownership, a configurable
+> database source, and visible ownership match reasons.
 
-If `0.0.16` is installed, download and run the latest `0.0.61` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.62` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -118,8 +118,8 @@ configuration and transfers.
   completion, and failure from the persisted transfer snapshot; selecting one
   opens and highlights the exact release in Transfers
 - Batched **Owned** and **Don't own** markers across MusicBrainz discographies
-  and Soulseek album-source reports, matched from the Archive's normalized
-  artist, album, release-year, and track-count metadata
+  and Soulseek album-source reports, matched by saved release-group MBID links
+  first, then normalized artist/title, with the match reason visible
 - A separate **Wanted Signals** watchlist for albums that are still missing,
   with preferred 15-minute, 30-minute, hourly, or manual rhythms, server-paced
   wishlist checks, adaptive backoff, effective cadence estimates, and per-album
@@ -430,6 +430,26 @@ up a newer Music Library import. Forever opens this database using SQLite's
 read-only flag and query-only mode; it has no Archive write command. Soulseek
 downloads continue to use the folder configured under Connection settings and
 are never imported into Archive.
+
+In **Archive → Library source**, **Choose database…** selects a different
+Music Library SQLite database. Forever validates it read-only before saving;
+invalid or cancelled choices leave the current source unchanged. **Use automatic
+location** restores the default. The source shows **Detected automatically** when
+connected at the default location, or **Custom database** for a selected file.
+A missing custom file remains visibly unavailable rather than switching libraries.
+The preference is saved separately in Forever's `archive.json` and survives restarts.
+Changing source clears ownership results and Missing Shelf caches.
+
+Ownership first checks saved `include` decisions in
+`musicbrainz_release_decisions` that reference a surviving local album and a
+verified, non-ignored artist link. These saved release-group MBIDs can match
+changed artist/title spellings. Conflicting saved identities are excluded from
+MBID matching; known different MBIDs do not fall through to a title match.
+Where no saved identity is available, matching uses shared Unicode-aware artist
+and title normalization, with original album year and stable local IDs breaking
+ties. **Owned · MBID** and **Owned · Title** distinguish the evidence; hover for
+local album details and the matched MBID. This confirms album ownership, not a
+particular pressing. Cached release-group catalogs alone are never proof of ownership.
 
 Open **Archive → Arrivals** after downloading an album. Forever shows verified
 downloads as **Ready to file**, recognizes albums already present in Music
@@ -770,8 +790,10 @@ verified downloads remain only as quiet Fulfilled history until you remove or
 re-add them; they never write to or import files into Music Library.
 
 Archive reads the external Music Library database at
-`%APPDATA%\com.local.musiclibrary\music-library.sqlite3`. Forever uses the
-`import_runs` and `albums` tables for source status and ownership matching. For
+`%APPDATA%\com.local.musiclibrary\music-library.sqlite3` by default, or the
+custom database selected in Library source. Forever uses the
+`import_runs`, `albums`, and optional `musicbrainz_release_decisions` tables for
+source status and ownership matching. For
 Missing Shelf it also reads verified rows from `musicbrainz_artist_links` and
 cached official rows from `musicbrainz_artist_release_groups`; absent tables or
 links fall back safely without schema changes. The connection is opened with

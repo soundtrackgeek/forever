@@ -5,6 +5,7 @@ import {
   Question,
 } from "@phosphor-icons/react";
 import type { ArchiveAlbumMatch } from "../types";
+import { archiveMatchReason } from "../utils/archiveMatch";
 
 type ArchiveOwnershipBadgeProps = {
   match?: ArchiveAlbumMatch;
@@ -29,7 +30,11 @@ export function ArchiveOwnershipBadge({
   const detail =
     match?.ownership === "owned"
       ? [
+          archiveMatchReason(match),
+          match.matchedReleaseGroupId,
+          match.localArtist,
           match.localTitle,
+          match.localAlbumId ? `Local album: ${match.localAlbumId}` : null,
           match.localYear,
           match.trackCount ? `${match.trackCount} tracks` : null,
         ]
@@ -41,7 +46,7 @@ export function ArchiveOwnershipBadge({
   return (
     <span
       className={`archive-ownership is-${classState} ${compact ? "is-compact" : ""}`}
-      title={detail || (state === "unknown" ? "Music Library Archive unavailable" : state === "unchecked" ? "This album has not been matched against the current Archive catalog." : undefined)}
+      title={(state === "owned" ? detail : undefined) || (state === "unknown" ? "Music Library Archive unavailable" : state === "unchecked" ? "This album has not been matched against the current Archive catalog." : undefined)}
     >
       {state === "owned" ? (
         <CheckCircle size={13} weight="fill" />
@@ -61,6 +66,7 @@ export function ArchiveOwnershipBadge({
             : state === "unchecked"
               ? "Archive not checked"
               : "Archive unavailable"}
+      {state === "owned" ? <small>{match?.matchMethod === "releaseGroupMbid" ? " · MBID" : match?.matchMethod === "normalizedTitle" ? " · Title" : ""}</small> : null}
     </span>
   );
 }

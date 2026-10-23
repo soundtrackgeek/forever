@@ -3,11 +3,14 @@ use crate::musicbrainz::{AlbumCatalog, AlbumReleaseGroup};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     time::{Duration, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager};
+
+pub(crate) mod settings;
+pub use settings::initialize;
 
 const MUSIC_LIBRARY_APP_DIRECTORY: &str = "com.local.musiclibrary";
 const MUSIC_LIBRARY_DATABASE: &str = "music-library.sqlite3";
@@ -18,6 +21,8 @@ const MAX_ARTIST_RESULTS: usize = 120;
 #[serde(rename_all = "camelCase")]
 pub struct ArchiveStatus {
     pub path: String,
+    pub path_source: settings::PathSource,
+    pub settings_notice: Option<String>,
     pub connected: bool,
     pub read_only: bool,
     pub album_count: Option<u64>,
@@ -39,6 +44,8 @@ pub struct ArchiveAlbumQuery {
 #[serde(rename_all = "camelCase")]
 pub struct ArchiveWantedQuery {
     pub id: String,
+    #[serde(default)]
+    pub release_group_id: Option<String>,
     pub artist: String,
     pub title: String,
     pub first_release_date: String,
@@ -52,11 +59,20 @@ pub enum ArchiveOwnership {
     Unknown,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ArchiveMatchMethod {
+    ReleaseGroupMbid,
+    NormalizedTitle,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchiveAlbumMatch {
     pub album_id: String,
     pub ownership: ArchiveOwnership,
+    pub match_method: Option<ArchiveMatchMethod>,
+    pub matched_release_group_id: Option<String>,
     pub local_album_id: Option<String>,
     pub local_title: Option<String>,
     pub local_artist: Option<String>,
@@ -146,6 +162,8 @@ fn modified_at_ms(path: &Path) -> Option<u64> {
 fn disconnected_status(path: &Path, error: String) -> ArchiveStatus {
     ArchiveStatus {
         path: path.display().to_string(),
+        path_source: settings::PathSource::Automatic,
+        settings_notice: None,
         connected: false,
         read_only: true,
         album_count: None,
@@ -199,6 +217,9 @@ fn status_from_connection(path: &Path, connection: &Connection) -> Result<Archiv
         );
     }
 
+    connection.prepare("SELECT id, album, album_artist_display, year, release_year, total_tracks FROM albums LIMIT 0")
+        .map_err(|error| format!("The selected database has an incompatible albums schema: {error}"))?;
+
     let import_summary = connection
         .query_row(
             "SELECT album_count, track_rows, completed_at
@@ -223,6 +244,8 @@ fn status_from_connection(path: &Path, connection: &Connection) -> Result<Archiv
 
     Ok(ArchiveStatus {
         path: path.display().to_string(),
+        path_source: settings::PathSource::Automatic,
+        settings_notice: None,
         connected: true,
         read_only: true,
         album_count,
@@ -553,7 +576,7 @@ fn query_artist_albums(
 ) -> Result<Vec<LocalAlbum>, String> {
     let mut statement = connection
         .prepare(
-            "SELECT id, album, album_artist_display, COALESCE(release_year, year), total_tracks
+            "SELECT id, album, album_artist_display, COALESCE(year, release_year), total_tracks
              FROM albums
              WHERE album_artist_display = ?1",
         )
@@ -579,23 +602,117 @@ fn query_artist_albums(
     Ok(albums)
 }
 
+fn normalized_mbid(value: &str) -> Option<String> {
+    let value = value.trim();
+    (value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        }))
+    .then(|| value.to_ascii_lowercase())
+}
+
+#[derive(Default)]
+struct OwnershipIndex {
+    by_mbid: HashMap<String, Vec<LocalAlbum>>,
+    identified_albums: HashSet<String>,
+}
+
+// Catalog caches describe everything an artist released, not what is owned.
+// Only saved include decisions attached to a surviving local album and a
+// verified, non-ignored artist link supply release-group identity evidence.
+fn ownership_index(connection: &Connection) -> Result<OwnershipIndex, String> {
+    let mut index = OwnershipIndex::default();
+    if !table_exists(connection, "musicbrainz_release_decisions")?
+        || !table_exists(connection, "musicbrainz_artist_links")?
+    {
+        return Ok(index);
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT d.release_mbid, a.id, a.album, a.album_artist_display,
+                COALESCE(a.year, a.release_year), a.total_tracks
+         FROM musicbrainz_release_decisions d
+         JOIN musicbrainz_artist_links l ON l.local_artist_key = d.local_artist_key
+         JOIN albums a ON a.id = d.local_album_id
+         WHERE d.decision = 'include' AND l.ignored = 0
+           AND l.verification_state = 'verified' AND NULLIF(TRIM(l.mbid), '') IS NOT NULL
+         ORDER BY a.id, d.release_mbid",
+        )
+        .map_err(|error| format!("Could not prepare Archive MBID links: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                LocalAlbum {
+                    id: row.get(1)?,
+                    title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    artist: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    year: row.get(4)?,
+                    track_count: row.get(5)?,
+                },
+            ))
+        })
+        .map_err(|error| format!("Could not query Archive MBID links: {error}"))?;
+    let mut by_album: HashMap<String, (LocalAlbum, HashSet<String>)> = HashMap::new();
+    for row in rows {
+        let (mbid, album) =
+            row.map_err(|error| format!("Could not read Archive MBID links: {error}"))?;
+        if let Some(mbid) = normalized_mbid(&mbid) {
+            by_album
+                .entry(album.id.clone())
+                .or_insert_with(|| (album, HashSet::new()))
+                .1
+                .insert(mbid);
+        }
+    }
+    for (id, (album, mbids)) in by_album {
+        index.identified_albums.insert(id);
+        // Conflicting saved identities must not claim either release via title.
+        if mbids.len() == 1 {
+            index
+                .by_mbid
+                .entry(mbids.into_iter().next().unwrap())
+                .or_default()
+                .push(album);
+        }
+    }
+    Ok(index)
+}
+
 fn match_queries(
     local_albums: &[LocalAlbum],
     queries: &[ArchiveAlbumQuery],
+    identities: &OwnershipIndex,
 ) -> Vec<ArchiveAlbumMatch> {
     queries
         .iter()
         .map(|query| {
             let title_key = normalize_title(&query.title);
             let query_year = year_from_date(&query.first_release_date);
-            let local = local_albums
-                .iter()
-                .filter(|album| normalize_title(&album.title) == title_key)
-                .min_by(|left, right| {
-                    year_distance(query_year, left.year)
-                        .cmp(&year_distance(query_year, right.year))
-                        .then_with(|| left.title.to_lowercase().cmp(&right.title.to_lowercase()))
-                });
+            let mbid = normalized_mbid(&query.id);
+            let compare = |left: &&LocalAlbum, right: &&LocalAlbum| {
+                year_distance(query_year, left.year)
+                    .cmp(&year_distance(query_year, right.year))
+                    .then_with(|| left.id.cmp(&right.id))
+            };
+            let exact = mbid
+                .as_ref()
+                .and_then(|id| identities.by_mbid.get(id))
+                .and_then(|albums| albums.iter().min_by(compare));
+            let local = exact.or_else(|| {
+                local_albums
+                    .iter()
+                    .filter(|album| {
+                        !title_key.is_empty()
+                            && normalize_title(&album.title) == title_key
+                            && (mbid.is_none() || !identities.identified_albums.contains(&album.id))
+                    })
+                    .min_by(compare)
+            });
             ArchiveAlbumMatch {
                 album_id: query.id.clone(),
                 ownership: if local.is_some() {
@@ -603,6 +720,14 @@ fn match_queries(
                 } else {
                     ArchiveOwnership::NotOwned
                 },
+                match_method: local.map(|_| {
+                    if exact.is_some() {
+                        ArchiveMatchMethod::ReleaseGroupMbid
+                    } else {
+                        ArchiveMatchMethod::NormalizedTitle
+                    }
+                }),
+                matched_release_group_id: exact.and(mbid),
                 local_album_id: local.map(|album| album.id.clone()),
                 local_title: local.map(|album| album.title.clone()),
                 local_artist: local.map(|album| album.artist.clone()),
@@ -628,6 +753,8 @@ fn match_for_path(
                     .map(|query| ArchiveAlbumMatch {
                         album_id: query.id.clone(),
                         ownership: ArchiveOwnership::Unknown,
+                        match_method: None,
+                        matched_release_group_id: None,
                         local_album_id: None,
                         local_title: None,
                         local_artist: None,
@@ -647,12 +774,15 @@ fn match_for_path(
             }
         }
     };
-    match normalized_artist_names(&connection)
-        .and_then(|names| query_artist_albums(&connection, artist, &names))
-    {
-        Ok(local_albums) => ArchiveMatchResponse {
+    match normalized_artist_names(&connection).and_then(|names| {
+        Ok((
+            query_artist_albums(&connection, artist, &names)?,
+            ownership_index(&connection)?,
+        ))
+    }) {
+        Ok((local_albums, identities)) => ArchiveMatchResponse {
             source,
-            matches: match_queries(&local_albums, queries),
+            matches: match_queries(&local_albums, queries, &identities),
         },
         Err(error) => ArchiveMatchResponse {
             source: disconnected_status(path, error),
@@ -672,6 +802,8 @@ fn match_wanted_for_path(path: &Path, queries: &[ArchiveWantedQuery]) -> Archive
                     .map(|query| ArchiveAlbumMatch {
                         album_id: query.id.clone(),
                         ownership: ArchiveOwnership::Unknown,
+                        match_method: None,
+                        matched_release_group_id: None,
                         local_album_id: None,
                         local_title: None,
                         local_artist: None,
@@ -700,6 +832,15 @@ fn match_wanted_for_path(path: &Path, queries: &[ArchiveWantedQuery]) -> Archive
             }
         }
     };
+    let identities = match ownership_index(&connection) {
+        Ok(identities) => identities,
+        Err(error) => {
+            return ArchiveMatchResponse {
+                source: disconnected_status(path, error),
+                matches: Vec::new(),
+            }
+        }
+    };
     let mut by_artist: HashMap<String, Result<Vec<LocalAlbum>, String>> = HashMap::new();
     let mut matches = Vec::with_capacity(queries.len());
     for query in queries {
@@ -717,11 +858,14 @@ fn match_wanted_for_path(path: &Path, queries: &[ArchiveWantedQuery]) -> Archive
             }
         };
         let album_query = ArchiveAlbumQuery {
-            id: query.id.clone(),
+            id: query.release_group_id.clone().unwrap_or_default(),
             title: query.title.clone(),
             first_release_date: query.first_release_date.clone(),
         };
-        if let Some(album_match) = match_queries(local_albums, &[album_query]).pop() {
+        if let Some(mut album_match) =
+            match_queries(local_albums, &[album_query], &identities).pop()
+        {
+            album_match.album_id = query.id.clone();
             matches.push(album_match);
         }
     }
@@ -730,8 +874,8 @@ fn match_wanted_for_path(path: &Path, queries: &[ArchiveWantedQuery]) -> Archive
 
 #[tauri::command]
 pub async fn archive_status(app: AppHandle) -> Result<ArchiveStatus, String> {
-    let path = default_database_path(&app)?;
-    tokio::task::spawn_blocking(move || status_for_path(&path))
+    let source = settings::source(&app);
+    tokio::task::spawn_blocking(move || source.annotate(status_for_path(&source.path)))
         .await
         .map_err(|error| format!("The Archive status task stopped unexpectedly: {error}"))
 }
@@ -755,10 +899,14 @@ pub async fn archive_match_albums(
     {
         return Err("The Archive can check up to 300 valid albums at a time.".to_owned());
     }
-    let path = default_database_path(&app)?;
-    tokio::task::spawn_blocking(move || match_for_path(&path, &artist, &albums))
-        .await
-        .map_err(|error| format!("The Archive ownership task stopped unexpectedly: {error}"))
+    let source = settings::source(&app);
+    tokio::task::spawn_blocking(move || {
+        let mut response = match_for_path(&source.path, &artist, &albums);
+        response.source = source.annotate(response.source);
+        response
+    })
+    .await
+    .map_err(|error| format!("The Archive ownership task stopped unexpectedly: {error}"))
 }
 
 #[tauri::command]
@@ -768,7 +916,11 @@ pub async fn archive_match_wanted(
 ) -> Result<ArchiveMatchResponse, String> {
     if albums.len() > 500
         || albums.iter().any(|album| {
-            album.id.is_empty()
+            album
+                .release_group_id
+                .as_ref()
+                .is_some_and(|id| normalized_mbid(id).is_none())
+                || album.id.is_empty()
                 || album.id.chars().count() > 100
                 || album.artist.trim().is_empty()
                 || album.artist.chars().count() > 180
@@ -780,10 +932,14 @@ pub async fn archive_match_wanted(
     {
         return Err("The Archive can check up to 500 valid Wanted albums at a time.".to_owned());
     }
-    let path = default_database_path(&app)?;
-    tokio::task::spawn_blocking(move || match_wanted_for_path(&path, &albums))
-        .await
-        .map_err(|error| format!("The Wanted ownership task stopped unexpectedly: {error}"))
+    let source = settings::source(&app);
+    tokio::task::spawn_blocking(move || {
+        let mut response = match_wanted_for_path(&source.path, &albums);
+        response.source = source.annotate(response.source);
+        response
+    })
+    .await
+    .map_err(|error| format!("The Wanted ownership task stopped unexpectedly: {error}"))
 }
 
 #[tauri::command]
@@ -795,10 +951,14 @@ pub async fn archive_artists(
     if query.chars().count() > 180 || query.chars().any(char::is_control) {
         return Err("Keep the Archive artist search under 180 visible characters.".to_owned());
     }
-    let path = default_database_path(&app)?;
-    tokio::task::spawn_blocking(move || artists_for_path(&path, &query))
-        .await
-        .map_err(|error| format!("The Archive artist task stopped unexpectedly: {error}"))
+    let source = settings::source(&app);
+    tokio::task::spawn_blocking(move || {
+        let mut response = artists_for_path(&source.path, &query);
+        response.source = source.annotate(response.source);
+        response
+    })
+    .await
+    .map_err(|error| format!("The Archive artist task stopped unexpectedly: {error}"))
 }
 
 #[tauri::command]
@@ -816,8 +976,8 @@ pub async fn archive_cached_catalog(
             "Choose a valid MusicBrainz artist before opening the Missing Shelf.".to_owned(),
         );
     }
-    let path = default_database_path(&app)?;
-    tokio::task::spawn_blocking(move || cached_catalog_for_path(&path, &artist_id))
+    let source = settings::source(&app);
+    tokio::task::spawn_blocking(move || cached_catalog_for_path(&source.path, &artist_id))
         .await
         .map_err(|error| format!("The cached catalog task stopped unexpectedly: {error}"))?
 }
@@ -827,7 +987,7 @@ mod tests {
     use super::*;
     use tempfile::NamedTempFile;
 
-    fn fixture() -> NamedTempFile {
+    pub(super) fn fixture() -> NamedTempFile {
         let file = NamedTempFile::new().expect("create archive fixture");
         let connection = Connection::open(file.path()).expect("open archive fixture");
         connection
@@ -904,6 +1064,176 @@ mod tests {
         assert_eq!(remaining, 3);
     }
 
+    const HYSTERIA_MBID: &str = "12fa3845-7c62-36e5-a8da-8be137155a72";
+    const OTHER_MBID: &str = "22222222-2222-4222-8222-222222222222";
+
+    fn link_hysteria(file: &NamedTempFile) {
+        let connection = Connection::open(file.path()).unwrap();
+        connection.execute_batch(
+            "CREATE TABLE musicbrainz_release_decisions (
+                local_artist_key TEXT, release_mbid TEXT, decision TEXT, local_album_id TEXT
+             );
+             INSERT INTO musicbrainz_release_decisions VALUES
+                ('def leppard', '12FA3845-7C62-36E5-A8DA-8BE137155A72', 'include', 'hysteria-local');"
+        ).unwrap();
+    }
+
+    fn query(id: &str, title: &str) -> ArchiveAlbumQuery {
+        ArchiveAlbumQuery {
+            id: id.into(),
+            title: title.into(),
+            first_release_date: "1987".into(),
+        }
+    }
+
+    #[test]
+    fn saved_mbid_wins_over_names_and_blocks_conflicting_title_matches() {
+        let file = fixture();
+        link_hysteria(&file);
+        let before = std::fs::read(file.path()).unwrap();
+        let renamed = match_for_path(
+            file.path(),
+            "New artist spelling",
+            &[query(HYSTERIA_MBID, "Different title")],
+        );
+        let matched = &renamed.matches[0];
+        assert_eq!(matched.local_album_id.as_deref(), Some("hysteria-local"));
+        assert_eq!(
+            matched.match_method,
+            Some(ArchiveMatchMethod::ReleaseGroupMbid)
+        );
+        assert_eq!(
+            matched.matched_release_group_id.as_deref(),
+            Some(HYSTERIA_MBID)
+        );
+        let competing_title = match_for_path(
+            file.path(),
+            "Def Leppard",
+            &[query(HYSTERIA_MBID, "Pyromania")],
+        );
+        assert_eq!(
+            competing_title.matches[0].local_album_id.as_deref(),
+            Some("hysteria-local")
+        );
+        let conflict = match_for_path(file.path(), "Def Leppard", &[query(OTHER_MBID, "Hysteria")]);
+        assert_eq!(conflict.matches[0].ownership, ArchiveOwnership::NotOwned);
+        assert_eq!(conflict.matches[0].match_method, None);
+        let fallback = match_for_path(
+            file.path(),
+            "Def Leppard",
+            &[query(OTHER_MBID, "Pyromania")],
+        );
+        assert_eq!(
+            fallback.matches[0].match_method,
+            Some(ArchiveMatchMethod::NormalizedTitle)
+        );
+        assert_eq!(std::fs::read(file.path()).unwrap(), before);
+    }
+
+    #[test]
+    fn catalog_rows_and_untrusted_or_dangling_decisions_do_not_prove_ownership() {
+        let file = fixture();
+        let no_link = match_for_path(
+            file.path(),
+            "Def Leppard",
+            &[query(HYSTERIA_MBID, "Different title")],
+        );
+        assert_eq!(no_link.matches[0].ownership, ArchiveOwnership::NotOwned);
+        link_hysteria(&file);
+        for change in [
+            "UPDATE musicbrainz_release_decisions SET decision = 'not-in-scope'",
+            "UPDATE musicbrainz_release_decisions SET decision = 'include', local_album_id = 'deleted'",
+            "UPDATE musicbrainz_release_decisions SET local_album_id = 'hysteria-local'; UPDATE musicbrainz_artist_links SET ignored = 1",
+            "UPDATE musicbrainz_artist_links SET ignored = 0, verification_state = 'unverified'",
+            "UPDATE musicbrainz_artist_links SET verification_state = 'verified'; UPDATE musicbrainz_release_decisions SET release_mbid = 'invalid'",
+        ] {
+            Connection::open(file.path()).unwrap().execute_batch(change).unwrap();
+            let response = match_for_path(file.path(), "Def Leppard", &[query(HYSTERIA_MBID, "Different title")]);
+            assert!(response.source.connected);
+            assert_eq!(response.matches[0].ownership, ArchiveOwnership::NotOwned);
+        }
+    }
+
+    #[test]
+    fn conflicting_saved_mbids_do_not_claim_either_release() {
+        let file = fixture();
+        link_hysteria(&file);
+        Connection::open(file.path()).unwrap().execute(
+            "INSERT INTO musicbrainz_release_decisions VALUES ('def leppard', ?1, 'include', 'hysteria-local')", [OTHER_MBID]
+        ).unwrap();
+        let response = match_for_path(
+            file.path(),
+            "Def Leppard",
+            &[
+                query(HYSTERIA_MBID, "Hysteria"),
+                query(OTHER_MBID, "Hysteria"),
+            ],
+        );
+        assert!(response
+            .matches
+            .iter()
+            .all(|matched| matched.ownership == ArchiveOwnership::NotOwned));
+    }
+
+    #[test]
+    fn transfers_keep_correlation_id_separate_from_release_group_identity() {
+        let file = fixture();
+        link_hysteria(&file);
+        let response = match_wanted_for_path(
+            file.path(),
+            &[
+                ArchiveWantedQuery {
+                    id: "download-instance".into(),
+                    release_group_id: Some(HYSTERIA_MBID.into()),
+                    artist: "Renamed".into(),
+                    title: "Renamed".into(),
+                    first_release_date: String::new(),
+                },
+                ArchiveWantedQuery {
+                    id: "legacy-instance".into(),
+                    release_group_id: None,
+                    artist: "Def Leppard".into(),
+                    title: "Hysteria".into(),
+                    first_release_date: String::new(),
+                },
+            ],
+        );
+        assert_eq!(response.matches[0].album_id, "download-instance");
+        assert_eq!(
+            response.matches[0].match_method,
+            Some(ArchiveMatchMethod::ReleaseGroupMbid)
+        );
+        assert_eq!(response.matches[1].album_id, "legacy-instance");
+        assert_eq!(
+            response.matches[1].match_method,
+            Some(ArchiveMatchMethod::NormalizedTitle)
+        );
+    }
+
+    #[test]
+    fn older_schema_uses_titles_and_original_year_with_stable_ties() {
+        let file = fixture();
+        Connection::open(file.path()).unwrap().execute_batch(
+            "DROP TABLE musicbrainz_artist_links; DROP TABLE musicbrainz_artist_release_groups;
+             UPDATE albums SET release_year = 2026 WHERE id = 'hysteria-local';
+             INSERT INTO albums VALUES ('other-hysteria', 'Hysteria', 'Def Leppard', 2000, 1987, 99);"
+        ).unwrap();
+        let response = match_for_path(
+            file.path(),
+            "Def Leppard",
+            &[query(HYSTERIA_MBID, "Hysteria")],
+        );
+        assert_eq!(
+            response.matches[0].local_album_id.as_deref(),
+            Some("hysteria-local")
+        );
+        assert_eq!(response.matches[0].local_year, Some(1987));
+        assert_eq!(
+            response.matches[0].match_method,
+            Some(ArchiveMatchMethod::NormalizedTitle)
+        );
+    }
+
     #[test]
     fn reports_import_metadata_without_counting_large_tables() {
         let file = fixture();
@@ -965,18 +1295,21 @@ mod tests {
             file.path(),
             &[
                 ArchiveWantedQuery {
+                    release_group_id: None,
                     id: "one".into(),
                     artist: "Bjork".into(),
                     title: "Joga and More".into(),
                     first_release_date: "1997".into(),
                 },
                 ArchiveWantedQuery {
+                    release_group_id: None,
                     id: "two".into(),
                     artist: "Simon and Garfunkel".into(),
                     title: "Parsley Sage Rosemary and Thyme".into(),
                     first_release_date: "1966".into(),
                 },
                 ArchiveWantedQuery {
+                    release_group_id: None,
                     id: "three".into(),
                     artist: "Bjork".into(),
                     title: "Joga and More Live".into(),
@@ -997,12 +1330,14 @@ mod tests {
             file.path(),
             &[
                 ArchiveWantedQuery {
+                    release_group_id: None,
                     id: "hysteria".to_owned(),
                     artist: "Def Leppard".to_owned(),
                     title: "Hysteria".to_owned(),
                     first_release_date: "1987-08-03".to_owned(),
                 },
                 ArchiveWantedQuery {
+                    release_group_id: None,
                     id: "other".to_owned(),
                     artist: "Engine Alley".to_owned(),
                     title: "A Sonic Holiday".to_owned(),

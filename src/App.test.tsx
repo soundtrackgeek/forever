@@ -23,7 +23,7 @@ describe("Forever shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     fireEvent.click(screen.getByRole("tab", { name: "Wanted 3" }));
     fireEvent.click(screen.getByRole("button", { name: "Check A Sonic Holiday now" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Review match" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Review match" }, { timeout: 10_000 }));
     await screen.findByText("Exact tracklist", {}, { timeout: 10000 });
     fireEvent.change(screen.getByRole("combobox", { name: "MusicBrainz edition" }), {
       target: { value: "preview-deluxe" },
@@ -1020,17 +1020,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.61 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.62 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Smart Match and Wanted share one Rust ranking and title matcher.",
+        "Archive ownership checks saved release-group MBID links before titles.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Choose an official edition and compare titles and track lengths.",
+        "Choose a Music Library database or restore automatic detection.",
       ),
     ).toBeInTheDocument();
     expect(

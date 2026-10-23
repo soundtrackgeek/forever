@@ -65,6 +65,8 @@ const previewCatalog: AlbumCatalog = {
 const previewMatches = previewAlbums.map<ArchiveAlbumMatch>((album) => ({
   albumId: album.id,
   ownership: previewOwnedIds.has(album.id) ? "owned" : "notOwned",
+  matchMethod: previewOwnedIds.has(album.id) ? "releaseGroupMbid" : null,
+  matchedReleaseGroupId: previewOwnedIds.has(album.id) ? album.id : null,
   localAlbumId: previewOwnedIds.has(album.id) ? `preview-${album.id}` : null,
   localTitle: previewOwnedIds.has(album.id) ? album.title : null,
   localArtist: previewOwnedIds.has(album.id) ? "Def Leppard" : null,
@@ -86,6 +88,7 @@ type CachedComparison = {
 
 export function useMissingShelf() {
   const native = isTauri();
+  const sourceGeneration = useRef(0);
   const [activated, setActivated] = useState(!native);
   const [query, setQuery] = useState("");
   const [artists, setArtists] = useState<ArchiveArtistSummary[]>(native ? [] : previewArtists);
@@ -101,6 +104,7 @@ export function useMissingShelf() {
   const comparisons = useRef(new Map<string, CachedComparison>());
 
   const loadArtists = useCallback(async (nextQuery: string) => {
+    const generation = sourceGeneration.current;
     const normalized = nextQuery.trim();
     setQuery(normalized);
     setLoading("artists");
@@ -113,19 +117,22 @@ export function useMissingShelf() {
             artists: previewArtists.filter((artist) => artist.name.toLowerCase().includes(normalized.toLowerCase())),
             truncated: false,
           };
+      if (generation !== sourceGeneration.current) return [];
+      if (response.source?.error) throw new Error(response.source.error);
       setArtists(response.artists);
       setArtistsTruncated(response.truncated);
       setActivated(true);
       return response.artists;
     } catch (cause) {
-      setError(message(cause));
+      if (generation === sourceGeneration.current) setError(message(cause));
       throw cause;
     } finally {
-      setLoading("idle");
+      if (generation === sourceGeneration.current) setLoading("idle");
     }
   }, [native]);
 
   const matchCatalog = useCallback(async (artist: string, nextCatalog: AlbumCatalog) => {
+    const generation = sourceGeneration.current;
     const response = native
       ? await invoke<ArchiveMatchResponse>("archive_match_albums", {
           artist,
@@ -136,6 +143,8 @@ export function useMissingShelf() {
           })),
         })
       : { source: null, matches: previewMatches };
+    if (generation !== sourceGeneration.current) return [];
+    if (response.source?.error) throw new Error(response.source.error);
     setMatches(response.matches);
     return response.matches;
   }, [native]);
@@ -144,6 +153,7 @@ export function useMissingShelf() {
     artist: ArchiveArtistSummary,
     identity?: AlbumArtist,
   ) => {
+    const generation = sourceGeneration.current;
     setSelectedArtist(artist);
     setIdentityOptions([]);
     setCatalog(null);
@@ -156,14 +166,15 @@ export function useMissingShelf() {
         const options = native
           ? await invoke<AlbumArtist[]>("album_artists_search", { query: artist.name })
           : [{ id: defLeppardId, name: artist.name, disambiguation: null, country: null, artistType: "Group", score: 100 }];
+        if (generation !== sourceGeneration.current) return null;
         setIdentityOptions(options);
         if (options.length === 0) setError("MusicBrainz did not return an identity for this artist.");
         return null;
       } catch (cause) {
-        setError(message(cause));
+        if (generation === sourceGeneration.current) setError(message(cause));
         throw cause;
       } finally {
-        setLoading("idle");
+        if (generation === sourceGeneration.current) setLoading("idle");
       }
     }
     const cacheKey = `${artist.name.toLowerCase()}\u0000${artistId.toLowerCase()}`;
@@ -194,10 +205,12 @@ export function useMissingShelf() {
         nextSource = "musicbrainz";
         nextFetchedAt = null;
       }
+      if (generation !== sourceGeneration.current) return null;
       setCatalog(nextCatalog);
       setCatalogSource(nextSource);
       setCatalogFetchedAt(nextFetchedAt);
       const nextMatches = await matchCatalog(artist.name, nextCatalog);
+      if (generation !== sourceGeneration.current) return null;
       comparisons.current.set(cacheKey, {
         catalog: nextCatalog,
         matches: nextMatches,
@@ -206,12 +219,28 @@ export function useMissingShelf() {
       });
       return nextCatalog;
     } catch (cause) {
-      setError(message(cause));
+      if (generation === sourceGeneration.current) setError(message(cause));
       throw cause;
     } finally {
-      setLoading("idle");
+      if (generation === sourceGeneration.current) setLoading("idle");
     }
   }, [matchCatalog, native]);
+
+  const resetSource = useCallback(() => {
+    sourceGeneration.current += 1;
+    comparisons.current.clear();
+    setActivated(false);
+    setArtists([]);
+    setArtistsTruncated(false);
+    setSelectedArtist(null);
+    setIdentityOptions([]);
+    setCatalog(null);
+    setMatches([]);
+    setCatalogSource(null);
+    setCatalogFetchedAt(null);
+    setLoading("idle");
+    setError(null);
+  }, []);
 
   const activate = useCallback(async () => {
     if (activated) return artists;
@@ -230,6 +259,7 @@ export function useMissingShelf() {
 
   return useMemo(() => ({
     activated,
+    resetSource,
     query,
     artists,
     artistsTruncated,
@@ -247,5 +277,5 @@ export function useMissingShelf() {
     selectIdentity,
     clearCache: () => comparisons.current.clear(),
     clearError: () => setError(null),
-  }), [activate, activated, artists, artistsTruncated, catalog, catalogFetchedAt, catalogSource, error, identityOptions, loadCatalog, loadArtists, loading, matchByAlbumId, query, selectIdentity, selectedArtist]);
+  }), [activate, activated, resetSource, artists, artistsTruncated, catalog, catalogFetchedAt, catalogSource, error, identityOptions, loadCatalog, loadArtists, loading, matchByAlbumId, query, selectIdentity, selectedArtist]);
 }

@@ -126,9 +126,11 @@ describe("Fulfilled Shelf", () => {
         error={null}
         wanted={wanted}
         wantedReady
+        wantedMatches={new Map()}
+        onSelectDatabase={vi.fn()}
         wantedError={null}
         online
-        onRefresh={vi.fn(async () => ({ path: "", connected: false, readOnly: true, albumCount: null, trackCount: null, lastImportedAt: null, lastModifiedAtMs: null, error: null }))}
+        onRefresh={vi.fn(async () => ({ path: "", pathSource: "automatic" as const, settingsNotice: null, connected: false, readOnly: true, albumCount: null, trackCount: null, lastImportedAt: null, lastModifiedAtMs: null, error: null }))}
         onSetWantedInterval={vi.fn(async () => undefined)}
         onCheckWanted={vi.fn(async () => undefined)}
         onSetWantedPaused={vi.fn(async () => undefined)}

@@ -39,8 +39,6 @@ type QueueDropTarget = {
   placement: "before" | "after";
 };
 
-const transfersClockStartedAtMs = Date.now();
-
 type TransfersWorkspaceProps = {
   transfers: Transfer[];
   safetyState: "running" | "draining" | "pausedForRestart";
@@ -193,7 +191,7 @@ export function TransfersWorkspace({
   focusTarget = null,
 }: TransfersWorkspaceProps) {
   const [direction, setDirection] = useState<"downloads" | "uploads">("downloads");
-  const [clock, setClock] = useState(transfersClockStartedAtMs);
+  const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 1_000);
     return () => window.clearInterval(timer);

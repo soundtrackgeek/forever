@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AlbumReleaseGroup,
   ArchiveAlbumMatch,
@@ -11,6 +11,8 @@ import type { TransferGroup } from "../utils/transfers";
 
 const previewStatus: ArchiveStatus = {
   path: "C:\\Users\\jtill\\AppData\\Roaming\\com.local.musiclibrary\\music-library.sqlite3",
+  pathSource: "automatic",
+  settingsNotice: null,
   connected: true,
   readOnly: true,
   albumCount: 72_366,
@@ -30,11 +32,15 @@ const message = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
 
 const transferArchiveQuery = (group: TransferGroup) => {
+  const identity = group.transfers.find((transfer) => transfer.searchAlbum)?.searchAlbum;
+  const releaseGroupId = group.transfers.find((transfer) => transfer.releaseGroupId)?.releaseGroupId ?? null;
+  if (identity) return { id: group.id, releaseGroupId, artist: identity.artist, title: identity.title, firstReleaseDate: "" };
   const match = /^(.*?)\s+-\s+(.+?)(?:\s+\((\d{4})\))?$/.exec(group.title.trim());
   if (!match) {
     if (group.id !== "preview-apex-horizon-release") return null;
     return {
       id: group.id,
+      releaseGroupId,
       artist: "Nova Arc",
       title: group.title,
       firstReleaseDate: "2025",
@@ -42,6 +48,7 @@ const transferArchiveQuery = (group: TransferGroup) => {
   }
   return {
     id: group.id,
+      releaseGroupId,
     artist: match[1].trim(),
     title: match[2].trim(),
     firstReleaseDate: match[3] ?? "",
@@ -53,6 +60,8 @@ const previewMatch = (album: AlbumReleaseGroup): ArchiveAlbumMatch => {
   return {
     albumId: album.id,
     ownership: owned ? "owned" : "notOwned",
+    matchMethod: owned ? "releaseGroupMbid" : null,
+    matchedReleaseGroupId: owned ? album.id : null,
     localAlbumId: owned ? `preview-${album.id}` : null,
     localTitle: owned ? album.title : null,
     localArtist: owned ? "Def Leppard" : null,
@@ -68,6 +77,8 @@ export function useArchiveInventory(
   transferGroups: TransferGroup[] = [],
 ) {
   const native = isTauri();
+  const sourceGeneration = useRef(0);
+  const switchingSource = useRef(false);
   const [status, setStatus] = useState<ArchiveStatus | null>(native ? null : previewStatus);
   const [matches, setMatches] = useState<ArchiveAlbumMatch[]>([]);
   const [wantedMatches, setWantedMatches] = useState<ArchiveAlbumMatch[]>([]);
@@ -86,7 +97,7 @@ export function useArchiveInventory(
     () => wantedQueryKey
       ? wantedQueryKey.split("\u0001").map((entry) => {
           const [id, wantedArtist, title, firstReleaseDate] = entry.split("\u0000");
-          return { id, artist: wantedArtist, title, firstReleaseDate };
+          return { id, releaseGroupId: id, artist: wantedArtist, title, firstReleaseDate };
         })
       : [],
     [wantedQueryKey],
@@ -97,15 +108,15 @@ export function useArchiveInventory(
       .map(transferArchiveQuery)
       .filter((query): query is NonNullable<ReturnType<typeof transferArchiveQuery>> => Boolean(query))
       .slice(0, 300)
-      .map((query) => `${query.id}\u0000${query.artist}\u0000${query.title}\u0000${query.firstReleaseDate}`)
+      .map((query) => `${query.id}\u0000${query.releaseGroupId ?? ""}\u0000${query.artist}\u0000${query.title}\u0000${query.firstReleaseDate}`)
       .join("\u0001"),
     [transferGroups],
   );
   const transferQueries = useMemo(
     () => transferQueryKey
       ? transferQueryKey.split("\u0001").map((entry) => {
-          const [id, transferArtist, title, firstReleaseDate] = entry.split("\u0000");
-          return { id, artist: transferArtist, title, firstReleaseDate };
+          const [id, releaseGroupId, transferArtist, title, firstReleaseDate] = entry.split("\u0000");
+          return { id, releaseGroupId: releaseGroupId || null, artist: transferArtist, title, firstReleaseDate };
         })
       : [],
     [transferQueryKey],
@@ -116,36 +127,65 @@ export function useArchiveInventory(
     [native],
   );
 
-  const refresh = useCallback(async () => {
+  const selectDatabase = useCallback(async (path: string | null) => {
+    switchingSource.current = true;
+    sourceGeneration.current += 1;
+    setMatching(false);
     setLoading(true);
     setError(null);
+    setMatches([]);
+    setWantedMatches([]);
+    setTransferMatches([]);
     try {
-      const next = await readStatus();
+      if (!native) throw new Error("Choose an Archive database in the desktop app.");
+      const next = await invoke<ArchiveStatus>("archive_set_database_path", { path });
       setStatus(next);
-      if (next.error) setError(next.error);
-      setRevision((current) => current + 1);
+      setError(next.error);
       return next;
     } catch (cause) {
       setError(message(cause));
       throw cause;
     } finally {
+      switchingSource.current = false;
+      sourceGeneration.current += 1;
+      setRevision((current) => current + 1);
       setLoading(false);
+    }
+  }, [native]);
+
+  const refresh = useCallback(async () => {
+    const generation = sourceGeneration.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const next = await readStatus();
+      if (generation !== sourceGeneration.current) return next;
+      setStatus(next);
+      if (next.error) setError(next.error);
+      setRevision((current) => current + 1);
+      return next;
+    } catch (cause) {
+      if (generation === sourceGeneration.current) setError(message(cause));
+      throw cause;
+    } finally {
+      if (generation === sourceGeneration.current) setLoading(false);
     }
   }, [readStatus]);
 
   useEffect(() => {
     let current = true;
+    const generation = sourceGeneration.current;
     void readStatus()
       .then((next) => {
-        if (!current) return;
+        if (!current || generation !== sourceGeneration.current) return;
         setStatus(next);
         setError(next.error);
       })
       .catch((cause) => {
-        if (current) setError(message(cause));
+        if (current && generation === sourceGeneration.current) setError(message(cause));
       })
       .finally(() => {
-        if (current) setLoading(false);
+        if (current && generation === sourceGeneration.current) setLoading(false);
       });
     return () => {
       current = false;
@@ -162,9 +202,11 @@ export function useArchiveInventory(
 
   useEffect(() => {
     let current = true;
+    const generation = sourceGeneration.current;
+    if (switchingSource.current) return;
     if (!artist || albums.length === 0) {
       void Promise.resolve().then(() => {
-        if (!current) return;
+        if (!current || generation !== sourceGeneration.current) return;
         setMatches([]);
         setMatching(false);
       });
@@ -189,16 +231,16 @@ export function useArchiveInventory(
               source: previewStatus,
               matches: albums.map(previewMatch),
             };
-        if (!current) return;
+        if (!current || generation !== sourceGeneration.current) return;
         setStatus(response.source);
         setMatches(response.matches);
         setError(response.source.error);
       } catch (cause) {
-        if (!current) return;
+        if (!current || generation !== sourceGeneration.current) return;
         setMatches([]);
         setError(message(cause));
       } finally {
-        if (current) setMatching(false);
+        if (current && generation === sourceGeneration.current) setMatching(false);
       }
     };
     void load();
@@ -209,9 +251,11 @@ export function useArchiveInventory(
 
   useEffect(() => {
     let current = true;
+    const generation = sourceGeneration.current;
+    if (switchingSource.current) return;
     if (!wantedQueryKey) {
       void Promise.resolve().then(() => {
-        if (current) setWantedMatches([]);
+        if (current && generation === sourceGeneration.current) setWantedMatches([]);
       });
       return () => {
         current = false;
@@ -226,6 +270,8 @@ export function useArchiveInventory(
             return {
               albumId: album.id,
               ownership: owned ? "owned" as const : "notOwned" as const,
+              matchMethod: owned ? "releaseGroupMbid" as const : null,
+              matchedReleaseGroupId: owned ? album.id : null,
               localAlbumId: owned ? `preview-${album.id}` : null,
               localTitle: owned ? album.title : null,
               localArtist: owned ? album.artist : null,
@@ -235,12 +281,15 @@ export function useArchiveInventory(
           }),
         }))
       .then((response) => {
-        if (!current) return;
-        setWantedMatches(response.matches);
+        if (!current || generation !== sourceGeneration.current) return;
+        setWantedMatches(response.source.connected ? response.matches : []);
         setStatus(response.source);
       })
       .catch((cause) => {
-        if (current) setError(message(cause));
+        if (current && generation === sourceGeneration.current) {
+          setWantedMatches([]);
+          setError(message(cause));
+        }
       });
     return () => {
       current = false;
@@ -249,9 +298,11 @@ export function useArchiveInventory(
 
   useEffect(() => {
     let current = true;
+    const generation = sourceGeneration.current;
+    if (switchingSource.current) return;
     if (!transferQueryKey) {
       void Promise.resolve().then(() => {
-        if (current) setTransferMatches([]);
+        if (current && generation === sourceGeneration.current) setTransferMatches([]);
       });
       return () => {
         current = false;
@@ -264,6 +315,8 @@ export function useArchiveInventory(
           matches: transferQueries.map((album) => ({
             albumId: album.id,
             ownership: ["In the Kingdom", "Apex Horizon (Deluxe)"].includes(album.title) ? "owned" as const : "notOwned" as const,
+            matchMethod: ["In the Kingdom", "Apex Horizon (Deluxe)"].includes(album.title) ? "normalizedTitle" as const : null,
+            matchedReleaseGroupId: null,
             localAlbumId: ["In the Kingdom", "Apex Horizon (Deluxe)"].includes(album.title) ? `preview-${album.id}` : null,
             localTitle: ["In the Kingdom", "Apex Horizon (Deluxe)"].includes(album.title) ? album.title : null,
             localArtist: ["In the Kingdom", "Apex Horizon (Deluxe)"].includes(album.title) ? album.artist : null,
@@ -272,12 +325,15 @@ export function useArchiveInventory(
           })),
         }))
       .then((response) => {
-        if (!current) return;
-        setTransferMatches(response.matches);
+        if (!current || generation !== sourceGeneration.current) return;
+        setTransferMatches(response.source.connected ? response.matches : []);
         setStatus(response.source);
       })
       .catch((cause) => {
-        if (current) setError(message(cause));
+        if (current && generation === sourceGeneration.current) {
+          setTransferMatches([]);
+          setError(message(cause));
+        }
       });
     return () => {
       current = false;
@@ -307,7 +363,8 @@ export function useArchiveInventory(
       wantedMatchByAlbumId,
       transferMatchByReleaseId,
       refresh,
+      selectDatabase,
     }),
-    [error, loading, matchByAlbumId, matching, refresh, status, transferMatchByReleaseId, wantedMatchByAlbumId],
+    [error, loading, matchByAlbumId, matching, refresh, selectDatabase, status, transferMatchByReleaseId, wantedMatchByAlbumId],
   );
 }

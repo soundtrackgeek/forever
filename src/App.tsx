@@ -1005,6 +1005,15 @@ function App() {
             error={archive.error}
             wanted={wanted.snapshot}
             wantedReady={wanted.ready}
+            wantedMatches={archive.wantedMatchByAlbumId}
+            onSelectDatabase={async (path) => {
+              missingShelf.resetSource();
+              try {
+                return await archive.selectDatabase(path);
+              } finally {
+                missingShelf.resetSource();
+              }
+            }}
             wantedError={wanted.error}
             online={connection.snapshot.state === "online"}
             onRefresh={async () => {

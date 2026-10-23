@@ -18,7 +18,7 @@ mod service;
 mod settings;
 mod shares;
 mod soundcheck;
-mod store;
+pub(crate) mod store;
 mod transfer_writer;
 mod uploads;
 mod wanted;

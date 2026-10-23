@@ -24,7 +24,9 @@ import {
 import { type ReactNode, useMemo, useState } from "react";
 import type { PatchReleaseFileInput } from "../hooks/useSoulseekTransfers";
 import type { SearchSessionRecord } from "../hooks/useSoulseekSearch";
-import type { AlbumTrack, ArchiveStatus, WantedAlbum, WantedSnapshot } from "../types";
+import type { AlbumTrack, ArchiveAlbumMatch, ArchiveStatus, WantedAlbum, WantedSnapshot } from "../types";
+import { ArchiveSourceControls } from "./ArchiveSourceControls";
+import { archiveMatchReason } from "../utils/archiveMatch";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { buildArrivals } from "../utils/arrivals";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
@@ -42,6 +44,8 @@ type ArchiveWorkspaceProps = {
   wantedError: string | null;
   online: boolean;
   onRefresh: () => Promise<ArchiveStatus>;
+  onSelectDatabase: (path: string | null) => Promise<ArchiveStatus>;
+  wantedMatches: ReadonlyMap<string, ArchiveAlbumMatch>;
   onSetWantedInterval: (minutes: 0 | 15 | 30 | 60) => Promise<unknown>;
   onCheckWanted: (albumId: string) => Promise<unknown>;
   onSetWantedPaused: (albumId: string, paused: boolean) => Promise<unknown>;
@@ -142,6 +146,8 @@ export function ArchiveWorkspace({
   wantedError,
   online,
   onRefresh,
+  onSelectDatabase,
+  wantedMatches,
   onSetWantedInterval,
   onCheckWanted,
   onSetWantedPaused,
@@ -257,10 +263,11 @@ export function ArchiveWorkspace({
               <span>
                 <small>Music Library database</small>
                 <h2>{connected ? "Archive connected" : "Archive unavailable"}</h2>
-                <p>{status?.path ?? "Resolving the Music Library database…"}</p>
+                <p title={status?.path}>{status?.path ?? "Resolving the Music Library database…"}</p>
               </span>
               <strong><i aria-hidden="true" />{connected ? "Live source" : "Needs attention"}</strong>
             </div>
+            <ArchiveSourceControls status={status} loading={loading} onSelectDatabase={onSelectDatabase} />
             {error ? (
               <div className="archive-source-error" role="alert">
                 <WarningCircle size={17} weight="fill" />
@@ -282,7 +289,7 @@ export function ArchiveWorkspace({
             </article>
             <article>
               <CheckCircle size={22} weight="light" />
-              <span><h2>Ownership follows your real library</h2><p>Album discovery is checked against normalized albums, while Wanted is stored separately by Forever.</p></span>
+              <span><h2>Ownership follows your real library</h2><p>Saved release-group MBID links take priority, with normalized artist/title matching as a fallback. Owned badges explain the match.</p></span>
             </article>
             <article>
               <Archive size={22} weight="light" />
@@ -380,7 +387,7 @@ export function ArchiveWorkspace({
                   <span className="wanted-quality">
                     <small>{receipt ? "Downloaded signal" : album.fulfilled ? "Ownership" : "Best match"}</small>
                     <strong>{receipt ? receipt.format : album.fulfilled ? "Archive" : album.bestFormat ?? "—"}</strong>
-                    <p>{receipt ? `${formatAlbumBytes(receipt.sizeBytes)} · from ${receipt.username}` : album.fulfilled ? "Read-only source of truth" : album.bestTrackCount ? `${album.bestTrackCount} tracks · ${album.bestSizeBytes ? formatAlbumBytes(album.bestSizeBytes) : "size unknown"}` : "Waiting for a qualifying source"}</p>
+                    <p>{receipt ? `${formatAlbumBytes(receipt.sizeBytes)} · from ${receipt.username}` : album.fulfilled ? archiveMatchReason(wantedMatches.get(album.albumId)) : album.bestTrackCount ? `${album.bestTrackCount} tracks · ${album.bestSizeBytes ? formatAlbumBytes(album.bestSizeBytes) : "size unknown"}` : "Waiting for a qualifying source"}</p>
                   </span>
                   <span className="wanted-speed">
                     <small>{receipt ? "Journey state" : album.fulfilled ? "Watch state" : "Recommended source"}</small>
