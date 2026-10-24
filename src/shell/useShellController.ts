@@ -11,6 +11,7 @@ import { useDialMemory } from "../hooks/useDialMemory";
 import { useLocalSharing } from "../hooks/useLocalSharing";
 import { useMissingShelf } from "../hooks/useMissingShelf";
 import { useDiscoveryShelf } from "../hooks/useDiscoveryShelf";
+import { useReleaseRadar } from "../hooks/useReleaseRadar";
 import { usePrivateMessages } from "../hooks/usePrivateMessages";
 import { useShelfRadar } from "../hooks/useShelfRadar";
 import { useSoulseekConnection } from "../hooks/useSoulseekConnection";
@@ -117,6 +118,7 @@ export function useShellController() {
         );
   const archiveAlbums = archiveDiscovery?.catalog?.albums ?? emptyAlbumCatalog;
   const wanted = useWantedAlbums();
+  const releaseRadar = useReleaseRadar();
   const missingShelf = useMissingShelf();
   const radar = useShelfRadar();
   const connection = useSoulseekConnection();
@@ -999,6 +1001,7 @@ export function useShellController() {
     messages,
     missingShelf,
     discovery,
+    releaseRadar,
     missingStudioCount,
     musicBrainzFallbackTrackCount,
     native,

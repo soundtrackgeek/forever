@@ -434,6 +434,30 @@ impl WantedHub {
         Ok(self.snapshot())
     }
 
+    // Insert-only and save-before-publish. A radar retry after a failed write
+    // must not mistake an unsaved in-memory watch for a durable receipt.
+    pub fn add_if_missing(
+        &self,
+        request: WantedAlbumRequest,
+    ) -> Result<WantedSnapshot, WantedError> {
+        let request = validate_request(request)?;
+        let mut store = self.store.write().unwrap_or_else(|p| p.into_inner());
+        let mut next = store.clone();
+        if insert_radar_request(&mut next, request)? {
+            if self.settings_file.is_blocked() {
+                return Err(std::io::Error::other(
+                    "Settings migration is unavailable; Wanted history is preserved.",
+                )
+                .into());
+            }
+            save_store(&self.path, &next)?;
+            *store = next;
+        }
+        drop(store);
+        self.publish();
+        Ok(self.snapshot())
+    }
+
     pub fn add_many(
         &self,
         requests: Vec<WantedAlbumRequest>,
@@ -1383,6 +1407,22 @@ pub(super) fn validate_preferences(preferences: &WantedPreferences) -> Result<()
     Ok(())
 }
 
+fn insert_radar_request(
+    store: &mut WantedStore,
+    request: WantedAlbumRequest,
+) -> Result<bool, WantedError> {
+    if store
+        .albums
+        .iter()
+        .any(|a| a.album_id.eq_ignore_ascii_case(&request.album_id))
+    {
+        return Ok(false);
+    }
+    let preferences = store.default_preferences.clone();
+    merge_bulk_requests(store, vec![request], &preferences, timestamp_ms())?;
+    Ok(true)
+}
+
 fn merge_bulk_requests(
     store: &mut WantedStore,
     requests: Vec<WantedAlbumRequest>,
@@ -2128,6 +2168,23 @@ mod tests {
             profile.format_preference
         );
         assert!(store.albums.iter().all(|album| !album.paused));
+    }
+
+    #[test]
+    fn radar_insertion_uses_defaults_and_preserves_every_existing_choice() {
+        let mut store = WantedStore::default();
+        store.default_preferences.minimum_bitrate_kbps = Some(256);
+        assert!(insert_radar_request(&mut store, request("album-1")).unwrap());
+        assert_eq!(store.albums[0].preferences.minimum_bitrate_kbps, Some(256));
+        store.albums[0].paused = true;
+        store.albums[0].fulfilled = true;
+        store.albums[0].selected_release_id = Some("my-edition".into());
+        store.default_preferences.minimum_bitrate_kbps = Some(320);
+        let before = serde_json::to_value(&store.albums).unwrap();
+        assert!(!insert_radar_request(&mut store, request("ALBUM-1")).unwrap());
+        assert_eq!(before, serde_json::to_value(&store.albums).unwrap());
+        assert!(insert_radar_request(&mut store, request("album-2")).unwrap());
+        assert_eq!(store.albums[1].preferences.minimum_bitrate_kbps, Some(320));
     }
 
     #[test]

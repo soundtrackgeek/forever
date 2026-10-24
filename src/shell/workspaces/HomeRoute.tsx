@@ -1,4 +1,5 @@
 import { ListeningPostWorkspace } from "../../components/ListeningPostWorkspace";
+import { NewReleaseRadar } from "../../components/NewReleaseRadar";
 import { useShell } from "../shellStore";
 
 export default function HomeRoute() {
@@ -6,6 +7,7 @@ export default function HomeRoute() {
     connection,
     transfers,
     wanted,
+    releaseRadar,
     messages,
     rooms,
     archive,
@@ -23,6 +25,7 @@ export default function HomeRoute() {
     connection: s.connection,
     transfers: s.transfers,
     wanted: s.wanted,
+    releaseRadar: s.releaseRadar,
     messages: s.messages,
     rooms: s.rooms,
     archive: s.archive,
@@ -39,6 +42,10 @@ export default function HomeRoute() {
   }));
   return (
     <ListeningPostWorkspace
+      releaseRadar={<NewReleaseRadar radar={releaseRadar} sourceKey={`${archive.status?.path ?? ""}:${archive.status?.lastModifiedAtMs ?? ""}:${archive.status?.connected ?? false}`} archiveConnected={Boolean(archive.status?.connected)} wanted={wanted.snapshot.albums} wantedReady={wanted.ready} onAddWanted={wanted.add} onSearchArtists={() => {
+        if (!dial.create({ mode: "albums" })) setSearchMode("albums");
+        setActiveView("search");
+      }} />}
       connection={connection.snapshot}
       searchNetwork={connection.searchNetwork}
       transfers={transfers.snapshot.transfers}

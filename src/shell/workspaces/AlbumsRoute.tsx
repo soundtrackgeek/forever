@@ -1,4 +1,5 @@
 import { AlbumSearchWorkspace } from "../../components/AlbumSearchWorkspace";
+import { FollowArtistButton } from "../../components/FollowArtistButton";
 import { PresetRail } from "../PresetRail";
 import { useShell } from "../shellStore";
 
@@ -15,6 +16,7 @@ export default function AlbumsRoute() {
     setActiveView,
     dial,
     albums,
+    releaseRadar,
   } = useShell((s) => ({
     query: s.query,
     connection: s.connection,
@@ -27,9 +29,11 @@ export default function AlbumsRoute() {
     setActiveView: s.setActiveView,
     dial: s.dial,
     albums: s.albums,
+    releaseRadar: s.releaseRadar,
   }));
   return (
     <AlbumSearchWorkspace
+      artistActions={albums.selectedArtist ? <FollowArtistButton key={albums.selectedArtist.id} radar={releaseRadar} artistId={albums.selectedArtist.id} name={albums.selectedArtist.name} /> : null}
       presetRail={<PresetRail />}
       filter={dial.active.albumFilter}
       query={query}

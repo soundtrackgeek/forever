@@ -679,6 +679,13 @@ impl ConnectionManager {
         self.wanted.snapshot()
     }
 
+    pub(crate) fn add_radar_wanted(&self, request: WantedAlbumRequest) -> Result<(), String> {
+        self.wanted
+            .add_if_missing(request)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
     pub fn current_radar(&self) -> RadarSnapshot {
         self.radar.snapshot()
     }

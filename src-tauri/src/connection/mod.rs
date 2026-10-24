@@ -15,6 +15,7 @@ mod people;
 mod protocol;
 mod radar;
 mod reachability;
+pub(crate) mod release_radar;
 mod rooms;
 mod search;
 mod search_governor;

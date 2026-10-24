@@ -2,6 +2,7 @@
  * Load styles once so visiting a lazy workspace cannot change the cascade. */
 @import "./tokens.css";
 @import "./workspaces/home.css";
+@import "./workspaces/release-radar.css";
 @import "./workspaces/people.css";
 @import "./workspaces/messages.css";
 @import "./shell.css";

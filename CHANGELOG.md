@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.0.76] - 2026-10-24
+
+### Added
+
+- Artist Follow from album search, verified Archive follow suggestions, and a
+  New Release Radar inbox in the Listening Post for recent/upcoming albums, EPs,
+  and singles. Includes follow management, dismissal/restore, and Add to Wanted.
+- Daily MusicBrainz checks while the desktop app is open, bounded date-filtered
+  queries with shared provider pacing, persisted retry cadence, manual cooldown,
+  partial/error states, and a crash-safe follow/inbox store readable offline.
+- Per-artist opt-in automatic Wanted additions with current default Smart Match
+  preferences, Archive ownership checks, durable addition receipts, and protection
+  for existing Wanted preferences, paused/fulfilled albums, and edition choices.
+
+### Verification
+
+- Regression coverage for date precision, provider pagination/identity/dedup,
+  scheduling/restarts, stale follows, dismissals, auto-add failures and idempotency,
+  insert-only Wanted behavior, frontend event ordering, and inbox actions.
+- Browser preview validation is separate from installed-app, long-running daily
+  scheduling, and live public Soulseek validation.
+
 ## [0.0.75] - 2026-10-24
 
 ### Added

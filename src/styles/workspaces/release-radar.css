@@ -1,0 +1,49 @@
+.release-radar {
+  margin: 14px 0 24px;
+  padding: 22px;
+  border: 1px solid #303047;
+  border-radius: 12px;
+  background: linear-gradient(110deg, #19172a, #101522 70%);
+  color: #e8e7f0;
+}
+.release-radar > header, .release-radar-actions, .release-radar-filter { display: flex; align-items: center; gap: 10px; }
+.release-radar > header { justify-content: space-between; flex-wrap: wrap; gap: 18px; }
+.release-radar .release-radar-kicker { display: flex; align-items: center; gap: 7px; color: #c6b6f3; font-size: 11px; }
+.release-radar h2 { margin: 7px 0 !important; font-size: 22px; letter-spacing: -.025em; font-weight: 550; }
+.release-radar h3 { font-size: 14px; font-weight: 550; }
+.release-radar p { color: #a4a7ba; font-size: 12px; line-height: 1.6; }
+.release-radar .release-radar-caption { margin: 12px 0; color: #9297ad; font-size: 11px; }
+.release-radar button, .artist-follow-control button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 32px; padding: 7px 11px; border: 1px solid #424158;
+  border-radius: 6px; background: #24243a; color: #ebe8f7; font: inherit; font-size: 11px; cursor: pointer;
+}
+.release-radar button:hover:not(:disabled), .artist-follow-control button:hover:not(:disabled) { background: #363149; border-color: #8874b4; }
+.release-radar button:disabled, .artist-follow-control button:disabled { opacity: .5; cursor: default; }
+.release-radar button[aria-pressed="true"], .artist-follow-control button[aria-pressed="true"] { background: #403153; border-color: #8e6eb5; }
+.release-radar .release-radar-notice { display: block; color: #e5c28b; margin: 10px 0; font-size: 11px; line-height: 1.5; }
+.release-radar-management { border-top: 1px solid #363047; border-bottom: 1px solid #363047; padding: 18px 0; margin: 16px 0; }
+.release-radar-management > div > button { margin-top: 10px; }
+.release-radar ul { list-style: none; padding: 0; margin: 12px 0; }
+.release-radar-management li { display: flex; align-items: center; gap: 16px; border-top: 1px solid #2b2c3e; padding: 12px 0; font-size: 12px; }
+.release-radar-management li > div:first-child, .release-radar-suggestions li > span:first-child { flex: 1; min-width: 0; }
+.release-radar-management small { display: block; color: #a4a7ba; margin-top: 5px; }
+.release-radar-management label { display: flex; align-items: center; gap: 8px; }
+.release-radar input[type="checkbox"] { accent-color: #a78bd4; }
+.release-radar-filter { margin-top: 18px; }
+.release-radar-releases li { display: flex; align-items: center; gap: 14px; border-top: 1px solid #2d2f43; padding: 16px 0; }
+.release-radar-art { display: grid; place-items: center; flex: 0 0 52px; height: 52px; color: #b8a6d9; border: 1px solid #48405f; border-radius: 6px; background: radial-gradient(circle at 30% 20%, #49405c, #1e2034); }
+.release-radar-release-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.release-radar-release-copy > small { display: block; margin-bottom: 5px; color: #a5a8bf; font-size: 10px; }
+.release-radar-release-copy h3 { margin-bottom: 5px; }
+.release-radar-owned { color: #94c6ad; font-size: 11px; }
+.release-radar-empty { display: flex; align-items: center; gap: 16px; padding: 24px 0; }
+.release-radar-empty > div { flex: 1; }
+.artist-follow-control { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+.artist-follow-control small { color: #e5c28b; }
+@media (max-width: 900px) {
+  .release-radar { padding: 16px; }
+  .release-radar-management li, .release-radar-releases li, .release-radar-empty { flex-wrap: wrap; }
+  .release-radar-release-copy { flex-basis: calc(100% - 80px); }
+  .release-radar-management li > div:first-child { flex-basis: 100%; }
+}

@@ -29,6 +29,10 @@ pub fn run() {
             ));
             app.manage(archive::initialize(app.handle())?);
             app.manage(musicbrainz::MusicBrainzClient::initialize(app.handle()));
+            app.manage(connection::release_radar::ReleaseRadar::new(
+                app.path().app_config_dir()?.join("release-radar.json"),
+            ));
+            connection::release_radar::start(app.handle().clone());
             app.manage(archive::discovery::DiscoveryProvider::new(
                 app.path()
                     .app_cache_dir()
@@ -43,6 +47,12 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            connection::release_radar::release_radar_snapshot,
+            connection::release_radar::release_radar_follow,
+            connection::release_radar::release_radar_unfollow,
+            connection::release_radar::release_radar_dismiss,
+            connection::release_radar::release_radar_refresh,
+            connection::release_radar::release_radar_add_wanted,
             connection::filing::filing_history,
             connection::filing::filing_notices,
             connection::filing::filing_preview,

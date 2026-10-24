@@ -18,6 +18,7 @@ import { WantedToggle } from "./WantedToggle";
 export type AlbumFilter = "studio" | "live" | "compilation" | "ep" | "all";
 
 type AlbumSearchWorkspaceProps = {
+  artistActions?: ReactNode;
   presetRail: ReactNode;
   filter: AlbumFilter;
   query: string;
@@ -92,6 +93,7 @@ function AlbumCover({ album }: { album: AlbumReleaseGroup }) {
 }
 
 export function AlbumSearchWorkspace({
+  artistActions,
   presetRail,
   filter,
   query,
@@ -224,6 +226,7 @@ export function AlbumSearchWorkspace({
               <span className="eyebrow">Discography</span>
               <h2><CountryFlag code={selectedArtist.country} />{selectedArtist.name}</h2>
               <p>{selectedArtist.disambiguation || [selectedArtist.artistType, selectedArtist.country].filter(Boolean).join(" · ")}</p>
+              {artistActions}
             </div>
             <dl>
               <div><dt>Cataloged</dt><dd>{deferredCatalog.albums.length}</dd></div>

@@ -36,15 +36,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.74",
-  version: "0.0.75",
-  body: `## What's new in Forever 0.0.75
+  currentVersion: "0.0.75",
+  version: "0.0.76",
+  body: `## What's new in Forever 0.0.76
 
 ### Changed
 
-- Discover new artists inspired by your most-owned Archive artists.
-- Explore studio album picks and hand them to Smart Match or Wanted.
-- See recommendation reasons and saved results when ListenBrainz is unavailable.`,
+- Follow artists and see recent or upcoming releases in the Listening Post.
+- Add discoveries to Wanted, or enable automatic additions per artist.
+- Keep your followed artists, dismissals, and release inbox across restarts.`,
   date: "2026-10-24",
 };
 

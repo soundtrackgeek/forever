@@ -817,7 +817,25 @@ Rebuild the TOC from track lengths and query **AccurateRip** and the **CUETools
 Database (CTDB)** in the way `cdverify` does. Show "AccurateRip ✓ (conf 12)" in
 the Arrival Desk and Smart Match review, and rank verified rips higher.
 
-### 5. Artist Follow and New Release Radar
+### 5. Artist Follow and New Release Radar - DONE
+
+**Implemented in 0.0.76 (2026-10-24):** Follow verified MusicBrainz identities
+from album search or choose Archive suggestions (up to 12 from the first 120
+Archive artists). Home's Listening Post has a durable recent/upcoming release
+inbox, dismissal/restore, follow management, Add to Wanted, and per-artist opt-in
+auto-add using current default Smart Match preferences. Existing Wanted entries
+keep their settings and fulfillment state; dismissed, previously added, and
+verified owned releases are skipped. The native scheduler checks daily while
+open, retries failures after an hour, and rate-limits manual checks to 15 minutes.
+MusicBrainz queries cover official album/EP/single release groups in a rolling
+90-day past/future window, share existing transport pacing/retries, validate
+artist credits, deduplicate editions, and report truncated results. Follows,
+check times, and discoveries use a versioned crash-safe store with recovery
+notices; unfollow/refollow invalidates stale responses. Limits are 100 artists,
+300 results per artist/check, and 5,000 retained recent discoveries. No closed-app
+service is introduced. Native/provider/UI regressions and browser preview checks
+are separate from installed-app and long-running daily/public-network validation.
+Original proposal follows.
 
 Today, Wanted albums must be chosen one by one. A follow list would
 automatically surface new releases from artists the user cares about,

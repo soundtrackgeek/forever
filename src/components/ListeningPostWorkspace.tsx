@@ -24,12 +24,14 @@ import type {
   WantedSnapshot,
 } from "../types";
 import { releaseHealth } from "../utils/finishLine";
+import type { ReactNode } from "react";
 import { buildArrivals } from "../utils/arrivals";
 import { groupTransfers, type TransferGroup } from "../utils/transfers";
 
 type ArchiveDestination = "arrivals" | "missing" | "wanted";
 
 type ListeningPostWorkspaceProps = {
+  releaseRadar?: ReactNode;
   connection: ConnectionSnapshot;
   searchNetwork: DistributedSnapshot;
   transfers: Transfer[];
@@ -176,6 +178,7 @@ const archiveActivity = (
 });
 
 export function ListeningPostWorkspace({
+  releaseRadar,
   connection,
   searchNetwork,
   transfers,
@@ -234,6 +237,7 @@ export function ListeningPostWorkspace({
         </div>
       </header>
 
+      {releaseRadar}
       <div className="listening-post-signal-grid">
         <section className="listening-post-now" aria-label="Now receiving">
           <h2>Now receiving</h2>

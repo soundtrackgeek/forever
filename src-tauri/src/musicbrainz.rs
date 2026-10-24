@@ -1,4 +1,5 @@
 mod cache;
+pub(crate) mod releases;
 mod status;
 mod transport;
 

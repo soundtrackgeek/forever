@@ -3,13 +3,59 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.75` adds the similar-artist Discovery shelf,
-> with Archive-based recommendations, studio album picks, and Smart Match handoff.
+> **Status:** pre-alpha. Version `0.0.76` adds Artist Follow and New Release Radar,
+> with daily MusicBrainz checks and an optional automatic handoff to Wanted.
 
-If `0.0.16` is installed, download and run the latest `0.0.75` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.76` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
+
+### Artist Follow and New Release Radar
+
+Search for an artist in **Albums**, select the correct MusicBrainz identity, and
+choose **Follow artist**. In **Home → New Release Radar → Following**, manage up
+to 100 followed artists or choose **Suggest from Archive** for up to 12 verified
+artists from Music Library. Suggestions use the first 120 Archive artist results;
+album search can find other artists. Following is always your choice, and Archive
+access remains read-only.
+
+While the desktop app is open, the radar checks MusicBrainz daily, independently
+of Soulseek login and the active workspace. **Check releases** permits an earlier
+check with a 15-minute cooldown per artist. Failed or interrupted checks retry
+after an hour, including after restart. Checks use the shared MusicBrainz pacing,
+retry, timeout, and response-size controls; no account or API key is needed.
+
+The inbox shows official release groups for albums, EPs, and singles with first
+release dates overlapping the past 90 days or next 90 days. Editions are deduplicated
+by release-group MBID; an old album's reissue is not a new release group. Upcoming
+and incomplete dates are labelled, and announcements depend on MusicBrainz coverage
+and search-index freshness. Each check is bounded to 300 results per artist, with
+visible partial-result notices. Up to 5,000 recent discoveries are retained.
+
+- **Add to Wanted** saves the release with your current default Smart Match
+  profile. This works without a Soulseek connection; source checks still require one.
+- **Auto-add to Wanted** is off by default for each artist. Once enabled, the next
+  check adds eligible inbox items using the defaults current at addition time.
+  Dismissed, previously added, and verified owned releases are skipped; existing
+  Wanted entries keep their preferences, pause, edition, and fulfillment state.
+  Ownership is checked against the available Archive; an unavailable Archive
+  cannot establish ownership. Failed additions remain visible and retry.
+- **Dismiss** and **Restore** retain your choice across checks and restarts while
+  the release remains in the date window. An added item is not automatically
+  re-added if you later remove it from Wanted.
+- **Unfollow** stops future checks and removes that artist's radar history;
+  collaborations discovered through another followed artist keep their decisions.
+  Existing Wanted albums remain. Following again begins a fresh history.
+
+Follows, inbox items, dismissals, and check times are stored in the crash-safe
+`release-radar.json` under Forever's app configuration directory, including backup
+recovery and visible storage notices. Saved discoveries remain readable offline.
+Checks catch up when the app reopens; Forever does not run a closed-app background
+service. The browser preview uses labelled fictional/sample data and never polls
+providers or performs automatic Wanted additions.
+
+Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/doc/MusicBrainz_API/Search#Release_Group).
 
 ![Forever Smart Match defaults and MP3-only profile](design/implementation/smart-match-0.0.38-desktop.png)
 

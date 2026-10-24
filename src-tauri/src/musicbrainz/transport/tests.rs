@@ -192,6 +192,47 @@ async fn permanent_errors_invalid_json_redirects_and_oversized_bodies_are_not_re
 }
 
 #[tokio::test]
+async fn radar_pages_dates_identity_and_dedup_are_independent_of_catalog_cache() {
+    let date = crate::musicbrainz::releases::today().to_string();
+    let group = |id: &str, artist: &str, date: &str| {
+        serde_json::json!({
+            "id": id, "title": "Recent single", "first-release-date": date, "primary-type": "Single",
+            "artist-credit": [{"artist": {"id": artist}}]
+        })
+    };
+    let server = server(vec![
+        ok(&serde_json::json!({"count":5,"offset":0,"release-groups":[group(GROUP, ARTIST, &date), group(RELEASE, GROUP, &date), group(RELEASE, ARTIST, "1980-01-01")]}).to_string()),
+        ok(&serde_json::json!({"count":5,"offset":3,"release-groups":[group(GROUP, ARTIST, &date), group(RELEASE, ARTIST, &date)]}).to_string()),
+    ]).await;
+    let mut client = MusicBrainzClient::with_cache(None, StatusHub::default());
+    client.transport.set_base_url(server.url.clone());
+    client
+        .cache
+        .put(
+            Entity::Catalog,
+            ARTIST,
+            &crate::musicbrainz::AlbumCatalog {
+                artist_id: ARTIST.into(),
+                albums: vec![],
+                truncated: false,
+            },
+        )
+        .await;
+    let result = client.recent_releases(ARTIST).await.unwrap();
+    assert_eq!(result.albums.len(), 2);
+    assert!(!result.truncated);
+    assert!(result
+        .albums
+        .iter()
+        .all(|a| a.first_release_date == date && a.cover_art_url.contains(&a.id)));
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].1.contains("firstreleasedate"));
+    assert!(requests[0].1.contains("status%3Aofficial"));
+    assert!(requests[1].1.contains("offset=3"));
+}
+
+#[tokio::test]
 async fn cache_survives_restart_with_all_entity_fields_and_release_identity() {
     let server = server(vec![
         ok(&format!(r#"{{"artists":[{{"id":"{ARTIST}","name":"Björk","score":100,"type":"Person","country":"IS"}}]}}"#)),
