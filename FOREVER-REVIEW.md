@@ -493,7 +493,18 @@ strings, with no `503`/`Retry-After` backoff.
 - Honor `503` and `Retry-After` with exponential backoff, and surface a clear
   "MusicBrainz is rate-limiting; retrying in N s" state.
 
-### 14. Unified settings store
+### 14. Unified settings store - DONE
+
+**Implemented in 0.0.67 (2026-10-24):** one typed, versioned Rust settings store
+owns connection, transfers, sharing, Wanted defaults, Archive source, frontend
+preferences, and Dial Memory. Legacy JSON and WebView settings migrate once;
+passwords remain in the OS vault and operational histories remain separate.
+Settings provides export, validated import with review, and section resets.
+Atomic saves, recovery notices, revision guards, and serialized patches protect
+against failed writes and stale responses. Imported presets open next launch so
+active searches remain usable. Tests cover migration, recovery, failed writes,
+invalid imports, concurrent edits, and the rendered review/reset flow. Browser
+checks do not establish installed-app or live Soulseek behavior. Original findings:
 
 **Today:** Settings live in at least six places. These are `connection.json`,
 `transfers.json` (lanes, relay delay, Soundcheck), `sharing.json`,

@@ -1,3 +1,4 @@
+import { useSettings, patchSettings } from "../settings";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -291,13 +292,15 @@ export type TransferActivityNotice = {
 };
 
 export function useSoulseekTransfers() {
+  const { settings, ready: settingsReady } = useSettings();
   const native = isTauri();
-  const [snapshot, setSnapshot] = useReducer(
+  const [rawSnapshot, setSnapshot] = useReducer(
     (current: TransferQueueSnapshot, next: SetStateAction<TransferQueueSnapshot>) => typeof next === "function"
       ? next(current)
       : acceptTransferSnapshot(current, next),
     native ? emptySnapshot : withCount(previewTransfers),
   );
+  const snapshot = useMemo(() => settingsReady ? { ...rawSnapshot, ...settings.transfers } : rawSnapshot, [rawSnapshot, settingsReady, settings.transfers]);
   const [ready, setReady] = useState(!native);
   const [error, setError] = useState<string | null>(null);
   const [storeError, setStoreError] = useState<string | null>(null);
@@ -1298,47 +1301,9 @@ export function useSoulseekTransfers() {
   const clearCompletionNotice = useCallback(() => setCompletionNotice(null), []);
   const clearActivityNotice = useCallback(() => setActivityNotice(null), []);
   const clearError = useCallback(() => setError(null), []);
-  const setMaxConcurrentDownloads = useCallback(async (maxConcurrentDownloads: number) => {
-    setError(null);
-    try {
-      const next = native
-        ? await invoke<TransferQueueSnapshot>("transfer_set_max_concurrent_downloads", { maxConcurrentDownloads })
-        : { ...snapshot, maxConcurrentDownloads };
-      setSnapshot(next);
-      return next;
-    } catch (cause) {
-      setError(errorMessage(cause));
-      throw cause;
-    }
-  }, [native, snapshot]);
-
-  const setRelaySuggestionMinutes = useCallback(async (minutes: number) => {
-    setError(null);
-    try {
-      const next = native
-        ? await invoke<TransferQueueSnapshot>("transfer_set_relay_suggestion_minutes", { minutes })
-        : { ...snapshot, relaySuggestionMinutes: minutes };
-      setSnapshot(next);
-      return next;
-    } catch (cause) {
-      setError(errorMessage(cause));
-      throw cause;
-    }
-  }, [native, snapshot]);
-
-  const setSoundcheckEnabled = useCallback(async (enabled: boolean) => {
-    setError(null);
-    try {
-      const next = native
-        ? await invoke<TransferQueueSnapshot>("transfer_set_soundcheck_enabled", { enabled })
-        : { ...snapshot, soundcheckEnabled: enabled };
-      setSnapshot(next);
-      return next;
-    } catch (cause) {
-      setError(errorMessage(cause));
-      throw cause;
-    }
-  }, [native, snapshot]);
+  const setMaxConcurrentDownloads = useCallback(async (maxConcurrentDownloads: number) => { await patchSettings({ maxConcurrentDownloads }); }, []);
+  const setRelaySuggestionMinutes = useCallback(async (minutes: number) => { await patchSettings({ relaySuggestionMinutes: minutes }); }, []);
+  const setSoundcheckEnabled = useCallback(async (enabled: boolean) => { await patchSettings({ soundcheckEnabled: enabled }); }, []);
 
   const prepareForRestart = useCallback(async (
     mode: "pauseNow" | "finishCurrentFiles",

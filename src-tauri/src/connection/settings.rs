@@ -15,7 +15,7 @@ fn enabled() -> bool {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConnectionProfile {
     pub username: String,
     pub server_host: String,
@@ -172,6 +172,7 @@ impl SettingsStore {
             .profile)
     }
 
+    #[cfg(test)]
     pub fn save(&self, profile: &ConnectionProfile) -> Result<(), SettingsError> {
         profile.validate()?;
         std::fs::create_dir_all(&profile.download_directory)?;
@@ -182,6 +183,7 @@ impl SettingsStore {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn delete(&self) -> Result<(), SettingsError> {
         self.path.delete()?;
         Ok(())

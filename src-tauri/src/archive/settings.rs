@@ -35,7 +35,7 @@ fn decode(bytes: &[u8]) -> Result<Settings, DecodeError> {
     Ok(settings)
 }
 
-fn validate_path(path: &std::path::Path) -> Result<(), String> {
+pub(crate) fn validate_path(path: &std::path::Path) -> Result<(), String> {
     if !path.is_absolute() || path.to_string_lossy().chars().any(char::is_control) {
         return Err("Choose an absolute path to a Music Library database.".into());
     }
@@ -43,6 +43,7 @@ fn validate_path(path: &std::path::Path) -> Result<(), String> {
 }
 
 pub struct ArchiveSettings {
+    unified: Option<crate::connection::app_settings::AppSettings>,
     file: JsonFile,
     settings: Mutex<Settings>,
     default_path: PathBuf,
@@ -64,9 +65,11 @@ impl Source {
 }
 
 impl ArchiveSettings {
+    #[cfg(test)]
     fn new(file: JsonFile, default_path: PathBuf) -> Self {
         let settings = file.load(Settings::default, decode);
         Self {
+            unified: None,
             file,
             settings: Mutex::new(settings),
             default_path,
@@ -96,6 +99,12 @@ impl ArchiveSettings {
     }
 
     fn source(&self) -> Source {
+        if let Some(unified) = &self.unified {
+            return self.source_from(&Settings {
+                version: 1,
+                database_path: unified.get().archive_database_path,
+            });
+        }
         self.source_from(&self.settings.lock().unwrap_or_else(|p| p.into_inner()))
     }
 
@@ -115,23 +124,32 @@ impl ArchiveSettings {
                 .error
                 .unwrap_or_else(|| "Could not read the selected Archive.".into()));
         }
-        self.file
-            .save(&next)
-            .map_err(|error| format!("Could not save the Archive source: {error}"))?;
+        if let Some(unified) = &self.unified {
+            unified
+                .update(|s| s.archive_database_path = next.database_path.clone())
+                .map_err(|e| e.to_string())?;
+        } else {
+            self.file.save(&next).map_err(|e| e.to_string())?;
+        }
         *settings = next;
         Ok(source.annotate(status))
     }
 }
 
+pub(crate) fn legacy_path(file: &JsonFile) -> Option<PathBuf> {
+    file.load(Settings::default, decode).database_path
+}
+
 pub fn initialize(app: &AppHandle) -> Result<ArchiveSettings, String> {
-    let directory = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| error.to_string())?;
-    Ok(ArchiveSettings::new(
-        JsonFile::new(directory.join("archive.json")),
-        default_database_path(app)?,
-    ))
+    let unified = app
+        .state::<crate::connection::ConnectionManager>()
+        .settings_store();
+    Ok(ArchiveSettings {
+        file: unified.file(),
+        settings: Mutex::new(Settings::default()),
+        default_path: default_database_path(app)?,
+        unified: Some(unified),
+    })
 }
 
 pub(super) fn source(app: &AppHandle) -> Source {
@@ -144,8 +162,12 @@ pub async fn archive_set_database_path(
     path: Option<String>,
 ) -> Result<ArchiveStatus, String> {
     tokio::task::spawn_blocking(move || {
-        app.state::<ArchiveSettings>()
-            .select(path.map(PathBuf::from))
+        let result = app
+            .state::<ArchiveSettings>()
+            .select(path.map(PathBuf::from))?;
+        app.state::<crate::connection::ConnectionManager>()
+            .publish_settings();
+        Ok(result)
     })
     .await
     .map_err(|error| format!("The Archive source task stopped unexpectedly: {error}"))?
@@ -154,6 +176,45 @@ pub async fn archive_set_database_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unified_source_selection_and_import_use_the_same_authority() {
+        use crate::connection::app_settings::AppSettings;
+        let dir = tempfile::tempdir().unwrap();
+        let legacy: Vec<_> = [
+            "connection",
+            "transfers",
+            "sharing",
+            "people",
+            "messages",
+            "rooms",
+            "wanted",
+            "queries",
+            "uploads",
+            "archive",
+        ]
+        .into_iter()
+        .map(|name| JsonFile::new(dir.path().join(format!("{name}.json"))))
+        .collect();
+        let unified = AppSettings::open(JsonFile::new(dir.path().join("settings.json")), &legacy);
+        let fixture = super::super::tests::fixture();
+        let before = std::fs::read(fixture.path()).unwrap();
+        let archive = ArchiveSettings {
+            file: unified.file(),
+            settings: Mutex::new(Settings::default()),
+            default_path: dir.path().join("default.sqlite3"),
+            unified: Some(unified.clone()),
+        };
+        archive.select(Some(fixture.path().to_path_buf())).unwrap();
+        assert_eq!(
+            unified.get().archive_database_path.as_deref(),
+            Some(fixture.path())
+        );
+        unified.update(|s| s.archive_database_path = None).unwrap();
+        assert_eq!(archive.source().kind, PathSource::Automatic);
+        assert!(!dir.path().join("archive.json").exists());
+        assert_eq!(std::fs::read(fixture.path()).unwrap(), before);
+    }
 
     #[test]
     fn selection_persists_validates_and_resets_without_writing_the_database() {

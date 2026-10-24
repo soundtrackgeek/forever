@@ -1,3 +1,4 @@
+import { getSettingsState, patchSettings, type DialMemory } from "../settings";
 import { isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AlbumSearchContext } from "../types";
@@ -7,7 +8,6 @@ import { normalizeAdvancedFilters, sortLabels, type AdvancedSearchFilters } from
 import type { SearchMode } from "../components/SearchModeSwitch";
 import type { ResultScrollMemory } from "../components/VirtualResultList";
 
-const STORAGE_KEY = "forever.dial-memory.v1";
 export const DIAL_SESSION_LIMIT = 8;
 export const PREVIEW_DIAL_IDS = {
   night: "preview-night-geometry",
@@ -34,11 +34,6 @@ export type DialSession = {
 
 export type ClosedDialSession = Pick<DialSession, "mode" | "query"> & {
   closedAtMs: number;
-};
-
-type PersistedDialMemory = {
-  pinned: Array<Pick<DialSession, "id" | "mode" | "query" | "searchFilter" | "searchSort" | "advancedFilters" | "searchLayout" | "albumFilter">>;
-  recent: ClosedDialSession[];
 };
 
 type NewSession = Partial<Pick<DialSession, "mode" | "query" | "pinned" | "albumContext" | "albumResultView" | "searchFilter" | "searchSort" | "advancedFilters" | "searchLayout" | "albumFilter">>;
@@ -71,10 +66,29 @@ const previewSessions = (): DialSession[] => [
   session({ mode: "albums", query: "Kate Bush", pinned: true }, PREVIEW_DIAL_IDS.kateBush),
 ];
 
+function queueDialChange(change: (saved: DialMemory) => DialMemory) {
+  void patchSettings((settings) => {
+    const next = change(settings.dialMemory);
+    return JSON.stringify(next) === JSON.stringify(settings.dialMemory) ? {} : { dialMemory: next };
+  }).catch(() => {});
+}
+function persistChangedPreset(id: string, value: DialSession | undefined) {
+  queueDialChange((saved) => {
+    const pinned = saved.pinned.filter((p) => p.id !== id);
+    if (value?.pinned && value.query.trim()) {
+      const { mode, query, searchFilter, searchSort, advancedFilters, searchLayout, albumFilter } = value;
+      const preset = { id, mode, query, searchFilter, searchSort, advancedFilters, searchLayout, albumFilter };
+      const previous = saved.pinned.findIndex((p) => p.id === id);
+      pinned.splice(previous < 0 ? pinned.length : previous, 0, preset);
+    }
+    return { ...saved, pinned };
+  });
+}
+
 const load = (): { sessions: DialSession[]; recent: ClosedDialSession[] } => {
-  if (!isTauri()) return { sessions: previewSessions(), recent: [] };
+  if (!isTauri() && !getSettingsState().settings.dialMemory.pinned.length) return { sessions: previewSessions(), recent: getSettingsState().settings.dialMemory.recent };
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as PersistedDialMemory | null;
+    const parsed = getSettingsState().settings.dialMemory;
     const pinned = (parsed?.pinned ?? [])
       .filter((item) => item.id && item.query && (item.mode === "files" || item.mode === "albums"))
       .slice(0, DIAL_SESSION_LIMIT)
@@ -103,29 +117,37 @@ export function useDialMemory() {
     }
   }, [sessions, resultScrollMemory]);
 
+  // Restores change saved presets without replacing live network results or selection.
   useEffect(() => {
-    const persisted: PersistedDialMemory = {
-      pinned: sessions
-        .filter((item) => item.pinned && item.query.trim())
-        .map(({ id, mode, query, searchFilter, searchSort, advancedFilters, searchLayout, albumFilter }) => ({
-          id, mode, query, searchFilter, searchSort, advancedFilters, searchLayout, albumFilter,
-        })),
-      recent,
+    const restored = () => {
+      const saved = getSettingsState().settings.dialMemory;
+      const ids = new Set(saved.pinned.map((p) => p.id));
+      const updated = sessionsRef.current.map((p) => ({ ...p, pinned: ids.has(p.id) }));
+      sessionsRef.current = updated;
+      setSessions(updated);
+      setRecent(saved.recent);
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
-  }, [recent, sessions]);
+    window.addEventListener("forever-settings-restored", restored);
+    return () => window.removeEventListener("forever-settings-restored", restored);
+  }, []);
 
   const active = sessions.find((item) => item.id === activeId) ?? sessions[0];
 
   const update = useCallback((id: string, patch: Partial<Omit<DialSession, "id" | "createdAtMs">>) => {
-    setSessions((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+    const next = sessionsRef.current.map((item) => item.id === id ? { ...item, ...patch } : item);
+    sessionsRef.current = next;
+    setSessions(next);
+    persistChangedPreset(id, next.find((item) => item.id === id));
   }, []);
 
   const create = useCallback((next: NewSession = {}) => {
     if (sessionsRef.current.length >= DIAL_SESSION_LIMIT) return null;
     const created = session(next);
-    setSessions((current) => [...current, created]);
+    const updated = [...sessionsRef.current, created];
+    sessionsRef.current = updated;
+    setSessions(updated);
     setActiveId(created.id);
+    if (created.pinned) persistChangedPreset(created.id, created);
     return created.id;
   }, []);
 
@@ -140,12 +162,13 @@ export function useDialMemory() {
     const removed = current[index];
     const remaining = current.filter((item) => item.id !== id);
     const next = remaining.length > 0 ? remaining : [session()];
+    sessionsRef.current = next;
     setSessions(next);
+    persistChangedPreset(id, undefined);
     if (removed.query.trim()) {
-      setRecent((items) => [
-        { mode: removed.mode, query: removed.query.trim(), closedAtMs: Date.now() },
-        ...items.filter((item) => item.mode !== removed.mode || item.query.toLocaleLowerCase() !== removed.query.trim().toLocaleLowerCase()),
-      ].slice(0, 8));
+      const entry = { mode: removed.mode, query: removed.query.trim(), closedAtMs: Date.now() };
+      setRecent((items) => [entry, ...items.filter((item) => item.mode !== removed.mode || item.query.toLocaleLowerCase() !== removed.query.trim().toLocaleLowerCase())].slice(0, 8));
+      queueDialChange((saved) => ({ ...saved, recent: [entry, ...saved.recent.filter((p) => p.mode !== entry.mode || p.query.toLocaleLowerCase() !== entry.query.toLocaleLowerCase())].slice(0, 8) }));
     }
     if (activeId === id) setActiveId(next[Math.min(index, next.length - 1)].id);
     return removed;
@@ -153,7 +176,10 @@ export function useDialMemory() {
 
   const reopen = useCallback((item: ClosedDialSession) => {
     const id = create({ mode: item.mode, query: item.query });
-    if (id) setRecent((items) => items.filter((candidate) => candidate !== item));
+    if (id) {
+      setRecent((items) => items.filter((candidate) => candidate !== item));
+      queueDialChange((saved) => ({ ...saved, recent: saved.recent.filter((p) => p.mode !== item.mode || p.query !== item.query) }));
+    }
     return id;
   }, [create]);
 

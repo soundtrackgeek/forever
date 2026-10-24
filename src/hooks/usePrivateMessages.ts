@@ -1,3 +1,4 @@
+import { useSettings, savePreference } from "../settings";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -102,13 +103,7 @@ const previewSnapshot = (): MessagesSnapshot => ({
 const errorMessage = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
 
-const readNotificationPreference = () => {
-  try {
-    return window.localStorage.getItem(MESSAGE_NOTIFICATION_STORAGE_KEY) !== "false";
-  } catch {
-    return true;
-  }
-};
+
 
 const incomingIds = (snapshot: MessagesSnapshot) =>
   new Set(
@@ -170,9 +165,8 @@ export function usePrivateMessages() {
   );
   const [ready, setReady] = useState(!native);
   const [error, setError] = useState<string | null>(null);
-  const [notificationsEnabled, setNotificationsEnabledState] = useState(
-    readNotificationPreference,
-  );
+  const { settings } = useSettings();
+  const notificationsEnabled = settings.preferences.messageNotificationsEnabled;
   const notificationPreference = useRef(notificationsEnabled);
   const knownIncoming = useRef<Set<string>>(new Set());
 
@@ -396,15 +390,7 @@ export function usePrivateMessages() {
 
   const setNotificationsEnabled = useCallback(
     (enabled: boolean) => {
-      setNotificationsEnabledState(enabled);
-      try {
-        window.localStorage.setItem(
-          MESSAGE_NOTIFICATION_STORAGE_KEY,
-          String(enabled),
-        );
-      } catch {
-        // The in-memory preference remains usable when storage is unavailable.
-      }
+      savePreference({ messageNotificationsEnabled: enabled });
       if (native && enabled) void requestPermission();
     },
     [native],

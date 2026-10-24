@@ -1,4 +1,5 @@
 mod album_query;
+pub(crate) mod app_settings;
 mod branch;
 mod credentials;
 mod diagnostics;
@@ -16,6 +17,7 @@ mod search;
 mod search_governor;
 mod service;
 mod settings;
+pub(crate) mod settings_commands;
 mod shares;
 mod soundcheck;
 pub(crate) mod store;

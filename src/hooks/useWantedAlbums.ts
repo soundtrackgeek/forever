@@ -1,3 +1,4 @@
+import { useSettings, patchSettings } from "../settings";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -212,12 +213,14 @@ const requestFor = (
 });
 
 export function useWantedAlbums() {
+  const { settings, ready: settingsReady } = useSettings();
   const native = isTauri();
-  const [snapshot, setSnapshot] = useState<WantedSnapshot>(
+  const [rawSnapshot, setSnapshot] = useState<WantedSnapshot>(
     native
       ? { albums: [], defaultPreferences: defaultWantedPreferences, intervalMinutes: 30, activeAlbumId: null, nextCheckAtMs: null, wishlistIntervalSeconds: null, effectiveCadenceMinutes: null, checkQueued: false, updatedAtMs: 0 }
       : previewSnapshot,
   );
+  const snapshot = useMemo(() => settingsReady ? { ...rawSnapshot, ...settings.wanted } : rawSnapshot, [rawSnapshot, settingsReady, settings.wanted]);
   const [ready, setReady] = useState(!native);
   const [error, setError] = useState<string | null>(null);
   const [alert, setAlert] = useState<WantedAlbum | null>(null);
@@ -526,13 +529,7 @@ export function useWantedAlbums() {
       updatedAtMs: Date.now(),
     })), [invokeOrPreview]);
 
-  const setIntervalMinutes = useCallback(async (intervalMinutes: 0 | 15 | 30 | 60) =>
-    await invokeOrPreview("wanted_set_interval", { intervalMinutes }, (current) => ({
-      ...current,
-      intervalMinutes,
-      nextCheckAtMs: intervalMinutes ? Date.now() + intervalMinutes * 60_000 : null,
-      updatedAtMs: Date.now(),
-    })), [invokeOrPreview]);
+  const setIntervalMinutes = useCallback(async (intervalMinutes: 0 | 15 | 30 | 60) => { await patchSettings({ wantedIntervalMinutes: intervalMinutes }); }, []);
 
   const setPreferences = useCallback(async (
     albumId: string,
@@ -566,13 +563,7 @@ export function useWantedAlbums() {
       updatedAtMs: Date.now(),
     })), [invokeOrPreview]);
 
-  const setDefaultPreferences = useCallback(async (
-    preferences: WantedPreferences,
-  ) => await invokeOrPreview("wanted_set_default_preferences", { preferences }, (current) => ({
-    ...current,
-    defaultPreferences: preferences,
-    updatedAtMs: Date.now(),
-  })), [invokeOrPreview]);
+  const setDefaultPreferences = useCallback(async (preferences: WantedPreferences) => { await patchSettings({ wantedDefaultPreferences: preferences }); }, []);
 
   const syncFulfilled = useCallback(async (
     fulfillments: Array<{ albumId: string; owned: boolean; trackCount: number | null }>,

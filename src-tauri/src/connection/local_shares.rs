@@ -32,9 +32,9 @@ const MAX_SEARCH_RESULTS: usize = 100;
 const MAX_PENDING_SEARCH_RESPONSES: usize = 256;
 const SEARCH_RESPONSE_TTL: Duration = Duration::from_secs(30);
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SharedRootConfig {
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SharedRootConfig {
     id: String,
     path: String,
     alias: String,
@@ -42,14 +42,42 @@ struct SharedRootConfig {
     added_at_ms: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SharingStore {
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SharingStore {
     version: u32,
-    upload_slots: u8,
+    pub upload_slots: u8,
     #[serde(default)]
-    upload_policy: UploadPolicy,
-    roots: Vec<SharedRootConfig>,
+    pub upload_policy: UploadPolicy,
+    pub roots: Vec<SharedRootConfig>,
+}
+
+impl SharingStore {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.version != STORE_VERSION
+            || !(1..=3).contains(&self.upload_slots)
+            || !self.upload_policy.valid()
+            || self.roots.len() > MAX_SHARED_ROOTS
+        {
+            return Err("Invalid sharing settings.".into());
+        }
+        let mut ids = HashSet::new();
+        let mut aliases = HashSet::new();
+        for root in &self.roots {
+            if root.id.is_empty()
+                || root.id.len() > 128
+                || !ids.insert(&root.id)
+                || !Path::new(&root.path).is_absolute()
+                || root.path.chars().any(char::is_control)
+                || root.alias.is_empty()
+                || root.alias != sanitize_alias(&root.alias)
+                || !aliases.insert(root.alias.to_lowercase())
+            {
+                return Err("Invalid or duplicate shared folder.".into());
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for SharingStore {
@@ -238,6 +266,7 @@ pub struct LocalSharesHub {
 pub struct LocalSharesInner {
     app: AppHandle,
     path: JsonFile,
+    settings: super::app_settings::AppSettings,
     store: Arc<RwLock<SharingStore>>,
     index: Arc<RwLock<ShareIndex>>,
     next_id: Arc<AtomicU64>,
@@ -271,8 +300,12 @@ pub enum SearchResponseOrigin {
 }
 
 impl LocalSharesHub {
-    pub fn new(app: AppHandle, path: JsonFile) -> Result<Self, LocalSharesError> {
-        let store = load_store(&path)?;
+    pub fn new(
+        app: AppHandle,
+        path: JsonFile,
+        settings: super::app_settings::AppSettings,
+    ) -> Result<Self, LocalSharesError> {
+        let store = settings.get().sharing;
         let root_snapshots = store
             .roots
             .iter()
@@ -291,6 +324,7 @@ impl LocalSharesHub {
             inner: Arc::new(LocalSharesInner {
                 app,
                 path,
+                settings,
                 store: Arc::new(RwLock::new(store)),
                 index: Arc::new(RwLock::new(ShareIndex {
                     roots: root_snapshots,
@@ -347,22 +381,11 @@ impl LocalSharesHub {
             .clone()
     }
 
-    pub fn set_upload_policy(
-        &self,
-        policy: UploadPolicy,
-    ) -> Result<LocalSharesSnapshot, LocalSharesError> {
-        if !policy.valid() {
-            return Err(LocalSharesError::InvalidUploadPolicy);
-        }
-        {
-            let mut store = self.store.write().unwrap_or_else(|p| p.into_inner());
-            let mut updated = store.clone();
-            updated.upload_policy = policy;
-            self.path.save(&updated)?;
-            *store = updated;
-        }
+    pub fn apply_settings(&self, settings: &SharingStore) {
+        let _scan = self.scan_lock.lock().unwrap_or_else(|p| p.into_inner());
+        *self.store.write().unwrap_or_else(|p| p.into_inner()) = settings.clone();
+        self.prune_disabled_roots();
         self.publish();
-        Ok(self.snapshot())
     }
 
     pub fn is_scanning(&self) -> bool {
@@ -421,7 +444,7 @@ impl LocalSharesHub {
             enabled: true,
             added_at_ms: now,
         });
-        self.path.save(&updated)?;
+        self.settings.save_sharing(&updated)?;
         *store = updated;
         drop(store);
         drop(scan);
@@ -438,7 +461,7 @@ impl LocalSharesHub {
             let before = store.roots.len();
             let mut updated = store.clone();
             updated.roots.retain(|root| root.id != id);
-            self.path.save(&updated)?;
+            self.settings.save_sharing(&updated)?;
             *store = updated;
             store.roots.len() != before
         };
@@ -465,7 +488,7 @@ impl LocalSharesHub {
             match updated.roots.iter_mut().find(|root| root.id == id) {
                 Some(root) => {
                     root.enabled = enabled;
-                    self.path.save(&updated)?;
+                    self.settings.save_sharing(&updated)?;
                     *store = updated;
                     true
                 }
@@ -478,22 +501,6 @@ impl LocalSharesHub {
         self.prune_disabled_roots();
         drop(scan);
         self.scan()
-    }
-
-    pub fn set_upload_slots(
-        &self,
-        upload_slots: u8,
-    ) -> Result<LocalSharesSnapshot, LocalSharesError> {
-        if !(1..=3).contains(&upload_slots) {
-            return Err(LocalSharesError::InvalidUploadSlots);
-        }
-        self.store
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .upload_slots = upload_slots;
-        self.persist()?;
-        self.publish();
-        Ok(self.snapshot())
     }
 
     pub fn scan(&self) -> Result<LocalSharesSnapshot, LocalSharesError> {
@@ -727,15 +734,6 @@ impl LocalSharesHub {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
-    }
-
-    fn persist(&self) -> Result<(), LocalSharesError> {
-        let store = self
-            .store
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.path.save(&*store)?;
-        Ok(())
     }
 
     fn publish(&self) {
@@ -1014,6 +1012,10 @@ fn scan_root_at(
     Ok(())
 }
 
+pub(super) fn legacy_settings(path: &JsonFile) -> SharingStore {
+    load_store(path).unwrap_or_default()
+}
+
 fn load_store(path: &JsonFile) -> Result<SharingStore, LocalSharesError> {
     Ok(path.load(SharingStore::default, decode_store))
 }
@@ -1258,8 +1260,6 @@ fn timestamp_ms() -> u64 {
 
 #[derive(Debug, Error)]
 pub enum LocalSharesError {
-    #[error("Upload limits must be 1–500 files and 1–1,000,000 MB per user.")]
-    InvalidUploadPolicy,
     #[error("Choose an existing folder to share.")]
     InvalidRoot,
     #[error("That folder overlaps another shared root. Choose only its parent or child.")]
@@ -1268,8 +1268,6 @@ pub enum LocalSharesError {
     TooManyRoots,
     #[error("That shared root no longer exists.")]
     RootNotFound,
-    #[error("Choose between one and three upload slots.")]
-    InvalidUploadSlots,
     #[error("The share index reached its safety limit.")]
     IndexLimit,
     #[error("The shared folder is unavailable: {0}")]

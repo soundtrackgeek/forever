@@ -1,3 +1,4 @@
+import { useSettings, patchSettings } from "../settings";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
@@ -82,6 +83,7 @@ const errorMessage = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
 
 export function useLocalSharing() {
+  const { settings, ready: settingsReady } = useSettings();
   const native = isTauri();
   const [shares, setShares] = useState(native ? emptyShares : previewShares);
   const [uploads, setUploads] = useState(native ? emptyUploads : previewUploads);
@@ -153,19 +155,8 @@ export function useLocalSharing() {
     () => shareAction("local_shares_rescan"),
     [shareAction],
   );
-  const setUploadSlots = useCallback(
-    (uploadSlots: number) =>
-      shareAction("local_shares_set_upload_slots", { uploadSlots }),
-    [shareAction],
-  );
-
-  const setUploadPolicy = useCallback(async (policy: UploadPolicy) => {
-    if (!native) {
-      setShares((current) => ({ ...current, uploadPolicy: policy }));
-      return;
-    }
-    await shareAction("local_shares_set_upload_policy", { policy });
-  }, [native, shareAction]);
+  const setUploadSlots = useCallback(async (uploadSlots: number) => { await patchSettings({ uploadSlots }); }, []);
+  const setUploadPolicy = useCallback(async (policy: UploadPolicy) => { await patchSettings({ uploadPolicy: policy }); }, []);
 
   const cancelUpload = useCallback(
     async (id: string) => {
@@ -212,7 +203,7 @@ export function useLocalSharing() {
   }, [native]);
 
   return {
-    shares,
+    shares: settingsReady ? { ...shares, uploadSlots: settings.sharing.uploadSlots, uploadPolicy: settings.sharing.uploadPolicy } : shares,
     uploads,
     error: error ?? uploads.persistenceError,
     addRoot,

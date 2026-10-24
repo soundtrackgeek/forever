@@ -1,3 +1,4 @@
+import { useSettings, savePreference } from "../settings";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
@@ -35,41 +36,20 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.65",
-  version: "0.0.66",
-  body: `## What's new in Forever 0.0.66
+  currentVersion: "0.0.66",
+  version: "0.0.67",
+  body: `## What's new in Forever 0.0.67
 
 ### Changed
 
-- MusicBrainz artist, catalog, edition, and tracklist caches survive restarts.
-- Busy MusicBrainz requests use bounded retries with a visible cooldown.
-- Cache failures preserve existing files and allow online discovery to continue.`,
+- All preferences and pinned searches share one versioned settings file.
+- Export and review imports without copying passwords or activity history.
+- Reset one settings section while keeping your other preferences.`,
   date: "2026-10-24",
 };
 
 const wait = (duration: number) =>
   new Promise((resolve) => window.setTimeout(resolve, duration));
-
-function readUpdateCheckInterval(): UpdateCheckIntervalMinutes {
-  try {
-    const value = window.localStorage.getItem(
-      UPDATE_CHECK_INTERVAL_STORAGE_KEY,
-    );
-    if (value === null) return DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES;
-    const stored = Number(value);
-    if (
-      SUPPORTED_UPDATE_CHECK_INTERVALS.includes(
-        stored as UpdateCheckIntervalMinutes,
-      )
-    ) {
-      return stored as UpdateCheckIntervalMinutes;
-    }
-  } catch {
-    // Fall back to the safe default if WebView storage is unavailable.
-  }
-
-  return DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES;
-}
 
 export function useAppUpdater() {
   const [status, setStatus] = useState<UpdateStatus>("idle");
@@ -78,8 +58,8 @@ export function useAppUpdater() {
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isToastDismissed, setIsToastDismissed] = useState(false);
-  const [updateCheckIntervalMinutes, setUpdateCheckIntervalState] =
-    useState<UpdateCheckIntervalMinutes>(readUpdateCheckInterval);
+  const { settings } = useSettings();
+  const updateCheckIntervalMinutes = settings.preferences.updateCheckIntervalMinutes;
   const updateRef = useRef<Update | null>(null);
   const checkInFlightRef = useRef(false);
   const installInProgressRef = useRef(false);
@@ -202,15 +182,7 @@ export function useAppUpdater() {
       const supported = SUPPORTED_UPDATE_CHECK_INTERVALS.includes(interval)
         ? interval
         : DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES;
-      setUpdateCheckIntervalState(supported);
-      try {
-        window.localStorage.setItem(
-          UPDATE_CHECK_INTERVAL_STORAGE_KEY,
-          String(supported),
-        );
-      } catch {
-        // The current session still uses the selected interval.
-      }
+      savePreference({ updateCheckIntervalMinutes: supported });
     },
     [],
   );

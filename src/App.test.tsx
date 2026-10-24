@@ -1,11 +1,8 @@
+import { getSettingsState } from "./settings";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { UPDATE_CHECK_INTERVAL_STORAGE_KEY } from "./hooks/useAppUpdater";
-import { MESSAGE_NOTIFICATION_STORAGE_KEY } from "./hooks/usePrivateMessages";
-import { ROOM_NOTIFICATION_STORAGE_KEY } from "./hooks/useSoulseekRooms";
 import { MESSAGE_DRAFTS_STORAGE_KEY } from "./components/MessagesWorkspace";
-import { MUSICBRAINZ_FALLBACK_TRACK_COUNT_STORAGE_KEY } from "./utils/musicbrainzFallback";
 
 // Rendered flows execute the same Rust policy as the native IPC commands.
 vi.mock("./utils/matchingClient", async () => {
@@ -459,9 +456,7 @@ describe("Forever shell", () => {
     });
     expect(fallback).toHaveValue(10);
     fireEvent.change(fallback, { target: { value: "6" } });
-    expect(window.localStorage.getItem(
-      MUSICBRAINZ_FALLBACK_TRACK_COUNT_STORAGE_KEY,
-    )).toBe("6");
+    expect(getSettingsState().settings.preferences.musicBrainzFallbackTrackCount).toBe(6);
 
     view.unmount();
     render(<App />);
@@ -978,13 +973,13 @@ describe("Forever shell", () => {
     });
     expect(notifications).toBeChecked();
     fireEvent.click(notifications);
-    expect(window.localStorage.getItem(MESSAGE_NOTIFICATION_STORAGE_KEY)).toBe("false");
+    expect(getSettingsState().settings.preferences.messageNotificationsEnabled).toBe(false);
     const roomNotifications = screen.getByRole("checkbox", {
       name: /Room alerts/,
     });
     expect(roomNotifications).toBeChecked();
     fireEvent.click(roomNotifications);
-    expect(window.localStorage.getItem(ROOM_NOTIFICATION_STORAGE_KEY)).toBe("false");
+    expect(getSettingsState().settings.preferences.roomNotificationsEnabled).toBe(false);
   });
 
   it("checks for updates every five minutes by default and saves a new cadence", () => {
@@ -999,8 +994,8 @@ describe("Forever shell", () => {
     });
     expect(interval).toHaveValue("5");
     fireEvent.change(interval, { target: { value: "15" } });
-    expect(window.localStorage.getItem(UPDATE_CHECK_INTERVAL_STORAGE_KEY)).toBe(
-      "15",
+    expect(getSettingsState().settings.preferences.updateCheckIntervalMinutes).toBe(
+      15,
     );
     const downloadLanes = screen.getByRole("combobox", {
       name: "Simultaneous download users",
@@ -1038,17 +1033,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.66 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.67 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "MusicBrainz artist, catalog, edition, and tracklist caches survive restarts.",
+        "All preferences and pinned searches share one versioned settings file.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Busy MusicBrainz requests use bounded retries with a visible cooldown.",
+        "Export and review imports without copying passwords or activity history.",
       ),
     ).toBeInTheDocument();
     expect(

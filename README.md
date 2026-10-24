@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.66` adds audio quality attributes to shares,
-> a persistent incremental index, and automatic folder watching.
+> **Status:** pre-alpha. Version `0.0.67` unifies settings, migrates existing
+> preferences, and adds settings export/import and section resets.
 
-If `0.0.16` is installed, download and run the latest `0.0.66` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.67` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -460,7 +460,7 @@ invalid or cancelled choices leave the current source unchanged. **Use automatic
 location** restores the default. The source shows **Detected automatically** when
 connected at the default location, or **Custom database** for a selected file.
 A missing custom file remains visibly unavailable rather than switching libraries.
-The preference is saved separately in Forever's `archive.json` and survives restarts.
+The preference is saved in Forever's unified `settings.json` and survives restarts.
 Changing source clears ownership results and Missing Shelf caches.
 
 Ownership first checks saved `include` decisions in
@@ -821,14 +821,52 @@ Unknown store versions are preserved in place and cannot be overwritten by this
 app version. Read/preservation/migration-write failures also keep the app open
 with a notice and prevent saves to the affected store for that session. Resolve
 the filesystem problem or use a compatible app version, then restart. Other
-stores remain usable. Forgetting connection settings removes both their primary
-file and backup, preventing a forgotten profile from returning on restart.
+stores remain usable. Forgetting the connection account clears it from both the
+unified settings file and its recovery copy, while preserving other preferences.
+Legacy account files are never reimported after settings migration has completed.
 
 This protects against interrupted writes; it is not a substitute for an external
 backup. Power-loss durability depends on the filesystem and device honoring
-flushes (Windows has no portable directory-fsync equivalent). WebView
-`localStorage` is outside this JSON-store migration, and moving persistence to
-SQLite remains future work.
+flushes (Windows has no portable directory-fsync equivalent). Settings migration
+from WebView storage is described below; message drafts remain in the WebView.
+
+### Unified settings and moving to another PC
+
+All preferences now live in one typed, versioned `settings.json` in Forever's
+application configuration folder, using the same atomic saves, validated backup,
+corruption recovery, and unsupported-version protection as the operational stores.
+This includes connection and download location, download lanes, Signal Relay,
+Soundcheck, shared folders and upload policy, Wanted scheduling and default matching,
+Archive location, update cadence, notification toggles, MusicBrainz fallback count,
+and Dial Memory's pinned presets and recent searches.
+
+On the first launch, Forever imports settings from `connection.json`, `sharing.json`,
+`archive.json`, and the preference fields in transfer and Wanted history. The old
+settings files remain available for recovery but are no longer authoritative.
+Transfer history and Wanted albums (including each album's matching preferences)
+continue in their own stores; subsequent history saves omit the migrated preferences.
+WebView preferences are imported once before the app starts using them. Their keys
+are removed only after a successful save. A failed migration keeps the originals
+and shows an error; fix the reported problem and restart. Invalid preset JSON stays
+available in WebView storage for recovery. Draft messages, current open results,
+selection, and scroll/layout state are not exported.
+
+Open **Settings → Backup & restore settings** to export a `.json` file. Exports
+include usernames, local folder paths, shared folders and search terms, so choose
+where to keep them. Passwords, downloads, messages, transfer/upload history, and
+Wanted albums are excluded. On another PC, import the file and review the account,
+paths, shared folders and download defaults before selecting **Apply imported settings**.
+The entire document is validated before saving; unsupported schemas, unknown fields,
+invalid values and files over 256 KiB are rejected. No files or databases are moved.
+Missing folders remain visible for correction, and enabled shared folders are indexed.
+
+Preferences apply immediately. Account/network changes disconnect the current
+session; connect again when ready and enter a password if this PC has none saved.
+Imported pinned presets open on the next launch, preserving current searches and
+navigation. **Reset section to defaults** previews its effect before confirmation.
+Resetting sharing removes roots from Forever without deleting files; resetting
+Wanted defaults retains albums and their individual profiles; resetting the account
+also forgets its saved password. Browser preview changes are session-only.
 
 Forever writes non-secret account preferences to the Tauri application
 configuration directory and connection events to

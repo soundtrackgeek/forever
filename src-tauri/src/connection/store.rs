@@ -79,6 +79,19 @@ impl JsonFile {
         }
     }
 
+    pub fn is_blocked(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .blocked
+            .is_some()
+    }
+
+    pub fn block_changes(&self, reason: String) {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        self.block(&mut state, reason);
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -115,6 +128,23 @@ impl JsonFile {
         empty: impl Fn() -> T,
         decode: impl Fn(&[u8]) -> Result<T, DecodeError>,
     ) -> T {
+        self.load_inner(empty, decode, true)
+    }
+
+    pub fn load_preserving<T: Serialize>(
+        &self,
+        empty: impl Fn() -> T,
+        decode: impl Fn(&[u8]) -> Result<T, DecodeError>,
+    ) -> T {
+        self.load_inner(empty, decode, false)
+    }
+
+    fn load_inner<T: Serialize>(
+        &self,
+        empty: impl Fn() -> T,
+        decode: impl Fn(&[u8]) -> Result<T, DecodeError>,
+        migrate: bool,
+    ) -> T {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if state.blocked.is_some() {
             return empty();
@@ -134,7 +164,11 @@ impl JsonFile {
             };
             match decode(&bytes) {
                 Ok(store) => {
-                    let current = match serde_json::to_vec_pretty(&store) {
+                    let current = match if migrate {
+                        serde_json::to_vec_pretty(&store)
+                    } else {
+                        Ok(bytes.clone())
+                    } {
                         Ok(bytes) => bytes,
                         Err(error) => {
                             self.block(
@@ -226,8 +260,27 @@ impl JsonFile {
         Ok(())
     }
 
+    // Forgetting an account must also remove it from the recovery copy while
+    // retaining the other sections. Both replacements use the usual crash-safe path.
+    pub fn save_with_backup(
+        &self,
+        value: &impl Serialize,
+        backup: &impl Serialize,
+    ) -> io::Result<()> {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(reason) = &state.blocked {
+            return Err(io::Error::other(reason.clone()));
+        }
+        let bytes = serde_json::to_vec_pretty(value).map_err(io::Error::other)?;
+        let previous = serde_json::to_vec_pretty(backup).map_err(io::Error::other)?;
+        commit(&self.path, &bytes, Some(&previous), |_| Ok(()))?;
+        state.last_good = Some(bytes);
+        Ok(())
+    }
+
     // Remove the fallback first so a successfully forgotten profile cannot be
     // resurrected from .bak on the next launch.
+    #[cfg(test)]
     pub fn delete(&self) -> io::Result<()> {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(reason) = &state.blocked {

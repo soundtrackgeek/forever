@@ -3,6 +3,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import { useSettings, savePreference } from "./settings";
 import { AppSidebar } from "./components/AppSidebar";
 import { AlbumSearchWorkspace } from "./components/AlbumSearchWorkspace";
 import { ArchiveWorkspace } from "./components/ArchiveWorkspace";
@@ -58,10 +59,7 @@ import type {
 } from "./types";
 import { groupAlbumSources } from "./utils/albumSources";
 import { albumDownloadStatesByTitle, type AlbumDownloadState } from "./utils/albumDownloadState";
-import {
-  readMusicBrainzFallbackTrackCount,
-  saveMusicBrainzFallbackTrackCount,
-} from "./utils/musicbrainzFallback";
+import { normalizeMusicBrainzFallbackTrackCount } from "./utils/musicbrainzFallback";
 import { groupTransfers } from "./utils/transfers";
 import { tracklistConfidenceForInspection } from "./utils/tracklistConfidence";
 import { verifiedDownloadedWantedFulfillments, wantedAlbumDownloadTitle } from "./utils/wantedFulfillment";
@@ -134,8 +132,8 @@ function App() {
   const safeExitPreview = import.meta.env.DEV
     && new URLSearchParams(window.location.search).get("safe-exit") === "1";
   const [activeView, setActiveView] = useState("home");
-  const [musicBrainzFallbackTrackCount, setMusicBrainzFallbackTrackCount] =
-    useState(readMusicBrainzFallbackTrackCount);
+  const appSettings = useSettings();
+  const musicBrainzFallbackTrackCount = appSettings.settings.preferences.musicBrainzFallbackTrackCount;
   const [transferShelfExpanded, setTransferShelfExpanded] = useState(false);
   const [transferFocus, setTransferFocus] = useState<{ groupId: string; requestId: number } | null>(null);
   const [archiveFocus, setArchiveFocus] = useState<{ tab: "arrivals" | "missing" | "wanted"; requestId: number } | null>(null);
@@ -831,6 +829,7 @@ function App() {
         <WindowControls />
       </header>
 
+      {appSettings.error && <div className="settings-save-error" role="alert">Settings could not be saved: {appSettings.error}</div>}
       <StorageNotices notices={connection.storageNotices} />
       <MusicBrainzNotice />
       <div className={`app-shell ${isFileSearchView ? "" : "is-single-view"}`}>
@@ -1273,6 +1272,7 @@ function App() {
           />
         ) : activeView === "settings" && connection.profile ? (
           <ConnectionSettings
+            onSettingsApplied={() => { if (native) { void connection.refresh(); void archive.refresh().catch(() => {}); } }}
             profile={connection.profile}
             hasPassword={connection.hasPassword}
             snapshot={connection.snapshot}
@@ -1297,9 +1297,7 @@ function App() {
             }
             musicBrainzFallbackTrackCount={musicBrainzFallbackTrackCount}
             onMusicBrainzFallbackTrackCountChange={(count) => {
-              setMusicBrainzFallbackTrackCount(
-                saveMusicBrainzFallbackTrackCount(count),
-              );
+              savePreference({ musicBrainzFallbackTrackCount: normalizeMusicBrainzFallbackTrackCount(count) });
             }}
             localShares={sharing.shares}
             sharingError={sharing.error}

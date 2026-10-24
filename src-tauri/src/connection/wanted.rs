@@ -167,10 +167,15 @@ pub struct WantedSnapshot {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct WantedStore {
     version: u32,
+    #[serde(default = "default_interval")]
     interval_minutes: u32,
     #[serde(default)]
     default_preferences: WantedPreferences,
     albums: Vec<WantedAlbum>,
+}
+
+fn default_interval() -> u32 {
+    DEFAULT_INTERVAL_MINUTES
 }
 
 impl Default for WantedStore {
@@ -286,6 +291,7 @@ impl WantedRuntime {
 pub struct WantedHub {
     app: AppHandle,
     path: JsonFile,
+    settings_file: JsonFile,
     store: Arc<RwLock<WantedStore>>,
     runtime: Arc<Mutex<WantedRuntime>>,
     governor: SearchGovernor,
@@ -298,13 +304,19 @@ impl WantedHub {
         path: JsonFile,
         governor: SearchGovernor,
         queries: QueryMemory,
+        settings: &super::app_settings::WantedSettings,
+        settings_file: JsonFile,
     ) -> Result<Self, WantedError> {
+        let mut store = load_store(&path)?;
+        store.interval_minutes = settings.interval_minutes;
+        store.default_preferences = settings.default_preferences.clone();
         Ok(Self {
             app,
             governor,
             queries,
             path: path.clone(),
-            store: Arc::new(RwLock::new(load_store(&path)?)),
+            settings_file,
+            store: Arc::new(RwLock::new(store)),
             runtime: Arc::new(Mutex::new(WantedRuntime::default())),
         })
     }
@@ -559,17 +571,13 @@ impl WantedHub {
         Ok(self.snapshot())
     }
 
-    pub fn set_interval(&self, interval_minutes: u32) -> Result<WantedSnapshot, WantedError> {
-        if !matches!(interval_minutes, 0 | 15 | 30 | 60) {
-            return Err(WantedError::InvalidInterval);
+    pub fn apply_settings(&self, settings: &super::app_settings::WantedSettings) {
+        {
+            let mut store = self.store.write().unwrap_or_else(|p| p.into_inner());
+            store.interval_minutes = settings.interval_minutes;
+            store.default_preferences = settings.default_preferences.clone();
         }
-        self.store
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .interval_minutes = interval_minutes;
-        self.persist()?;
         self.publish();
-        Ok(self.snapshot())
     }
 
     pub fn set_preferences(
@@ -644,20 +652,6 @@ impl WantedHub {
         }
         drop(store);
         drop(runtime);
-        self.publish();
-        Ok(self.snapshot())
-    }
-
-    pub fn set_default_preferences(
-        &self,
-        preferences: WantedPreferences,
-    ) -> Result<WantedSnapshot, WantedError> {
-        validate_preferences(&preferences)?;
-        self.store
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .default_preferences = preferences;
-        self.persist()?;
         self.publish();
         Ok(self.snapshot())
     }
@@ -1039,7 +1033,10 @@ impl WantedHub {
             .store
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.path.save(&*store)?;
+        if self.settings_file.is_blocked() {
+            return Err(std::io::Error::other("Settings migration is unavailable; Wanted history is preserved until it can complete.").into());
+        }
+        save_store(&self.path, &store)?;
         Ok(())
     }
 
@@ -1373,7 +1370,7 @@ fn reset_for_watch(album: &mut WantedAlbum, added_at_ms: u64) {
     album.source_fingerprints.clear();
 }
 
-fn validate_preferences(preferences: &WantedPreferences) -> Result<(), WantedError> {
+pub(super) fn validate_preferences(preferences: &WantedPreferences) -> Result<(), WantedError> {
     if !matches!(
         preferences.minimum_bitrate_kbps,
         None | Some(128 | 192 | 256 | 320)
@@ -1485,8 +1482,34 @@ fn valid_text(value: &str, max: usize) -> Result<String, WantedError> {
     }
 }
 
+fn save_store(path: &JsonFile, store: &WantedStore) -> Result<(), WantedError> {
+    let mut data = serde_json::to_value(store)?;
+    if let Some(fields) = data.as_object_mut() {
+        fields.remove("interval_minutes");
+        fields.remove("default_preferences");
+    }
+    path.save(&data)?;
+    Ok(())
+}
+
 fn load_store(path: &JsonFile) -> Result<WantedStore, WantedError> {
-    Ok(path.load(WantedStore::default, decode_store))
+    Ok(path.load_preserving(WantedStore::default, decode_store))
+}
+
+pub(super) fn legacy_settings(path: &JsonFile) -> super::app_settings::WantedSettings {
+    let raw = path.load(
+        || serde_json::Value::Null,
+        |bytes| {
+            decode_store(bytes)?;
+            Ok(serde_json::from_slice::<serde_json::Value>(bytes)?)
+        },
+    );
+    let mut result = super::app_settings::WantedSettings::default();
+    if let Ok(s) = serde_json::from_value::<WantedStore>(raw) {
+        result.interval_minutes = s.interval_minutes;
+        result.default_preferences = s.default_preferences;
+    }
+    result
 }
 
 fn decode_store(bytes: &[u8]) -> Result<WantedStore, DecodeError> {
@@ -1570,8 +1593,6 @@ pub enum WantedError {
     AlbumFulfilled,
     #[error("Another wanted album is already being checked.")]
     CheckInProgress,
-    #[error("Choose Manual, 15 minutes, 30 minutes, or 1 hour.")]
-    InvalidInterval,
     #[error("Choose valid Smart Match format, bitrate, and track requirements.")]
     InvalidPreferences,
     #[error("Choose a valid verified download before fulfilling this Wanted album.")]
@@ -1839,11 +1860,16 @@ mod tests {
         assert_eq!(store.albums[0].album_id, "legacy-album");
         assert_eq!(store.albums[0].preferences, WantedPreferences::default());
         assert!(file.notices().is_empty());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        save_store(&file, &store).unwrap();
         assert_eq!(
             std::fs::read(dir.path().join("wanted.json.bak")).unwrap(),
             bytes
         );
         let migrated = std::fs::read(&path).unwrap();
+        let document: serde_json::Value = serde_json::from_slice(&migrated).unwrap();
+        assert!(document.get("interval_minutes").is_none());
+        assert!(document.get("default_preferences").is_none());
         let again = load_store(&JsonFile::new(path)).unwrap();
         assert_eq!(
             serde_json::to_value(&store).unwrap(),

@@ -5,6 +5,28 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.67] - 2026-10-24
+
+### Added
+
+- A typed, versioned `settings.json` for all application preferences, shared roots,
+  Archive location, and pinned/recent searches, with `settings_get` and
+  `settings_patch` commands, ordered change events, atomic saves and backup recovery.
+- Settings export/import with a review step, whole-document validation and a 256 KiB
+  limit; passwords and operational history are excluded. Section resets describe
+  their effects and retain unrelated settings, history and files.
+
+### Changed
+
+- Existing JSON and WebView preferences migrate once. Old settings files remain
+  available for recovery; WebView keys are removed only after the new store is saved.
+  Drafts and transient workspace state remain separate.
+- All settings controls use the same authority, with serialized patches and revision
+  guards. Failed writes leave displayed values unchanged and show a persistent error.
+- Restores apply runtime preferences without changing the active workspace. Imported
+  presets open next launch; changed account/network settings disconnect for reconnection.
+  Forgetting an account also scrubs it from the settings recovery copy.
+
 ## [0.0.66] - 2026-10-24
 
 ### Added

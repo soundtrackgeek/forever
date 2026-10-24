@@ -429,8 +429,16 @@ pub struct TransferHub {
 }
 
 impl TransferHub {
-    pub fn new(app: AppHandle, path: JsonFile) -> Result<Self, TransferError> {
-        let store = load_store(&path)?;
+    pub fn new(
+        app: AppHandle,
+        path: JsonFile,
+        settings: &super::app_settings::TransferSettings,
+        settings_file: JsonFile,
+    ) -> Result<Self, TransferError> {
+        let mut store = load_store(&path)?;
+        store.max_concurrent_downloads = settings.max_concurrent_downloads;
+        store.relay_suggestion_minutes = settings.relay_suggestion_minutes;
+        store.soundcheck_enabled = settings.soundcheck_enabled;
         let mut transfers = store.transfers;
         for transfer in &mut transfers {
             reconcile_transfer_after_restart(transfer);
@@ -447,7 +455,8 @@ impl TransferHub {
         let writer = TransferWriter::new(
             move |store: TransferStore| {
                 (|| -> Result<(), TransferError> {
-                    path.save(&store)?;
+                    if settings_file.is_blocked() { return Err(std::io::Error::other("Settings migration is unavailable; transfer history is preserved until it can complete.").into()); }
+                    save_store(&path, &store)?;
                     Ok(())
                 })()
                 .map_err(|error| error.to_string())
@@ -586,52 +595,31 @@ impl TransferHub {
             .len()
     }
 
-    pub fn set_max_concurrent_downloads(
-        &self,
-        max_concurrent_downloads: u8,
-    ) -> Result<TransferQueueSnapshot, TransferError> {
-        if !(1..=MAX_CONCURRENT_DOWNLOADS).contains(&max_concurrent_downloads) {
-            return Err(TransferError::InvalidConcurrentDownloads);
-        }
+    pub fn apply_settings(&self, settings: &super::app_settings::TransferSettings) {
         self.max_concurrent_downloads
-            .store(max_concurrent_downloads, Ordering::SeqCst);
-        self.persist_and_publish()?;
-        Ok(self.snapshot())
-    }
-
-    pub fn set_relay_suggestion_minutes(
-        &self,
-        relay_suggestion_minutes: u32,
-    ) -> Result<TransferQueueSnapshot, TransferError> {
-        if !RELAY_SUGGESTION_MINUTES.contains(&relay_suggestion_minutes) {
-            return Err(TransferError::InvalidRelaySuggestionMinutes);
-        }
+            .store(settings.max_concurrent_downloads, Ordering::SeqCst);
         self.relay_suggestion_minutes
-            .store(relay_suggestion_minutes, Ordering::SeqCst);
-        self.persist_and_publish()?;
-        Ok(self.snapshot())
-    }
-
-    pub fn set_soundcheck_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<TransferQueueSnapshot, TransferError> {
-        self.soundcheck_enabled.store(enabled, Ordering::SeqCst);
-        if enabled {
-            let mut transfers = self
-                .transfers
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            for transfer in transfers.iter_mut().filter(|transfer| {
-                transfer.status == TransferStatus::Completed
-                    && transfer.verification_status == VerificationStatus::Verified
-                    && transfer.soundcheck.is_none()
+            .store(settings.relay_suggestion_minutes, Ordering::SeqCst);
+        let enabled_now = settings.soundcheck_enabled
+            && !self
+                .soundcheck_enabled
+                .swap(settings.soundcheck_enabled, Ordering::SeqCst);
+        if enabled_now {
+            let mut transfers = self.transfers.write().unwrap_or_else(|p| p.into_inner());
+            for transfer in transfers.iter_mut().filter(|t| {
+                t.status == TransferStatus::Completed
+                    && t.verification_status == VerificationStatus::Verified
+                    && t.soundcheck.is_none()
             }) {
                 refresh_soundcheck(transfer, false);
             }
+            drop(transfers);
+            let _ = self.persist();
         }
-        self.persist_and_publish()?;
-        Ok(self.snapshot())
+        let mut revision = self.publication.lock().unwrap_or_else(|p| p.into_inner());
+        let _ = self
+            .app
+            .emit(TRANSFER_EVENT, self.snapshot_at(&mut revision));
     }
 
     pub fn enqueue(
@@ -2387,8 +2375,19 @@ fn next_download_index(
     })
 }
 
+fn save_store(path: &JsonFile, store: &TransferStore) -> Result<(), TransferError> {
+    let mut data = serde_json::to_value(store)?;
+    if let Some(fields) = data.as_object_mut() {
+        fields.remove("max_concurrent_downloads");
+        fields.remove("relay_suggestion_minutes");
+        fields.remove("soundcheck_enabled");
+    }
+    path.save(&data)?;
+    Ok(())
+}
+
 fn load_store(path: &JsonFile) -> Result<TransferStore, TransferError> {
-    Ok(path.load(
+    Ok(path.load_preserving(
         || TransferStore {
             version: STORE_VERSION,
             max_concurrent_downloads: DEFAULT_MAX_CONCURRENT_DOWNLOADS,
@@ -2398,6 +2397,23 @@ fn load_store(path: &JsonFile) -> Result<TransferStore, TransferError> {
         },
         decode_store,
     ))
+}
+
+pub(super) fn legacy_settings(path: &JsonFile) -> super::app_settings::TransferSettings {
+    let raw = path.load(
+        || serde_json::Value::Null,
+        |bytes| {
+            decode_store(bytes)?;
+            Ok(serde_json::from_slice::<serde_json::Value>(bytes)?)
+        },
+    );
+    let mut result = super::app_settings::TransferSettings::default();
+    if let Ok(s) = serde_json::from_value::<TransferStore>(raw) {
+        result.max_concurrent_downloads = s.max_concurrent_downloads;
+        result.relay_suggestion_minutes = s.relay_suggestion_minutes;
+        result.soundcheck_enabled = s.soundcheck_enabled;
+    }
+    result
 }
 
 fn decode_store(bytes: &[u8]) -> Result<TransferStore, DecodeError> {
@@ -2976,11 +2992,17 @@ mod tests {
         assert_eq!(store.transfers[0].transferred_bytes, 37);
         assert!(store.soundcheck_enabled);
         assert!(file.notices().is_empty());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        save_store(&file, &store).unwrap();
         assert_eq!(
             std::fs::read(dir.path().join("transfers.json.bak")).unwrap(),
             bytes
         );
         let migrated = std::fs::read(&path).unwrap();
+        let document: serde_json::Value = serde_json::from_slice(&migrated).unwrap();
+        assert!(document.get("max_concurrent_downloads").is_none());
+        assert!(document.get("relay_suggestion_minutes").is_none());
+        assert!(document.get("soundcheck_enabled").is_none());
         let again = load_store(&JsonFile::new(path)).unwrap();
         assert_eq!(
             serde_json::to_value(&store).unwrap(),

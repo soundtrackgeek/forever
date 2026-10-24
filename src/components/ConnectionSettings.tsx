@@ -1,3 +1,4 @@
+import { SettingsPortability } from "./SettingsPortability";
 import { UploadPolicySettings } from "./UploadPolicySettings";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ReachabilitySettings } from "./ReachabilitySettings";
@@ -30,6 +31,7 @@ import type {
 } from "../types";
 
 type ConnectionSettingsProps = {
+  onSettingsApplied: () => void;
   profile: ConnectionProfile;
   hasPassword: boolean;
   snapshot: ConnectionSnapshot;
@@ -109,6 +111,7 @@ function formatTime(timestampMs: number) {
 }
 
 export function ConnectionSettings({
+  onSettingsApplied,
   profile,
   hasPassword,
   snapshot,
@@ -148,6 +151,12 @@ export function ConnectionSettings({
   onRoomNotificationsChange,
 }: ConnectionSettingsProps) {
   const [draft, setDraft] = useState(profile);
+  const signature = JSON.stringify(profile);
+  const [profileSignature, setProfileSignature] = useState(signature);
+  if (signature !== profileSignature) {
+    setProfileSignature(signature);
+    setDraft(profile);
+  }
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -229,6 +238,7 @@ export function ConnectionSettings({
       </header>
 
       <div className="settings-scroll">
+        <SettingsPortability onApplied={onSettingsApplied} />
         <form className="settings-panel" onSubmit={save}>
           <div className="settings-panel-heading">
             <div className="settings-icon">

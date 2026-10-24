@@ -1,5 +1,6 @@
 use super::{
     album_query::{AlbumIdentity, QueryMemory},
+    app_settings::{AppSettings, Settings, SettingsPatch},
     branch::{Branch, ChildCandidate},
     credentials::CredentialVault,
     diagnostics::{DiagnosticEntry, Diagnostics},
@@ -59,7 +60,7 @@ use super::{
     rooms::{valid_room_message, valid_room_name, RoomsError, RoomsHub, RoomsSnapshot},
     search::{valid_client_id, SearchHub, SearchSnapshot, SearchState},
     search_governor::{SearchGovernor, SearchLane},
-    settings::{ConnectionProfile, SettingsStore},
+    settings::ConnectionProfile,
     shares::{
         ShareFolderSnapshot, ShareSearchSnapshot, SharesError, SharesHub, SharesTicket,
         UserSharesOverview,
@@ -413,7 +414,8 @@ enum PeerMessagePurpose {
 #[derive(Clone)]
 pub struct ConnectionManager {
     app: AppHandle,
-    settings: SettingsStore,
+    settings: AppSettings,
+    settings_operation: Arc<Mutex<()>>,
     store_files: Vec<JsonFile>,
     vault: CredentialVault,
     diagnostics: Diagnostics,
@@ -468,11 +470,14 @@ impl ConnectionManager {
             paths.wanted.clone(),
             paths.wanted.with_file_name("search-queries.json"),
             paths.wanted.with_file_name("uploads.json"),
+            paths.wanted.with_file_name("archive.json"),
+            paths.wanted.with_file_name("settings.json"),
         ]
         .into_iter()
         .map(JsonFile::new)
         .collect();
-        let settings = SettingsStore::new(store_files[0].clone());
+        let settings = AppSettings::open(store_files[10].clone(), &store_files[..10]);
+        let preferences = settings.get();
         let diagnostics = Diagnostics::new(paths.diagnostics)?;
         let profile = settings.load()?;
         let snapshot = profile
@@ -481,8 +486,14 @@ impl ConnectionManager {
             .unwrap_or_else(ConnectionSnapshot::unconfigured);
         let queries = QueryMemory::new(store_files[7].clone());
         let search = SearchHub::new(app.clone(), queries.clone());
-        let transfers = TransferHub::new(app.clone(), store_files[1].clone())?;
-        let local_shares = LocalSharesHub::new(app.clone(), store_files[2].clone())?;
+        let transfers = TransferHub::new(
+            app.clone(),
+            store_files[1].clone(),
+            &preferences.transfers,
+            settings.file(),
+        )?;
+        let local_shares =
+            LocalSharesHub::new(app.clone(), store_files[2].clone(), settings.clone())?;
         let uploads = UploadHub::new(
             app.clone(),
             store_files[8].clone(),
@@ -500,12 +511,15 @@ impl ConnectionManager {
             store_files[6].clone(),
             search_governor.clone(),
             queries.clone(),
+            &preferences.wanted,
+            settings.file(),
         )?;
         let radar = RadarHub::new(app.clone(), queries);
 
         Ok(Self {
             app,
             settings,
+            settings_operation: Arc::new(Mutex::new(())),
             store_files,
             vault: CredentialVault::default(),
             diagnostics,
@@ -538,6 +552,150 @@ impl ConnectionManager {
         })
     }
 
+    pub fn settings_store(&self) -> AppSettings {
+        self.settings.clone()
+    }
+
+    pub(crate) fn publish_settings(&self) {
+        let _ = self.app.emit("forever://settings", self.settings.get());
+    }
+
+    fn apply_settings(&self, previous: &Settings, next: &Settings) {
+        if previous.connection != next.connection {
+            self.stop_active_task();
+            self.rooms.disconnected();
+            self.publish(
+                next.connection
+                    .as_ref()
+                    .map(ConnectionSnapshot::offline)
+                    .unwrap_or_else(ConnectionSnapshot::unconfigured),
+            );
+        }
+        if previous.transfers != next.transfers {
+            self.transfers.apply_settings(&next.transfers);
+            self.schedule_downloads();
+        }
+        if previous.wanted != next.wanted {
+            self.wanted.apply_settings(&next.wanted);
+        }
+        if previous.sharing != next.sharing {
+            self.local_shares.apply_settings(&next.sharing);
+            self.uploads.set_policy(
+                next.sharing.upload_policy.clone(),
+                self.people.saved_users_to_watch(),
+            );
+            self.schedule_uploads();
+            if previous.sharing.roots != next.sharing.roots {
+                let manager = self.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let _ = manager.rescan_local_shares();
+                });
+            }
+        }
+        self.publish_settings();
+    }
+
+    pub fn patch_settings(&self, patch: SettingsPatch) -> Result<Settings, ConnectionServiceError> {
+        let _guard = self
+            .settings_operation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let previous = self.settings.get();
+        if patch.touches_webview() && !previous.webview_migrated {
+            return Err(super::settings::SettingsError::Validation("WebView preferences have not finished migrating. Resolve the settings notice and restart, or import a complete settings backup.".into()).into());
+        }
+        let next = self.settings.update(|s| patch.apply(s))?;
+        self.apply_settings(&previous, &next);
+        Ok(next)
+    }
+
+    pub fn import_settings(&self, json: &str) -> Result<Settings, String> {
+        let imported = super::app_settings::parse_import(json)?;
+        let _guard = self
+            .settings_operation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let previous = self.settings.get();
+        let next = self
+            .settings
+            .update(|s| {
+                *s = imported;
+                s.webview_migrated = true;
+            })
+            .map_err(|e| e.to_string())?;
+        self.apply_settings(&previous, &next);
+        Ok(next)
+    }
+
+    pub fn reset_settings_section(&self, section: &str) -> Result<Settings, String> {
+        if ["preferences", "searches"].contains(&section) && !self.settings.get().webview_migrated {
+            return Err("WebView preferences have not finished migrating. Resolve the settings notice and restart, or import a complete settings backup.".into());
+        }
+        if section == "connection" {
+            self.reset().map_err(|e| e.to_string())?;
+            return Ok(self.settings.get());
+        }
+        if ![
+            "transfers",
+            "sharing",
+            "wanted",
+            "archive",
+            "preferences",
+            "searches",
+        ]
+        .contains(&section)
+        {
+            return Err("Unknown settings section.".into());
+        }
+        let _guard = self
+            .settings_operation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let previous = self.settings.get();
+        let next = self
+            .settings
+            .update(|s| match section {
+                "transfers" => s.transfers = Default::default(),
+                "sharing" => s.sharing = Default::default(),
+                "wanted" => s.wanted = Default::default(),
+                "archive" => s.archive_database_path = None,
+                "searches" => s.dial_memory = Default::default(),
+                "preferences" => {
+                    s.preferences = Default::default();
+                    s.webview_migrated = true;
+                }
+                _ => unreachable!(),
+            })
+            .map_err(|e| e.to_string())?;
+        self.apply_settings(&previous, &next);
+        Ok(next)
+    }
+
+    pub fn migrate_webview_settings(
+        &self,
+        preferences: super::app_settings::Preferences,
+        dial_memory: super::app_settings::DialMemory,
+    ) -> Result<Settings, String> {
+        let _guard = self
+            .settings_operation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let previous = self.settings.get();
+        if previous.webview_migrated {
+            return Ok(previous);
+        }
+        let next = self
+            .settings
+            .update(|s| {
+                s.preferences = preferences;
+                s.dial_memory = dial_memory;
+                s.webview_migrated = true;
+            })
+            .map_err(|e| e.to_string())?;
+        self.publish_settings();
+        Ok(next)
+    }
+
     pub fn bootstrap(&self) -> Result<ConnectionBootstrap, ConnectionServiceError> {
         let profile = self.settings.load()?;
         let has_password = match profile.as_ref() {
@@ -566,6 +724,10 @@ impl ConnectionManager {
         &self,
         request: SaveConnectionRequest,
     ) -> Result<ConnectionBootstrap, ConnectionServiceError> {
+        let _guard = self
+            .settings_operation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         request.profile.validate()?;
         let previous = self.settings.load()?;
         let username_changed = previous
@@ -585,6 +747,7 @@ impl ConnectionManager {
             request.profile.remember_password,
         )?;
         self.settings.save(&request.profile)?;
+        self.publish_settings();
 
         if let Some(previous) = previous {
             if previous.username != request.profile.username {
@@ -644,12 +807,17 @@ impl ConnectionManager {
     }
 
     pub fn reset(&self) -> Result<ConnectionBootstrap, ConnectionServiceError> {
+        let _guard = self
+            .settings_operation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         self.stop_active_task();
         self.rooms.disconnected();
         if let Some(profile) = self.settings.load()? {
             self.vault.forget(&profile.username)?;
         }
         self.settings.delete()?;
+        self.publish_settings();
         self.diagnostics.record(
             "info",
             "profile_removed",
@@ -758,7 +926,11 @@ impl ConnectionManager {
         &self,
         interval_minutes: u32,
     ) -> Result<WantedSnapshot, ConnectionServiceError> {
-        Ok(self.wanted.set_interval(interval_minutes)?)
+        self.patch_settings(SettingsPatch {
+            wanted_interval_minutes: Some(interval_minutes),
+            ..Default::default()
+        })?;
+        Ok(self.wanted.snapshot())
     }
 
     pub fn set_wanted_preferences(
@@ -781,7 +953,11 @@ impl ConnectionManager {
         &self,
         preferences: WantedPreferences,
     ) -> Result<WantedSnapshot, ConnectionServiceError> {
-        Ok(self.wanted.set_default_preferences(preferences)?)
+        self.patch_settings(SettingsPatch {
+            wanted_default_preferences: Some(preferences),
+            ..Default::default()
+        })?;
+        Ok(self.wanted.snapshot())
     }
 
     pub fn sync_wanted_fulfilled(
@@ -843,18 +1019,22 @@ impl ConnectionManager {
         &self,
         max_concurrent_downloads: u8,
     ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
-        let snapshot = self
-            .transfers
-            .set_max_concurrent_downloads(max_concurrent_downloads)?;
-        self.schedule_downloads();
-        Ok(snapshot)
+        self.patch_settings(SettingsPatch {
+            max_concurrent_downloads: Some(max_concurrent_downloads),
+            ..Default::default()
+        })?;
+        Ok(self.transfers.snapshot())
     }
 
     pub fn set_soundcheck_enabled(
         &self,
         enabled: bool,
     ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
-        Ok(self.transfers.set_soundcheck_enabled(enabled)?)
+        self.patch_settings(SettingsPatch {
+            soundcheck_enabled: Some(enabled),
+            ..Default::default()
+        })?;
+        Ok(self.transfers.snapshot())
     }
 
     pub fn current_local_shares(&self) -> LocalSharesSnapshot {
@@ -1153,7 +1333,12 @@ impl ConnectionManager {
         &self,
         path: &str,
     ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
+        let _guard = self
+            .settings_operation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let snapshot = self.local_shares.add_root(path)?;
+        self.publish_settings();
         self.refresh_shared_counts();
         Ok(snapshot)
     }
@@ -1162,7 +1347,12 @@ impl ConnectionManager {
         &self,
         id: &str,
     ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
+        let _guard = self
+            .settings_operation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let snapshot = self.local_shares.remove_root(id)?;
+        self.publish_settings();
         self.refresh_shared_counts();
         Ok(snapshot)
     }
@@ -1172,7 +1362,12 @@ impl ConnectionManager {
         id: &str,
         enabled: bool,
     ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
+        let _guard = self
+            .settings_operation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let snapshot = self.local_shares.set_enabled(id, enabled)?;
+        self.publish_settings();
         self.refresh_shared_counts();
         Ok(snapshot)
     }
@@ -1187,22 +1382,22 @@ impl ConnectionManager {
         &self,
         upload_slots: u8,
     ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
-        let snapshot = self.local_shares.set_upload_slots(upload_slots)?;
-        self.schedule_uploads();
-        Ok(snapshot)
+        self.patch_settings(SettingsPatch {
+            upload_slots: Some(upload_slots),
+            ..Default::default()
+        })?;
+        Ok(self.local_shares.snapshot())
     }
 
     pub fn set_upload_policy(
         &self,
         policy: UploadPolicy,
     ) -> Result<LocalSharesSnapshot, ConnectionServiceError> {
-        let snapshot = self.local_shares.set_upload_policy(policy)?;
-        self.uploads.set_policy(
-            snapshot.upload_policy.clone(),
-            self.people.saved_users_to_watch(),
-        );
-        self.schedule_uploads();
-        Ok(snapshot)
+        self.patch_settings(SettingsPatch {
+            upload_policy: Some(policy),
+            ..Default::default()
+        })?;
+        Ok(self.local_shares.snapshot())
     }
 
     pub fn current_uploads(&self) -> UploadQueueSnapshot {
@@ -1409,7 +1604,11 @@ impl ConnectionManager {
         &self,
         minutes: u32,
     ) -> Result<TransferQueueSnapshot, ConnectionServiceError> {
-        Ok(self.transfers.set_relay_suggestion_minutes(minutes)?)
+        self.patch_settings(SettingsPatch {
+            relay_suggestion_minutes: Some(minutes),
+            ..Default::default()
+        })?;
+        Ok(self.transfers.snapshot())
     }
 
     pub fn reveal_release_path(&self, release_id: &str) -> Result<String, ConnectionServiceError> {

@@ -21,6 +21,13 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            connection::settings_commands::settings_get,
+            connection::settings_commands::settings_patch,
+            connection::settings_commands::settings_migrate_webview,
+            connection::settings_commands::settings_validate_import,
+            connection::settings_commands::settings_import,
+            connection::settings_commands::settings_reset_section,
+            connection::settings_commands::settings_export,
             matching::rank_album_sources,
             matching::tracklist_confidence,
             matching::normalize_title,

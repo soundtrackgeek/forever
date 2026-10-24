@@ -1,3 +1,4 @@
+import { useSettings, savePreference } from "../settings";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -124,13 +125,7 @@ const emptySnapshot = (): RoomsSnapshot => ({
 const errorMessage = (cause: unknown) =>
   cause instanceof Error ? cause.message : String(cause);
 
-const readNotificationPreference = () => {
-  try {
-    return window.localStorage.getItem(ROOM_NOTIFICATION_STORAGE_KEY) !== "false";
-  } catch {
-    return true;
-  }
-};
+
 
 const messageIds = (snapshot: RoomsSnapshot) =>
   new Set(snapshot.rooms.flatMap((room) => room.messages.map((message) => message.id)));
@@ -152,9 +147,8 @@ export function useSoulseekRooms() {
   );
   const [ready, setReady] = useState(!native);
   const [error, setError] = useState<string | null>(null);
-  const [notificationsEnabled, setNotificationsEnabledState] = useState(
-    readNotificationPreference,
-  );
+  const { settings } = useSettings();
+  const notificationsEnabled = settings.preferences.roomNotificationsEnabled;
   const knownMessages = useRef<Set<string>>(new Set());
   const notificationPreference = useRef(notificationsEnabled);
 
@@ -297,12 +291,7 @@ export function useSoulseekRooms() {
   }, [invokeSnapshot, native, snapshot, updatePreviewRoom]);
 
   const setNotificationsEnabled = useCallback((enabled: boolean) => {
-    setNotificationsEnabledState(enabled);
-    try {
-      window.localStorage.setItem(ROOM_NOTIFICATION_STORAGE_KEY, String(enabled));
-    } catch {
-      // Preference remains active for this session when storage is unavailable.
-    }
+    savePreference({ roomNotificationsEnabled: enabled });
   }, []);
 
   return useMemo(() => ({
