@@ -829,7 +829,23 @@ including artists inferred from the Archive.
 Listening Post with **Add to Wanted** (or "auto-add with my default Smart Match
 profile").
 
-### 6. Similar-artist discovery shelf
+### 6. Similar-artist discovery shelf - DONE
+
+**Implemented in 0.0.75 (2026-10-24):** Archive's Discovery shelf uses ListenBrainz
+similarity, seeded by up to five most-owned artists with verified MusicBrainz
+identities. It removes already-owned artists across the complete Archive using
+MBIDs and normalized display/canonical names, combines affinities into 12 ranked
+recommendations, and explains their seed artists. Selecting an artist loads up
+to three studio album picks from the MusicBrainz catalog, ordered by ListenBrainz
+listen counts where available, with Smart Match source search and Add to Wanted.
+Unverified seeds are skipped and counted; identity review stays in Music Library.
+Requests are explicit, paced, cached for seven days, and may fall back to labeled
+data up to 30 days old. Partial catalogs/provider failures are visible, and late
+responses cannot replace a newer artist/source. Read-only/ranking/provider/UI
+regressions and browser preview checks cover the flow; installed-app and public
+Soulseek validation remain separate. Soulseek-native recommendations/similar-user
+messages are an optional future source, not part of this implementation. Original
+proposal follows.
 
 The Missing Shelf answers "what am I missing from artists I own?". A discovery
 shelf would answer "which artists should I own?".

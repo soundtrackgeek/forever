@@ -602,3 +602,47 @@
     margin: 4px 0 7px;
   }
 }
+
+.discovery-workspace { padding: 28px 30px; color: #c5c9d5; }
+.discovery-heading { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 24px; }
+.discovery-kicker { display: flex; align-items: center; gap: 8px; color: #d9ad68; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; }
+.discovery-heading h2 { margin: 10px 0 8px; font-size: 27px; color: #f0eee8; font-weight: 550; }
+.discovery-heading p, .discovery-caption { color: #969bad; font-size: 12px; line-height: 1.7; }
+.discovery-workspace button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 13px; border: 1px solid #414454; border-radius: 6px; color: #dddfe8; background: #202333; cursor: pointer; font: inherit; font-size: 12px; }
+.discovery-workspace button:disabled { opacity: .5; cursor: default; }
+.discovery-workspace button:focus-visible { outline: 2px solid #e5b96e; outline-offset: 3px; }
+.discovery-workspace button:not(:disabled):hover { background: #2b2f40; border-color: #b79159; }
+.discovery-intro { max-width: 580px; margin: 60px auto; text-align: center; color: #a4a9bb; line-height: 1.8; }
+.discovery-intro > svg { color: #cda66a; }
+.discovery-intro h3 { color: #e4e4e9; }
+.discovery-intro p { font-size: 13px; }
+.discovery-notice { padding: 12px 15px; background: #2a2630; border: 1px solid #5c4d40; border-radius: 6px; font-size: 12px; line-height: 1.7; }
+.discovery-notice button { margin-left: 12px; }
+.discovery-seeds { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0 12px; }
+.discovery-seeds > small { color: #9398aa; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.discovery-seeds > span { padding: 7px 10px; border: 1px solid #3f414d; border-radius: 5px; font-size: 11px; }
+.discovery-seeds b { color: #9b927f; font-weight: 400; margin-left: 7px; }
+.discovery-layout { display: grid; grid-template-columns: minmax(250px, .95fr) minmax(0, 1.5fr); gap: 24px; margin: 25px 0; align-items: start; }
+.discovery-artists { list-style: none; margin: 0; padding: 0; }
+.discovery-artists li + li { margin-top: 6px; }
+.discovery-artists button { display: flex; width: 100%; padding: 16px 12px; text-align: left; justify-content: start; gap: 14px; background: transparent; border-color: transparent; }
+.discovery-artists button[aria-pressed="true"] { background: #2b2930; border-color: #796044; }
+.discovery-rank { color: #b99c70; font-size: 11px; font-variant-numeric: tabular-nums; }
+.discovery-artists button > span:nth-child(2) { min-width: 0; flex: 1; }
+.discovery-artists strong { display: block; font-size: 15px; color: #e9e9ed; overflow-wrap: anywhere; }
+.discovery-artists small, .discovery-artists em { display: block; margin-top: 6px; font-size: 10px; line-height: 1.5; color: #999fb2; font-style: normal; }
+.discovery-artists em { color: #c2a16c; }
+.discovery-picks { min-width: 0; padding: 24px; background: #181c29; border: 1px solid #343847; border-radius: 9px; }
+.discovery-picks h3 { margin: 10px 0; color: #eeece7; font-size: 24px; font-weight: 550; }
+.discovery-albums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+.discovery-albums article { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.discovery-artwork { display: grid; place-items: center; width: 100%; aspect-ratio: 1; border: 1px solid #3f4354; border-radius: 5px; background: linear-gradient(140deg, #33364a, #202235); color: #ac9671; overflow: hidden; }
+.discovery-artwork img { width: 100%; height: 100%; object-fit: cover; }
+.discovery-albums article > div { flex: 1; }
+.discovery-albums small { color: #a1a6b7; font-size: 10px; }
+.discovery-albums h4 { margin: 6px 0; line-height: 1.4; font-size: 13px; overflow-wrap: anywhere; }
+.discovery-albums button { padding: 9px 5px; font-size: 10px; }
+.discovery-albums button:first-of-type { color: #e4c48a; border-color: #776044; background: #302a28; }
+.discovery-empty { padding: 30px 14px; color: #a0a7ba; font-size: 13px; line-height: 1.8; text-align: center; }
+@media (max-width: 1100px) { .discovery-layout { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .discovery-workspace { padding: 20px 14px; } .discovery-heading { flex-wrap: wrap; } .discovery-picks { padding: 15px; } .discovery-albums { grid-template-columns: 1fr; } .discovery-artwork { max-width: 190px; } }

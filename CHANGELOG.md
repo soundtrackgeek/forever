@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.0.75] - 2026-10-24
+
+### Added
+
+- Archive Discovery shelf: up to 12 ranked similar artists from ListenBrainz,
+  seeded by up to five most-owned verified MusicBrainz artists, with visible
+  recommendation reasons and complete Archive artist ownership filtering.
+- Three studio album picks per selected artist, matched to MusicBrainz catalog
+  identities and ranked by ListenBrainz listens, with Smart Match source-search
+  handoff and offline-capable Add to Wanted.
+- Bounded persistent discovery cache, serialized provider requests, rate-limit
+  cooldowns, explicit stale/partial/fallback notices, empty/error/retry states,
+  and guards against late responses after artist or Archive-source changes.
+
+### Verification
+
+- Regression coverage for read-only full-Archive filtering, verified aliases,
+  deterministic ranking, provider cache/restart/failure behavior, album identity,
+  stale UI responses, Wanted errors, and Smart Match handoff. Browser preview
+  checks are separate from native installed-app/public Soulseek validation.
+
 ## [0.0.74] - 2026-10-24
 
 ### Added

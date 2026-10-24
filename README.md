@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.74` adds reviewed tagging and filing in Arrival Desk,
-> with MusicBrainz tags, artwork, naming templates, and durable undo.
+> **Status:** pre-alpha. Version `0.0.75` adds the similar-artist Discovery shelf,
+> with Archive-based recommendations, studio album picks, and Smart Match handoff.
 
-If `0.0.16` is installed, download and run the latest `0.0.74` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.75` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -20,6 +20,26 @@ configuration and transfers.
 ![Forever Open Frequency public rooms](design/implementation/open-frequency-0.0.31-desktop.png)
 
 ## Current foundation
+
+- **Discovery shelf** in Archive recommends up to 12 artists outside your
+  collection using ListenBrainz listening affinity. Choose **Discover artists**
+  to send up to five of your most-owned, verified MusicBrainz artist IDs to
+  ListenBrainz; no account or API key is required. The Archive stays read-only.
+  Each recommendation explains which owned artists contributed. Unverified
+  artists are counted and skipped as seeds; verify identities in Music Library.
+- Select a recommended artist for up to three MusicBrainz studio albums, ranked
+  by ListenBrainz listen counts where available, then by release date. Live
+  albums, compilations, and EPs are excluded. **Smart Match** opens the existing
+  source search/review flow; **Add to Wanted** also works while Soulseek is
+  offline. Discovery itself needs internet access or saved provider data.
+- Discovery checks ownership across all Archive album artists using verified
+  MBIDs and normalized display/canonical names. It is listening affinity, not
+  audio similarity. Provider responses use a separate bounded SQLite cache in
+  Forever's cache directory, fresh for seven days; failures may use explicitly
+  labeled saved data up to 30 days old. **Refresh shelf** rereads Archive
+  ownership and reuses fresh provider data. Missing identities, partial catalogs,
+  provider failures, and cache problems remain visible. No background discovery,
+  automatic Wanted additions, or downloads run from recommendations.
 
 - Faithful Midnight Radio desktop interface
 - **The Listening Post** Home command center opens after startup with live

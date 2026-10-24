@@ -9,6 +9,7 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
+pub(crate) mod discovery;
 pub(crate) mod settings;
 pub use settings::initialize;
 

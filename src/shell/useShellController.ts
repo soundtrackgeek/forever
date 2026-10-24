@@ -10,6 +10,7 @@ import { useArchiveInventory } from "../hooks/useArchiveInventory";
 import { useDialMemory } from "../hooks/useDialMemory";
 import { useLocalSharing } from "../hooks/useLocalSharing";
 import { useMissingShelf } from "../hooks/useMissingShelf";
+import { useDiscoveryShelf } from "../hooks/useDiscoveryShelf";
 import { usePrivateMessages } from "../hooks/usePrivateMessages";
 import { useShelfRadar } from "../hooks/useShelfRadar";
 import { useSoulseekConnection } from "../hooks/useSoulseekConnection";
@@ -131,6 +132,7 @@ export function useShellController() {
     wanted.snapshot.albums,
     transferGroups,
   );
+  const discovery = useDiscoveryShelf(`${archive.status?.path ?? ""}:${archive.status?.lastModifiedAtMs ?? ""}:${archive.status?.connected ?? false}`);
   const archiveOwnedReleaseIds = useMemo(
     () =>
       new Set(
@@ -996,6 +998,7 @@ export function useShellController() {
     loadOfficialTracklist,
     messages,
     missingShelf,
+    discovery,
     missingStudioCount,
     musicBrainzFallbackTrackCount,
     native,

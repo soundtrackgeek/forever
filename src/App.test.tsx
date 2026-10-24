@@ -1071,17 +1071,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.74 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.75 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Preview MusicBrainz tags, cover artwork, and library destination paths.",
+        "Discover new artists inspired by your most-owned Archive artists.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "File completed arrivals with original-file backups and reviewed undo.",
+        "Explore studio album picks and hand them to Smart Match or Wanted.",
       ),
     ).toBeInTheDocument();
     expect(

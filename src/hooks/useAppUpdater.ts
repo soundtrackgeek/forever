@@ -36,15 +36,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.73",
-  version: "0.0.74",
-  body: `## What's new in Forever 0.0.74
+  currentVersion: "0.0.74",
+  version: "0.0.75",
+  body: `## What's new in Forever 0.0.75
 
 ### Changed
 
-- Preview MusicBrainz tags, cover artwork, and library destination paths.
-- File completed arrivals with original-file backups and reviewed undo.
-- Save naming templates and an incomplete folder, with an optional beets hand-off.`,
+- Discover new artists inspired by your most-owned Archive artists.
+- Explore studio album picks and hand them to Smart Match or Wanted.
+- See recommendation reasons and saved results when ListenBrainz is unavailable.`,
   date: "2026-10-24",
 };
 

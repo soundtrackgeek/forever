@@ -71,9 +71,10 @@ type ArchiveWorkspaceProps = {
   onClearReleaseHistory: (releaseIds: string[]) => Promise<unknown>;
   missingShelf: ReactNode;
   onOpenMissing: () => void;
+  discoveryShelf?: ReactNode;
 };
 
-type ArchiveTab = "library" | "arrivals" | "missing" | "wanted";
+type ArchiveTab = "library" | "arrivals" | "missing" | "discovery" | "wanted";
 type WantedFilter = "all" | "matches" | "waiting" | "fulfilled";
 
 const count = (value: number | null | undefined) =>
@@ -173,6 +174,7 @@ export function ArchiveWorkspace({
   onClearReleaseHistory,
   missingShelf,
   onOpenMissing,
+  discoveryShelf,
 }: ArchiveWorkspaceProps) {
   const [tab, setTab] = useState<ArchiveTab>(initialTab);
   const [filter, setFilter] = useState<WantedFilter>("all");
@@ -253,6 +255,9 @@ export function ArchiveWorkspace({
         <button type="button" role="tab" aria-selected={tab === "wanted"} className={tab === "wanted" ? "is-active" : ""} onClick={() => setTab("wanted")}>
           <BellRinging size={15} /> Wanted <small>{activeWantedCount}</small>
         </button>
+        <button type="button" role="tab" aria-selected={tab === "discovery"} className={tab === "discovery" ? "is-active" : ""} onClick={() => setTab("discovery")}>
+          <Record size={15} /> Discovery shelf
+        </button>
       </div>
 
       {tab === "library" ? (
@@ -316,7 +321,7 @@ export function ArchiveWorkspace({
           onClearReleaseHistory={onClearReleaseHistory}
           onOpenTransfer={onOpenTransfer}
         />
-      ) : tab === "missing" ? (
+      ) : tab === "discovery" ? discoveryShelf : tab === "missing" ? (
         missingShelf
       ) : (
         <div className="wanted-workspace">

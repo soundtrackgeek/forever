@@ -29,6 +29,12 @@ pub fn run() {
             ));
             app.manage(archive::initialize(app.handle())?);
             app.manage(musicbrainz::MusicBrainzClient::initialize(app.handle()));
+            app.manage(archive::discovery::DiscoveryProvider::new(
+                app.path()
+                    .app_cache_dir()
+                    .ok()
+                    .map(|path| path.join("discovery.sqlite3")),
+            ));
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -56,6 +62,8 @@ pub fn run() {
             matching::tracklist_confidence,
             matching::normalize_title,
             archive::archive_status,
+            archive::discovery::discovery_shelf,
+            archive::discovery::discovery_albums,
             archive::settings::archive_set_database_path,
             archive::archive_artists,
             archive::archive_cached_catalog,

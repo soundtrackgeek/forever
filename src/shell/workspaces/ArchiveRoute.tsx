@@ -1,5 +1,6 @@
 import { ArchiveWorkspace } from "../../components/ArchiveWorkspace";
 import { MissingShelfWorkspace } from "../../components/MissingShelfWorkspace";
+import { DiscoveryShelfWorkspace } from "../../components/DiscoveryShelfWorkspace";
 import { useShell } from "../shellStore";
 
 export default function ArchiveRoute() {
@@ -8,6 +9,7 @@ export default function ArchiveRoute() {
     archive,
     wanted,
     missingShelf,
+    discovery,
     connection,
     wantedDownloadStateByAlbumId,
     openTransfer,
@@ -29,6 +31,7 @@ export default function ArchiveRoute() {
     archive: s.archive,
     wanted: s.wanted,
     missingShelf: s.missingShelf,
+    discovery: s.discovery,
     connection: s.connection,
     wantedDownloadStateByAlbumId: s.wantedDownloadStateByAlbumId,
     openTransfer: s.openTransfer,
@@ -58,16 +61,19 @@ export default function ArchiveRoute() {
       wantedMatches={archive.wantedMatchByAlbumId}
       onSelectDatabase={async (path) => {
         missingShelf.resetSource();
+        discovery.resetSource();
         try {
           return await archive.selectDatabase(path);
         } finally {
           missingShelf.resetSource();
+          discovery.resetSource();
         }
       }}
       wantedError={wanted.error}
       online={connection.snapshot.state === "online"}
       onRefresh={async () => {
         missingShelf.clearCache();
+        discovery.resetSource();
         return await archive.refresh();
       }}
       onSetWantedInterval={wanted.setIntervalMinutes}
@@ -103,6 +109,17 @@ export default function ArchiveRoute() {
       onSetReleaseFiled={transfers.setReleaseFiled}
       onClearReleaseHistory={transfers.clearReleaseHistory}
       onOpenMissing={() => void missingShelf.activate().catch(() => undefined)}
+      discoveryShelf={
+        <DiscoveryShelfWorkspace
+          discovery={discovery}
+          connected={Boolean(archive.status?.connected)}
+          online={connection.snapshot.state === "online"}
+          wantedReady={wanted.ready}
+          wantedAlbums={wanted.snapshot.albums}
+          onAddWanted={wanted.add}
+          onSmartMatch={(artist, album) => openAlbumSources({ albumId: album.id, artist, title: album.title, coverArtUrl: album.coverArtUrl, firstReleaseDate: album.firstReleaseDate })}
+        />
+      }
       missingShelf={
         <MissingShelfWorkspace
           query={missingShelf.query}
