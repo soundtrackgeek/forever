@@ -199,6 +199,9 @@ impl<W: AsyncWrite + Unpin> Session<'_, W> {
                 })?;
             }
             Some(ConnectionCommand::ScheduleDownloads) => loop {
+                if self.manager.bandwidth.paused() {
+                    break;
+                }
                 let token = self.manager.take_connection_token();
                 let Some(ticket) = self.manager.transfers.activate_next(token) else {
                     break;
@@ -240,7 +243,7 @@ impl<W: AsyncWrite + Unpin> Session<'_, W> {
             }
             Some(ConnectionCommand::ScheduleUploads) => {
                 // Wait for startup indexing before validating restored requests.
-                while !self.manager.local_shares.is_scanning() {
+                while !self.manager.local_shares.is_scanning() && !self.manager.bandwidth.paused() {
                     let token = self.manager.take_connection_token();
                     let Some(ticket) = self
                         .manager

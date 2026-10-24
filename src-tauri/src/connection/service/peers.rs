@@ -1,3 +1,4 @@
+use super::super::bandwidth::{Bandwidth, Direction};
 use super::super::branch::ChildCandidate;
 use super::super::downloads::{DownloadPlan, TransferHub, TransferTicket};
 use super::super::folders::FolderTicket;
@@ -27,13 +28,14 @@ use super::{
 use std::io::SeekFrom;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::timeout;
+use tokio::time::Instant;
 
 // Direct/indirect peer negotiation and file IO.
 
@@ -160,6 +162,7 @@ pub(super) async fn handle_direct_peer(
                 stream.write_u32_le(ticket.transfer_token).await?;
                 stream.flush().await?;
                 spawn_file_upload(
+                    services.bandwidth.clone(),
                     stream,
                     ticket,
                     services.uploads,
@@ -230,6 +233,7 @@ pub(super) async fn handle_direct_peer(
                 .await
                 .map_err(|_| peer_timeout_error())??;
             spawn_file_download(
+                services.bandwidth.clone(),
                 stream,
                 transfer_token,
                 services.transfers,
@@ -258,6 +262,7 @@ pub(super) async fn handle_indirect_peer(
             stream.write_u32_le(ticket.transfer_token).await?;
             stream.flush().await?;
             spawn_file_upload(
+                services.bandwidth.clone(),
                 stream,
                 ticket,
                 services.uploads,
@@ -271,6 +276,7 @@ pub(super) async fn handle_indirect_peer(
             .await
             .map_err(|_| peer_timeout_error())??;
         spawn_file_download(
+            services.bandwidth.clone(),
             stream,
             transfer_token,
             services.transfers,
@@ -433,6 +439,7 @@ pub(super) fn spawn_outbound_upload_file_peer(
             return;
         }
         spawn_file_upload(
+            services.bandwidth.clone(),
             stream,
             claimed,
             services.uploads,
@@ -522,6 +529,7 @@ pub(super) fn spawn_outbound_download_peer(
     };
     tauri::async_runtime::spawn(async move {
         let PeerServices {
+            bandwidth,
             search,
             wanted,
             radar,
@@ -558,6 +566,7 @@ pub(super) fn spawn_outbound_download_peer(
             &mut stream,
             claimed.clone(),
             PeerServices {
+                bandwidth,
                 search,
                 wanted,
                 radar,
@@ -600,6 +609,7 @@ pub(super) fn spawn_outbound_folder_peer(
     };
     tauri::async_runtime::spawn(async move {
         let PeerServices {
+            bandwidth,
             search,
             wanted,
             radar,
@@ -636,6 +646,7 @@ pub(super) fn spawn_outbound_folder_peer(
             &mut stream,
             claimed.clone(),
             PeerServices {
+                bandwidth,
                 search,
                 wanted,
                 radar,
@@ -1100,6 +1111,7 @@ pub(super) fn spawn_upload_request_timeout(
 }
 
 pub(super) fn spawn_file_download(
+    bandwidth: Bandwidth,
     stream: TcpStream,
     transfer_token: u32,
     transfers: TransferHub,
@@ -1122,7 +1134,14 @@ pub(super) fn spawn_file_download(
     let task_transfers = transfers.clone();
     let task_id = id.clone();
     tauri::async_runtime::spawn(async move {
-        let outcome = receive_file(stream, &plan, task_transfers.clone(), cancellation).await;
+        let outcome = receive_file(
+            stream,
+            &plan,
+            task_transfers.clone(),
+            cancellation,
+            bandwidth,
+        )
+        .await;
         if let Err(message) = outcome {
             if retryable_download_error(&message) {
                 task_transfers.retry_attempt(&task_id, transfer_token, message);
@@ -1136,6 +1155,7 @@ pub(super) fn spawn_file_download(
 }
 
 pub(super) fn spawn_file_upload(
+    bandwidth: Bandwidth,
     stream: TcpStream,
     ticket: UploadTicket,
     uploads: UploadHub,
@@ -1167,9 +1187,15 @@ pub(super) fn spawn_file_upload(
     }
     let task_uploads = uploads.clone();
     tauri::async_runtime::spawn(async move {
-        let result = send_file(stream, &plan, cancellation.clone(), |transferred, speed| {
-            task_uploads.update_progress(&plan.id, plan.transfer_token, transferred, speed);
-        })
+        let result = send_file(
+            stream,
+            &plan,
+            cancellation.clone(),
+            bandwidth,
+            |transferred, speed| {
+                task_uploads.update_progress(&plan.id, plan.transfer_token, transferred, speed);
+            },
+        )
         .await;
         match result {
             Ok(Some(measurement)) => {
@@ -1214,6 +1240,7 @@ pub(super) async fn send_file<S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
     plan: &UploadTicket,
     cancellation: Arc<AtomicBool>,
+    bandwidth: Bandwidth,
     progress: impl FnMut(u64, u64),
 ) -> Result<Option<UploadMeasurement>, String> {
     tokio::select! {
@@ -1223,13 +1250,17 @@ pub(super) async fn send_file<S: AsyncRead + AsyncWrite + Unpin>(
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         } => Ok(None),
-        result = send_file_contents(stream, plan, progress) => result.map(Some),
+        result = send_file_contents(stream, plan, bandwidth, &cancellation, progress) => {
+            if cancellation.load(Ordering::SeqCst) { Ok(None) } else { result.map(Some) }
+        },
     }
 }
 
 pub(super) async fn send_file_contents<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     plan: &UploadTicket,
+    bandwidth: Bandwidth,
+    cancellation: &AtomicBool,
     mut progress: impl FnMut(u64, u64),
 ) -> Result<UploadMeasurement, String> {
     let offset = timeout(PEER_MESSAGE_TIMEOUT, stream.read_u64_le())
@@ -1255,13 +1286,23 @@ pub(super) async fn send_file_contents<S: AsyncRead + AsyncWrite + Unpin>(
         let remaining = plan.size_bytes - transferred;
         let capacity = usize::try_from(remaining.min(FILE_BUFFER_SIZE as u64))
             .expect("bounded file read size fits usize");
+        if bandwidth.paused() {
+            progress(transferred, 0);
+        }
+        let Some(mut permit) = bandwidth
+            .acquire(Direction::Upload, capacity, cancellation)
+            .await
+        else {
+            return Err("Upload cancelled.".into());
+        };
         let count = file
-            .read(&mut buffer[..capacity])
+            .read(&mut buffer[..permit.count])
             .await
             .map_err(|error| format!("Forever could not read the shared file: {error}"))?;
         if count == 0 {
             return Err("The shared file ended before its indexed size.".to_owned());
         }
+        permit.used(count);
         stream
             .write_all(&buffer[..count])
             .await
@@ -1297,11 +1338,40 @@ pub(super) async fn send_file_contents<S: AsyncRead + AsyncWrite + Unpin>(
 }
 
 pub(super) async fn receive_file(
-    mut stream: TcpStream,
+    stream: TcpStream,
     plan: &DownloadPlan,
     transfers: TransferHub,
     cancellation: Arc<AtomicBool>,
+    bandwidth: Bandwidth,
 ) -> Result<(), String> {
+    if !receive_file_contents(
+        stream,
+        plan,
+        &cancellation,
+        bandwidth,
+        |transferred, speed| {
+            transfers.update_progress(&plan.id, plan.transfer_token, transferred, speed);
+        },
+    )
+    .await?
+    {
+        return Ok(());
+    }
+    let plan = plan.clone();
+    tokio::task::spawn_blocking(move || transfers.complete(&plan))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(super) async fn receive_file_contents<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
+    plan: &DownloadPlan,
+    cancellation: &AtomicBool,
+    bandwidth: Bandwidth,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<bool, String> {
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -1330,13 +1400,25 @@ pub(super) async fn receive_file(
             file.sync_data()
                 .await
                 .map_err(|error| format!("Forever could not secure the paused file: {error}"))?;
-            return Ok(());
+            return Ok(false);
         }
         let remaining = plan.size_bytes - transferred;
         let capacity = usize::try_from(remaining.min(FILE_BUFFER_SIZE as u64))
             .expect("bounded file read size fits usize");
+        if bandwidth.paused() {
+            progress(transferred, 0);
+        }
+        let waiting = Instant::now();
+        let permit = bandwidth
+            .acquire(Direction::Download, capacity, cancellation)
+            .await;
+        // Throttling and metered holds are not a silent source.
+        last_data += waiting.elapsed();
+        let Some(mut permit) = permit else {
+            continue;
+        };
         let count = tokio::select! {
-            result = stream.read(&mut buffer[..capacity]) => result
+            result = stream.read(&mut buffer[..permit.count]) => result
                 .map_err(|error| format!("The source connection was interrupted: {error}"))?,
             _ = tokio::time::sleep(Duration::from_millis(100)) => {
                 if last_data.elapsed() >= Duration::from_secs(60) {
@@ -1344,7 +1426,7 @@ pub(super) async fn receive_file(
                 }
                 if last_update.elapsed() >= Duration::from_millis(250) {
                     let speed = transferred.saturating_sub(last_bytes).saturating_mul(1_000) / last_update.elapsed().as_millis().max(1) as u64;
-                    transfers.update_progress(&plan.id, plan.transfer_token, transferred, speed);
+                    progress(transferred, speed);
                     last_bytes = transferred;
                     last_update = Instant::now();
                 }
@@ -1354,6 +1436,7 @@ pub(super) async fn receive_file(
         if count == 0 {
             return Err("The source closed the connection before the file completed.".to_owned());
         }
+        permit.used(count);
         last_data = Instant::now();
         if cancellation.load(Ordering::SeqCst) {
             continue;
@@ -1366,13 +1449,13 @@ pub(super) async fn receive_file(
         if elapsed >= Duration::from_millis(250) || transferred == plan.size_bytes {
             let millis = elapsed.as_millis().max(1) as u64;
             let speed = transferred.saturating_sub(last_bytes).saturating_mul(1_000) / millis;
-            transfers.update_progress(&plan.id, plan.transfer_token, transferred, speed);
+            progress(transferred, speed);
             last_bytes = transferred;
             last_update = Instant::now();
         }
     }
     if cancellation.load(Ordering::SeqCst) {
-        return Ok(());
+        return Ok(false);
     }
     file.flush()
         .await
@@ -1382,12 +1465,7 @@ pub(super) async fn receive_file(
         .map_err(|error| format!("Forever could not secure the completed file: {error}"))?;
     drop(file);
 
-    let plan = plan.clone();
-    tokio::task::spawn_blocking(move || transfers.complete(&plan))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())?;
-    Ok(())
+    Ok(true)
 }
 
 pub(super) fn peer_timeout_error() -> ProtocolError {

@@ -1,3 +1,4 @@
+import { bandwidthSummary, useBandwidthStatus } from "../bandwidth";
 import {
   Archive,
   ArrowLineUp,
@@ -195,6 +196,7 @@ export function TransfersWorkspace({
   onDismissUploadError,
   focusTarget = null,
 }: TransfersWorkspaceProps) {
+  const bandwidth = useBandwidthStatus();
   const [direction, setDirection] = useState<"downloads" | "uploads">("downloads");
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
@@ -384,6 +386,7 @@ export function TransfersWorkspace({
         <div>
           <h1>Transfers</h1>
           <p>{direction === "downloads" ? "Complete releases, one carefully resumed file at a time." : "Every outgoing file, clearly queued and in sight."}</p>
+          {bandwidth.snapshot && <p role="status">{bandwidthSummary(bandwidth.snapshot)} · Settings → Bandwidth</p>}
         </div>
         <label className="transfer-search">
           <MagnifyingGlass size={16} weight="light" />

@@ -1,3 +1,4 @@
+import { BandwidthSettings } from "./BandwidthSettings";
 import { SettingsPortability } from "./SettingsPortability";
 import { DiagnosticsExport } from "./DiagnosticsExport";
 import { UploadPolicySettings } from "./UploadPolicySettings";
@@ -427,6 +428,8 @@ export function ConnectionSettings({
             <span className="settings-status-copy">{snapshot.message}</span>
           </div>
         </form>
+
+        <BandwidthSettings />
 
         <section className="settings-panel download-lanes-panel">
           <div className="settings-panel-heading">

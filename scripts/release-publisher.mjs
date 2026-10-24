@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import semver from "semver";
 import { releaseChannel, shouldAdvanceBeta, normalizeFeed } from "./release-policy.mjs";
 
-export async function publishUpdateFeed({ gh, version, branch, sha, file }) {
+export async function publishUpdateFeed({ gh, version, branch, sha, file, releaseId }) {
   const channel = releaseChannel(version, branch);
   const repo = "soundtrackgeek/forever";
   const tag = `v${version}`;
@@ -11,12 +11,22 @@ export async function publishUpdateFeed({ gh, version, branch, sha, file }) {
       && semver.valid(release.tag_name.slice(1)) && semver.gt(release.tag_name.slice(1), version))) {
     throw new Error("Refusing to replace a newer Stable release. Use its checkout for recovery.");
   }
-  const release = JSON.parse(gh("api", `repos/${repo}/releases/tags/${tag}`));
+  // The tag endpoint only resolves published releases. The installer action
+  // deliberately leaves this release in draft until all checks have passed.
+  // Prefer its exact ID; manual recovery discovers drafts in the paginated list.
+  if (releaseId === undefined || releaseId === "") {
+    const candidates = releases.filter((item) => item.tag_name === tag);
+    if (candidates.length !== 1) throw new Error(`Expected exactly one release for ${tag}; found ${candidates.length}. Supply its release ID for recovery.`);
+    releaseId = candidates[0].id;
+  }
+  if (!/^[1-9]\d*$/.test(String(releaseId))) throw new Error("Invalid release ID.");
+  const release = JSON.parse(gh("api", `repos/${repo}/releases/${releaseId}`));
+  if (release.tag_name !== tag || String(release.id) !== String(releaseId)) throw new Error(`Release ID does not match ${tag}.`);
   // Recovery is safe only for a release with all required artifacts already uploaded.
   for (const suffix of ["-setup.exe", "-setup.exe.sig", ".msi", ".msi.sig", "SHA256SUMS.txt"]) {
     if (!release.assets.some((asset) => asset.name.endsWith(suffix))) throw new Error(`Missing release artifact: ${suffix}`);
   }
-  const feed = normalizeFeed(JSON.parse(await readFile(file, "utf8")), version, repo, release.assets);
+  const feed = normalizeFeed(JSON.parse(await readFile(file, "utf8")), version, repo, release.assets, { draft: release.draft });
   const beta = releases.find((item) => item.tag_name === "beta");
   if (beta && (!beta.prerelease || beta.draft)) throw new Error("The beta metadata release must be a published prerelease.");
   const asset = beta?.assets.find((item) => item.name === "latest.json");

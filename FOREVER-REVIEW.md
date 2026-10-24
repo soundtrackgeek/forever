@@ -901,7 +901,20 @@ scan** (tags read with lofty and cached in SQLite), a **beets** database
 (read-only), and **Navidrome/OpenSubsonic** (`getArtists`, `getAlbum`, and
 `search3`; `startScan` after filing). A Jellyfin provider can come later.
 
-### 9. Bandwidth limits and scheduling
+### 9. Bandwidth limits and scheduling - DONE
+
+**Implemented in 0.0.77 (2026-10-24):** one shared token-bucket governor caps
+combined and per-direction file payloads across every lane. Unified settings
+persist normal/alternate profiles, a daily local-time window (including midnight),
+and optional Windows metered/unknown-cost holds. Five-second environment checks
+run independently of Soulseek login and workspace; status is visible in Settings
+and Transfers. Changes apply live, cancellation remains responsive, limiter waits
+do not count as source-idle time, and held queues do not spin on overdue retries.
+Tests cover concurrent budgets, bounded credit, refunds, schedule boundaries,
+clock changes, metering, old settings, real stream pacing/resume and UI validation.
+Caps exclude control/provider traffic and existing OS buffers; remote peers can
+close long holds. Physical network-cost switching and live public-peer behavior
+remain unverified. The original proposal follows for context.
 
 The app has no speed limits for either direction, which matters on shared or
 metered home connections.

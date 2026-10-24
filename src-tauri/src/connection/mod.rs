@@ -1,5 +1,6 @@
 mod album_query;
 pub(crate) mod app_settings;
+pub(crate) mod bandwidth;
 mod branch;
 mod credentials;
 pub(crate) mod diagnostics;

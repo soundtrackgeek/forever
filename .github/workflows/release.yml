@@ -136,6 +136,7 @@ jobs:
           }
 
       - name: Build installers and create draft GitHub Release
+        id: installers
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -197,3 +198,4 @@ jobs:
         run: node scripts/publish-update-feed.mjs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.installers.outputs.releaseId }}

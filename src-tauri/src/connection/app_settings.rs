@@ -126,6 +126,8 @@ impl DialMemory {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferSettings {
     #[serde(default)]
+    pub bandwidth: super::bandwidth::BandwidthSettings,
+    #[serde(default)]
     pub filing: super::filing::FilingSettings,
     pub max_concurrent_downloads: u8,
     pub relay_suggestion_minutes: u32,
@@ -136,6 +138,7 @@ pub struct TransferSettings {
 impl Default for TransferSettings {
     fn default() -> Self {
         Self {
+            bandwidth: super::bandwidth::BandwidthSettings::default(),
             filing: super::filing::FilingSettings::default(),
             max_concurrent_downloads: 3,
             relay_suggestion_minutes: 10,
@@ -213,6 +216,7 @@ impl Default for Settings {
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
         self.transfers.filing.validate()?;
+        self.transfers.bandwidth.validate()?;
         if self.revision > 9_007_199_254_740_991 {
             return Err("Invalid settings revision.".into());
         }
@@ -370,6 +374,7 @@ impl AppSettings {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SettingsPatch {
+    pub bandwidth: Option<super::bandwidth::BandwidthSettings>,
     pub filing: Option<super::filing::FilingSettings>,
     pub max_concurrent_downloads: Option<u8>,
     pub relay_suggestion_minutes: Option<u32>,
@@ -414,6 +419,7 @@ impl SettingsPatch {
         );
         assign!(auto_mirror_minutes, s.transfers.auto_mirror_minutes);
         assign!(filing, s.transfers.filing);
+        assign!(bandwidth, s.transfers.bandwidth);
         assign!(soundcheck_enabled, s.transfers.soundcheck_enabled);
         assign!(upload_slots, s.sharing.upload_slots);
         assign!(upload_policy, s.sharing.upload_policy);
@@ -556,6 +562,7 @@ mod tests {
         assert_eq!(
             settings.transfers,
             TransferSettings {
+                bandwidth: Default::default(),
                 filing: Default::default(),
                 max_concurrent_downloads: 5,
                 relay_suggestion_minutes: 30,

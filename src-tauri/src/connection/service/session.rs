@@ -290,7 +290,8 @@ impl ConnectionManager {
                 SessionEvent::Keepalive,
             ),
         ];
-        let mut download_wake = Box::pin(self.transfers.scheduling_changed());
+        let mut download_wake =
+            Box::pin(self.transfers.scheduling_changed(self.bandwidth.paused()));
         loop {
             tokio::select! {
                 frame = server_frame_receiver.recv() => {
@@ -319,7 +320,7 @@ impl ConnectionManager {
                 command = command_receiver.recv() => session.on_command(command).await?,
                 _ = &mut download_wake => {
                     session.on_command(Some(ConnectionCommand::ScheduleDownloads)).await?;
-                    download_wake = Box::pin(self.transfers.scheduling_changed());
+                    download_wake = Box::pin(self.transfers.scheduling_changed(self.bandwidth.paused()));
                 },
                 Some(event) = event_receiver.recv() => session.on_timer(event).await?,
             }

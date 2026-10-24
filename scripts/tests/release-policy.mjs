@@ -16,12 +16,27 @@ test("MSI gets a numeric version while the app keeps full SemVer", () => {
   assert.throws(() => releaseChannel("0.0.73+1"));
 });
 test("tauri-action API asset URLs normalize to the exact release download", () => {
-  const asset = { url: "https://api.github.com/repos/soundtrackgeek/forever/releases/assets/123",
+  const asset = { name: "Forever_0.0.73-beta.1_x64-setup.exe", url: "https://api.github.com/repos/soundtrackgeek/forever/releases/assets/123",
     browser_download_url: "https://github.com/soundtrackgeek/forever/releases/download/v0.0.73-beta.1/Forever_0.0.73-beta.1_x64-setup.exe" };
   const feed = { version: "0.0.73-beta.1", platforms: { "windows-x86_64": { url: asset.url, signature: "signed" } } };
   assert.equal(normalizeFeed(feed, feed.version, "soundtrackgeek/forever", [asset]).platforms["windows-x86_64"].url, asset.browser_download_url);
   assert.throws(() => normalizeFeed(feed, feed.version, "soundtrackgeek/forever", []));
   assert.equal(feed.platforms["windows-x86_64"].url, asset.url);
+});
+
+test("draft untagged URLs become public URLs only for verified release asset membership", () => {
+  const repo = "soundtrackgeek/forever", version = "0.0.76";
+  const asset = { name: "Forever_0.0.76_x64-setup.exe", url: `https://api.github.com/repos/${repo}/releases/assets/672426805`,
+    browser_download_url: `https://github.com/${repo}/releases/download/untagged-41780c2a5b4268f283f5/Forever_0.0.76_x64-setup.exe` };
+  const feed = { version, platforms: { "windows-x86_64": { url: asset.url, signature: "signed" } } };
+  const expected = `https://github.com/${repo}/releases/download/v${version}/${asset.name}`;
+  assert.equal(normalizeFeed(feed, version, repo, [asset], {draft:true}).platforms["windows-x86_64"].url, expected);
+  assert.throws(() => normalizeFeed(feed, version, repo, [asset]));
+  for (const url of [asset.browser_download_url.replace("soundtrackgeek", "other-owner"), asset.browser_download_url + "?download=1", asset.browser_download_url.replace(asset.name, "other.exe")]) {
+    assert.throws(() => normalizeFeed(feed, version, repo, [{...asset, browser_download_url:url}], {draft:true}));
+  }
+  const wrongId = structuredClone(feed); wrongId.platforms["windows-x86_64"].url += "9";
+  assert.throws(() => normalizeFeed(wrongId, version, repo, [asset], {draft:true}));
 });
 test("Beta follows releases in SemVer order without rolling back a newer experiment", () => {
   assert.equal(shouldAdvanceBeta(undefined, "0.0.72"), true);

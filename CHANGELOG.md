@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.0.77] - 2026-10-24
+
+### Added
+
+- Shared combined, download, and upload payload bandwidth caps in KiB/s, applied
+  live across all transfer lanes with unlimited defaults and bounded burst credit.
+- Daily alternate limits on local-time schedules, including overnight windows,
+  plus live active-policy and network-cost status in Settings and Transfers.
+- Optional Windows metered-network transfer holds, also covering unknown cost,
+  roaming, over-limit and restricted networks, with automatic continuation.
+
+### Changed
+
+- Bandwidth policy persists through unified settings, backup recovery, export,
+  import, and Transfers reset. Older settings retain unlimited behavior.
+- Limiter waits remain cancellable and excluded from source-idle timeouts;
+  held queues do not spin on overdue retries or automatically change sources.
+
+### Fixed
+
+- Release publication now uses the installer action's release ID to find drafts
+  instead of the published-only tag endpoint that failed releases 0.0.72–0.0.76.
+  Draft asset URLs are normalized from verified asset membership to their final
+  versioned download URLs before publishing, with draft/recovery regression tests.
+
+### Verification
+
+- Concurrent aggregate/directional budget, bounded credit/refunds, overnight and
+  clock-change schedules, metering/cancellation, settings compatibility, stream
+  pacing/resume, and UI validation coverage. Browser preview checks are separate
+  from installed-app public Soulseek and physical metered-network validation.
+
 ## [0.0.76] - 2026-10-24
 
 ### Added

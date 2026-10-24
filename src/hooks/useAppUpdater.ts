@@ -36,15 +36,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.75",
-  version: "0.0.76",
-  body: `## What's new in Forever 0.0.76
+  currentVersion: "0.0.76",
+  version: "0.0.77",
+  body: `## What's new in Forever 0.0.77
 
 ### Changed
 
-- Follow artists and see recent or upcoming releases in the Listening Post.
-- Add discoveries to Wanted, or enable automatic additions per artist.
-- Keep your followed artists, dismissals, and release inbox across restarts.`,
+- Limit combined, download, and upload bandwidth across all transfer lanes.
+- Schedule alternate limits by local time, including overnight windows.
+- Hold file transfers on metered networks and see the active policy in Settings and Transfers.`,
   date: "2026-10-24",
 };
 

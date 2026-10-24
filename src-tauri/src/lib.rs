@@ -22,6 +22,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(connection::initialize(app.handle())?);
+            connection::bandwidth::start(app.handle().clone());
             app.manage(connection::filing::FilingHub::new(
                 app.path().app_config_dir()?.join("filing.json"),
                 app.state::<connection::ConnectionManager>()
@@ -61,6 +62,7 @@ pub fn run() {
             connection::filing::filing_undo,
             connection::filing::filing_metadata,
             updater::updater_check,
+            connection::bandwidth::bandwidth_snapshot,
             connection::settings_commands::settings_get,
             connection::settings_commands::settings_patch,
             connection::settings_commands::settings_migrate_webview,

@@ -13,7 +13,7 @@ if (dirname(resolve(dir)) !== resolve(tmpdir())) throw new Error("Unexpected tem
 try {
   gh("release", "download", tag, "--repo", repo, "--pattern", "latest.json", "--dir", dir);
   const file = join(dir, "latest.json");
-  const channel = await publishUpdateFeed({ gh, version, branch: process.env.GITHUB_REF_NAME, sha: process.env.GITHUB_SHA, file });
+  const channel = await publishUpdateFeed({ gh, version, branch: process.env.GITHUB_REF_NAME, sha: process.env.GITHUB_SHA, file, releaseId: process.env.RELEASE_ID });
   console.log(`Published ${tag} to ${channel}; Beta follows the newest stable or beta version.`);
 } finally {
   // Only the uniquely created task directory is removed.

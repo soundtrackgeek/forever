@@ -23,16 +23,30 @@ export function windowsInstallerVersion(version) {
   return `${major}.${minor}.${patch}`;
 }
 
-export function normalizeFeed(feed, version, repository, assets) {
+export function normalizeFeed(feed, version, repository, assets, { draft = false } = {}) {
   if (feed.version !== version) throw new Error("Updater feed version does not match the release.");
   const result = structuredClone(feed);
+  const prefix = `https://github.com/${repository}/releases/download/`;
   for (const platform of Object.values(result.platforms ?? {})) {
-    const asset = assets.find((item) => item.url === platform.url || item.browser_download_url === platform.url);
-    if (!asset || !platform.signature?.trim()
-        || !asset.browser_download_url?.startsWith(`https://github.com/${repository}/releases/download/v${version}/`)) {
+    const asset = assets.find((item) => item.url === platform.url || item.browser_download_url === platform.url
+      || (draft && typeof item.name === "string" && `${prefix}v${version}/${encodeURIComponent(item.name)}` === platform.url));
+    if (!asset || !platform.signature?.trim() || typeof asset.name !== "string"
+        || !asset.name || /[/\\]/u.test(asset.name) || [...asset.name].some((char) => char.charCodeAt(0) < 32)) {
       throw new Error("Updater artifact does not belong to this versioned release.");
     }
-    platform.url = asset.browser_download_url;
+    const filename = encodeURIComponent(asset.name);
+    const publishedUrl = `${prefix}v${version}/${filename}`;
+    // GitHub draft assets use an untagged-* URL until publication. Membership
+    // comes from the authenticated, identity-checked release, never a basename
+    // guess from the input feed. Write the eventual public URL before publishing.
+    const draftPath = asset.browser_download_url?.startsWith(prefix)
+      ? asset.browser_download_url.slice(prefix.length) : "";
+    if (asset.browser_download_url !== publishedUrl
+        && !(draft && /^untagged-[a-zA-Z0-9]+\//u.test(draftPath)
+          && draftPath.slice(draftPath.indexOf("/") + 1) === filename)) {
+      throw new Error("Updater artifact does not belong to this versioned release.");
+    }
+    platform.url = publishedUrl;
   }
   validateFeed(result, version, repository);
   return result;

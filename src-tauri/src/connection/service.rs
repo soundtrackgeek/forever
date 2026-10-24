@@ -208,6 +208,7 @@ enum ConnectionCommand {
 
 #[derive(Clone)]
 struct PeerServices {
+    bandwidth: super::bandwidth::Bandwidth,
     search: SearchHub,
     wanted: WantedHub,
     radar: RadarHub,
@@ -233,6 +234,7 @@ enum PeerMessagePurpose {
 
 #[derive(Clone)]
 pub struct ConnectionManager {
+    bandwidth: super::bandwidth::Bandwidth,
     app: AppHandle,
     settings: AppSettings,
     settings_operation: Arc<Mutex<()>>,
@@ -340,6 +342,7 @@ impl ConnectionManager {
         let radar = RadarHub::new(app.clone(), queries);
 
         Ok(Self {
+            bandwidth: super::bandwidth::Bandwidth::new(preferences.transfers.bandwidth.clone()),
             app,
             settings,
             settings_operation: Arc::new(Mutex::new(())),
@@ -375,6 +378,16 @@ impl ConnectionManager {
         })
     }
 
+    pub fn bandwidth(&self) -> super::bandwidth::Bandwidth {
+        self.bandwidth.clone()
+    }
+
+    pub fn bandwidth_changed(&self) {
+        self.transfers.wake_scheduler();
+        self.schedule_downloads();
+        self.schedule_uploads();
+    }
+
     pub fn settings_store(&self) -> AppSettings {
         self.settings.clone()
     }
@@ -392,6 +405,13 @@ impl ConnectionManager {
                     .map(ConnectionSnapshot::offline)
                     .unwrap_or_else(ConnectionSnapshot::unconfigured),
             );
+        }
+        if previous.transfers.bandwidth != next.transfers.bandwidth {
+            self.bandwidth.configure(next.transfers.bandwidth.clone());
+            let _ = self
+                .app
+                .emit("forever://bandwidth", self.bandwidth.snapshot());
+            self.bandwidth_changed();
         }
         if previous.transfers != next.transfers {
             self.transfers.apply_settings(&next.transfers);
@@ -1432,6 +1452,7 @@ impl ConnectionManager {
         source: ReleaseAlternativeSource,
     ) -> Result<bool, ConnectionServiceError> {
         if self.current_snapshot().state != ConnectionState::Online
+            || self.bandwidth.paused()
             || self.people.is_blocked(&source.username)
             || self.people.is_ignored(&source.username)
         {
@@ -1653,6 +1674,7 @@ impl ConnectionManager {
         command_sender: &mpsc::UnboundedSender<ConnectionCommand>,
     ) -> PeerServices {
         PeerServices {
+            bandwidth: self.bandwidth.clone(),
             search: self.search.clone(),
             wanted: self.wanted.clone(),
             radar: self.radar.clone(),

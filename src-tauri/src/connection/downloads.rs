@@ -1747,8 +1747,8 @@ impl TransferHub {
         self.scheduler.changed();
     }
 
-    pub(super) async fn scheduling_changed(&self) {
-        let deadline = if self.safety_state() == TransferSafetyState::Running {
+    pub(super) async fn scheduling_changed(&self, bandwidth_paused: bool) {
+        let deadline = if !bandwidth_paused && self.safety_state() == TransferSafetyState::Running {
             let transfers = self.transfers.read().unwrap_or_else(|p| p.into_inner());
             available_retry_deadline(
                 &transfers,

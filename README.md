@@ -3,13 +3,51 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.76` adds Artist Follow and New Release Radar,
-> with daily MusicBrainz checks and an optional automatic handoff to Wanted.
+> **Status:** pre-alpha. Version `0.0.77` adds shared bandwidth caps, daily
+> alternate limits, and metered-network transfer holds.
 
-If `0.0.16` is installed, download and run the latest `0.0.76` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.77` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
+
+### Bandwidth limits and scheduling
+
+Open **Settings → Bandwidth limits and scheduling** to set combined, download,
+and upload caps in **KiB/s** (1 KiB = 1,024 bytes). **0 means unlimited**. Limits
+apply across every transfer lane: a combined cap is shared by both directions,
+and each direction also respects its own cap. Saving applies immediately to
+active transfers without reconnecting. Existing installations remain unlimited.
+
+Enable the daily schedule to use a second set of caps between two local times.
+For example, set normal limits to 1,024 KiB/s combined and 128 KiB/s upload, then
+leave alternate limits at zero from 23:00 to 07:00 for unlimited overnight
+transfers. Start is inclusive; end is exclusive. Windows that cross midnight
+work every day. Equal start/end times are rejected. Forever reevaluates the
+computer's local clock every five seconds, including timezone/DST changes and
+resume from sleep; it must be running for the schedule to apply.
+
+**Pause file transfers on metered networks** is off by default. When enabled,
+Windows' active internet profile is checked every five seconds. Metered,
+roaming, over-limit, restricted, and unknown cost hold file payloads and prevent
+new queued transfers from starting. Transfers continue when cost is unmetered
+or the toggle is disabled. Manual Pause/Cancel remains available; user-paused
+items stay paused. Settings and Transfers show the active caps or hold reason.
+A remote peer may close a long-held connection; ordinary retry/resume behavior
+still applies, and upload peers may need to requeue their request.
+
+Caps pace file payloads with a shared token bucket and up to 250 ms of credit
+(capped at 128 KiB per bucket). They are not a billing or exact wire-speed cap:
+TCP buffers, in-flight chunks, headers, search, chat, metadata, and other control
+traffic can still use data. Windows' reported profile may not reflect VPN or
+per-route billing. Unknown cost is displayed explicitly and holds transfers only
+when the metered toggle is enabled. Policy is saved in the existing crash-safe
+`settings.json`, included in settings export/import, and reset with **Transfers**.
+Browser preview controls are simulated and do not detect network cost or transfer
+files. Native stream tests cover pacing, cancellation, and partial-file resume;
+real public peers and a physical metered-network switch need separate validation.
+
+Windows cost reference: [Microsoft ConnectionProfile documentation](https://learn.microsoft.com/en-us/uwp/api/windows.networking.connectivity.connectionprofile).
 
 ### Artist Follow and New Release Radar
 
@@ -1242,6 +1280,17 @@ Azure credentials were configured for this change. Windows may still warn when
 the installer is downloaded. See [Windows signing setup](docs/windows-signing.md)
 for provisioning, required repository configuration, verification, and release
 recovery. Signing does not guarantee the absence of SmartScreen warnings.
+
+### Release publication
+
+The Windows release job keeps installers in a draft until quality checks,
+startup smoke testing, signatures, checksums, and updater metadata are ready.
+Publication uses the release ID returned by the installer action; GitHub's
+published-release tag lookup cannot find a draft. The publisher verifies that
+ID's tag, required assets, and updater feed, then converts draft `untagged-*`
+asset links into the final versioned public links before publishing. Manual
+publisher recovery can discover the matching draft through paginated release
+listings, or use `RELEASE_ID`. Regression tests run with `npm run test:release`.
 
 ## Project structure
 

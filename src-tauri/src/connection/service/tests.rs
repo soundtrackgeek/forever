@@ -1,3 +1,4 @@
+use super::super::bandwidth::{Bandwidth, BandwidthSettings};
 use super::super::protocol::{
     parse_distributed_branch_root, read_peer_init, server_ping_frame, set_online_frame,
     ParentCandidate, PeerInit, DISTRIBUTED_BRANCH_ROOT_CODE,
@@ -33,6 +34,115 @@ fn upload_fixture(directory: &Path, bytes: &[u8]) -> UploadTicket {
     }
 }
 
+#[tokio::test]
+async fn bandwidth_paces_real_upload_and_download_payloads_and_preserves_resume() {
+    use super::super::bandwidth::Limits;
+    use super::super::downloads::DownloadPlan;
+    use super::peers::receive_file_contents;
+    let directory = tempfile::tempdir().unwrap();
+    let bytes = vec![42; 1024];
+    let upload_plan = upload_fixture(directory.path(), &bytes);
+    let download_plan = DownloadPlan {
+        id: "download".into(),
+        partial_path: directory.path().join("download.part"),
+        final_path: directory.path().join("download.flac"),
+        size_bytes: 1024,
+        offset: 128,
+        transfer_token: 3,
+    };
+    std::fs::write(&download_plan.partial_path, &bytes[..128]).unwrap();
+    let limiter = Bandwidth::new(BandwidthSettings {
+        normal: Limits {
+            total_kib: 2,
+            download_kib: 2,
+            upload_kib: 2,
+        },
+        ..Default::default()
+    });
+    let (sender, receiver) = tokio::io::duplex(128);
+    let stop = AtomicBool::new(false);
+    let started = tokio::time::Instant::now();
+    let (sent, received) = tokio::join!(
+        send_file(
+            sender,
+            &upload_plan,
+            Arc::new(AtomicBool::new(false)),
+            limiter.clone(),
+            |_, _| {}
+        ),
+        receive_file_contents(receiver, &download_plan, &stop, limiter, |_, _| {})
+    );
+    assert_eq!(sent.unwrap().unwrap().bytes_sent, 896);
+    assert!(received.unwrap());
+    assert_eq!(std::fs::read(&download_plan.partial_path).unwrap(), bytes);
+    // The same governor accounts for both ends: 896 uploaded + 896 downloaded.
+    assert!(started.elapsed() >= Duration::from_millis(850));
+}
+
+#[tokio::test(start_paused = true)]
+async fn metered_hold_does_not_become_a_download_timeout_and_cancel_secures_partial() {
+    use super::super::bandwidth::NetworkCost;
+    use super::super::downloads::DownloadPlan;
+    use super::peers::receive_file_contents;
+    let directory = tempfile::tempdir().unwrap();
+    let plan = DownloadPlan {
+        id: "download".into(),
+        partial_path: directory.path().join("download.part"),
+        final_path: directory.path().join("download.flac"),
+        size_bytes: 8,
+        offset: 3,
+        transfer_token: 3,
+    };
+    std::fs::write(&plan.partial_path, b"012").unwrap();
+    let limiter = Bandwidth::new(BandwidthSettings {
+        pause_on_metered: true,
+        ..Default::default()
+    });
+    let (mut peer, stream) = tokio::io::duplex(128);
+    let stop = Arc::new(AtomicBool::new(false));
+    let c = stop.clone();
+    let l = limiter.clone();
+    let p = plan.clone();
+    let task =
+        tokio::spawn(async move { receive_file_contents(stream, &p, &c, l, |_, _| {}).await });
+    assert_eq!(peer.read_u64_le().await.unwrap(), 3);
+    tokio::time::advance(Duration::from_secs(120)).await;
+    assert!(!task.is_finished());
+    limiter.environment(600, NetworkCost::Unmetered);
+    // No source data for 100 ms after the two minute hold: it must still wait.
+    tokio::time::advance(Duration::from_millis(100)).await;
+    tokio::task::yield_now().await;
+    assert!(!task.is_finished());
+    limiter.environment(600, NetworkCost::Metered);
+    stop.store(true, Ordering::SeqCst);
+    assert!(!task.await.unwrap().unwrap());
+    assert_eq!(std::fs::read(&plan.partial_path).unwrap(), b"012");
+}
+
+#[tokio::test]
+async fn cancelling_an_upload_held_by_metering_is_not_a_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    let plan = upload_fixture(directory.path(), b"01234567");
+    let limiter = Bandwidth::new(BandwidthSettings {
+        pause_on_metered: true,
+        ..Default::default()
+    });
+    let (mut peer, stream) = tokio::io::duplex(128);
+    peer.write_u64_le(0).await.unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let s = stop.clone();
+    let task = tokio::spawn(async move { send_file(stream, &plan, s, limiter, |_, _| {}).await });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(!task.is_finished());
+    stop.store(true, Ordering::SeqCst);
+    assert!(timeout(Duration::from_secs(1), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap()
+        .is_none());
+}
+
 #[test]
 fn upload_average_uses_attempt_bytes_and_saturates_the_wire_integer() {
     for (bytes_sent, elapsed, expected) in [
@@ -66,6 +176,7 @@ async fn uploads_measure_only_new_bytes_and_wait_for_downloader_close() {
             stream,
             &plan,
             Arc::new(AtomicBool::new(false)),
+            Bandwidth::new(BandwidthSettings::default()),
             |total, speed| progress.push((total, speed)),
         ));
         peer.write_u64_le(offset).await.unwrap();
@@ -104,14 +215,26 @@ async fn cancelled_uploads_have_no_completion_measurement() {
     let plan = upload_fixture(directory.path(), b"01234567");
     let cancellation = Arc::new(AtomicBool::new(true));
     let (_peer, stream) = tokio::io::duplex(64);
-    assert!(send_file(stream, &plan, cancellation.clone(), |_, _| {})
-        .await
-        .unwrap()
-        .is_none());
+    assert!(send_file(
+        stream,
+        &plan,
+        cancellation.clone(),
+        Bandwidth::new(BandwidthSettings::default()),
+        |_, _| {}
+    )
+    .await
+    .unwrap()
+    .is_none());
 
     cancellation.store(false, Ordering::SeqCst);
     let (mut peer, stream) = tokio::io::duplex(64);
-    let mut upload = Box::pin(send_file(stream, &plan, cancellation.clone(), |_, _| {}));
+    let mut upload = Box::pin(send_file(
+        stream,
+        &plan,
+        cancellation.clone(),
+        Bandwidth::new(BandwidthSettings::default()),
+        |_, _| {},
+    ));
     peer.write_u64_le(0).await.unwrap();
     let mut received = [0; 8];
     tokio::select! {
@@ -139,29 +262,43 @@ async fn failed_uploads_have_no_completion_measurement() {
         if extra {
             peer.write_all(&[1]).await.unwrap();
         }
-        let error = send_file(stream, &plan, Arc::new(AtomicBool::new(false)), |_, _| {})
-            .await
-            .unwrap_err();
+        let error = send_file(
+            stream,
+            &plan,
+            Arc::new(AtomicBool::new(false)),
+            Bandwidth::new(BandwidthSettings::default()),
+            |_, _| {},
+        )
+        .await
+        .unwrap_err();
         assert!(error.contains(expected), "{error}");
     }
     let (mut peer, stream) = tokio::io::duplex(64);
     peer.write_u64_le(0).await.unwrap();
     drop(peer);
-    assert!(
-        send_file(stream, &plan, Arc::new(AtomicBool::new(false)), |_, _| {})
-            .await
-            .is_err()
-    );
+    assert!(send_file(
+        stream,
+        &plan,
+        Arc::new(AtomicBool::new(false)),
+        Bandwidth::new(BandwidthSettings::default()),
+        |_, _| {}
+    )
+    .await
+    .is_err());
 
     std::fs::write(&plan.local_path, b"short").unwrap();
     let (mut peer, stream) = tokio::io::duplex(64);
     peer.write_u64_le(0).await.unwrap();
-    assert!(
-        send_file(stream, &plan, Arc::new(AtomicBool::new(false)), |_, _| {})
-            .await
-            .unwrap_err()
-            .contains("ended before")
-    );
+    assert!(send_file(
+        stream,
+        &plan,
+        Arc::new(AtomicBool::new(false)),
+        Bandwidth::new(BandwidthSettings::default()),
+        |_, _| {}
+    )
+    .await
+    .unwrap_err()
+    .contains("ended before"));
 }
 
 #[test]

@@ -994,3 +994,21 @@ form.settings-panel {
     flex-direction: column;
   }
 }
+
+
+.bandwidth-panel { grid-column: 1 / -1; padding: 20px; margin-bottom: 20px; }
+.bandwidth-panel p { color: #9da5ba; font-size: 12px; line-height: 1.6; }
+.bandwidth-panel .bandwidth-status { padding: 12px 14px; margin: 18px 0 12px; background: #171e31; border-radius: 8px; color: #d8c9ff; }
+.bandwidth-form fieldset { min-width: 0; padding: 0; margin: 0; border: 0; }
+.bandwidth-profiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 18px 0; }
+.bandwidth-profiles fieldset { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.bandwidth-profiles legend { margin-bottom: 12px; color: #ded9ef; font-weight: 600; }
+.bandwidth-form label { color: #b8bed0; font-size: 12px; }
+.bandwidth-form label span { color: #8791aa; font-size: 10px; }
+.bandwidth-form input[type="number"], .bandwidth-form input[type="time"] { display: block; width: 100%; box-sizing: border-box; margin-top: 7px; padding: 10px; color: #e2deed; background: #0d1321; border: 1px solid #343b50; border-radius: 6px; color-scheme: dark; }
+.bandwidth-times { display: flex; gap: 16px; margin: 16px 0 8px; }
+.bandwidth-times label { width: 160px; }
+.bandwidth-form .bandwidth-toggle { display: flex; align-items: center; gap: 9px; margin: 16px 0 10px; }
+.bandwidth-form .primary-action { margin-top: 8px; }
+.bandwidth-form .primary-action:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 1100px) { .bandwidth-profiles { grid-template-columns: 1fr; } }
