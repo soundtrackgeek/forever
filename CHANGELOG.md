@@ -5,6 +5,28 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.68] - 2026-10-24
+
+### Added
+
+- **Export diagnostics** in Settings saves a local ZIP with event logs, app/Tauri
+  versions, platform details, a safe settings summary, and the latest Rust panic
+  report. The export excludes credentials, IPs, usernames, hostnames, paths,
+  search text, activity history, and free-form messages. Nothing is uploaded.
+- An early panic hook records the build, platform, timestamp, and source location
+  atomically in one bounded local report, without panic payloads or raw stacks.
+
+### Fixed
+
+- Connection logging uses structured `tracing` and daily UTC rotation, retaining
+  seven files capped at 4 MiB each, including across restarts. Recent activity
+  remains available when log storage fails or the daily cap is reached; startup
+  and diagnostics export still work. Write failures and cap notices
+  appear in diagnostics. Legacy `connection.log` is preserved and no longer used.
+- Diagnostics exports bound reads, filter every included field, report skipped or
+  malformed data, and atomically replace the chosen ZIP outside the configuration
+  directory so failed exports preserve an existing report.
+
 ## [0.0.67] - 2026-10-24
 
 ### Added

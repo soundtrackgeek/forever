@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.67` unifies settings, migrates existing
-> preferences, and adds settings export/import and section resets.
+> **Status:** pre-alpha. Version `0.0.68` adds bounded daily diagnostic logs,
+> local panic reports, and a privacy-filtered diagnostics ZIP export.
 
-If `0.0.16` is installed, download and run the latest `0.0.67` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.68` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -269,7 +269,8 @@ configuration and transfers.
   names, collision-free destinations, and no overwrite of existing files
 - Passwords stored in Windows Credential Manager, or held only in memory when
   “Remember password” is disabled
-- Non-secret JSON connection preferences and sanitized local diagnostics
+- Non-secret JSON connection preferences, bounded daily diagnostic logs, local
+  panic reports, and **Export diagnostics** in Settings for private bug-report ZIPs
 - Local design-preview data when the React frontend runs outside Tauri
 - Custom frameless Windows shell and branded application icons
 - In-app update checks at startup and every five minutes by default, with a
@@ -868,10 +869,40 @@ Resetting sharing removes roots from Forever without deleting files; resetting
 Wanted defaults retains albums and their individual profiles; resetting the account
 also forgets its saved password. Browser preview changes are session-only.
 
+### Diagnostics and bug reports
+
+In **Settings → Recent activity → Export diagnostics**, choose where to save a ZIP.
+It contains event codes, severity and timestamps from up to seven daily logs,
+Forever/Tauri versions, OS/architecture, a settings summary of switches, numeric
+limits and counts, and the latest Rust panic report when available. The manifest
+reports omitted malformed records, unreadable files, truncation, and logging health.
+Credentials, IP addresses, usernames, hostnames, local paths, search queries,
+private messages, transfer history, and free-form log messages are excluded.
+Nothing is uploaded automatically. Diagnostics export requires the desktop app.
+
+New local logs use `logs/connection.YYYY-MM-DD.jsonl`, rotate at UTC midnight on
+the next event, and retain at most seven files of up to 4 MiB each. After the daily
+limit, the bounded recent-activity list keeps working and disk logging resumes
+the next UTC day. Daily limits account for existing bytes after restart. Write
+failures and the daily cap appear as recent-activity notices. Unavailable log
+storage does not prevent startup; exports can still include recent events and
+the settings summary, with missing files reported in the manifest. Older
+`logs/connection.log` is preserved, no longer appended to, and excluded from ZIPs;
+it may be removed manually when no longer needed.
+
+The early panic hook saves `logs/crash-latest.json` atomically, retaining only the
+latest Rust panic's timestamp, version, platform, and source filename/line/column.
+Panic payloads, raw stacks, and absolute source paths are omitted. It runs before
+Tauri startup and does not depend on the normal logging lock. Native crashes,
+forced termination, and power loss are outside this hook's coverage. Exports are
+written through a temporary file and cannot target Forever's configuration tree.
+
+### Local data and connection safety
+
 Forever writes non-secret account preferences to the Tauri application
 configuration directory and connection events to
-`logs/connection.log`. Release grouping, file order, and transfer metadata are
-stored in `transfers.json` in the same configuration directory. Favorites,
+`logs/connection.YYYY-MM-DD.jsonl`. Release grouping, file order, and transfer
+metadata are stored in `transfers.json` in the same configuration directory. Favorites,
 ignored listeners, banned listeners, and recent source usernames are stored in
 `people.json`. Bounded private-message history, unread state, and outgoing
 delivery status are stored in `messages.json`. Bounded unsent drafts and the

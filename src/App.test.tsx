@@ -1033,17 +1033,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.67 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.68 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "All preferences and pinned searches share one versioned settings file.",
+        "Daily diagnostic logs keep seven files with a bounded size.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Export and review imports without copying passwords or activity history.",
+        "Export a private diagnostics ZIP from Settings for bug reports.",
       ),
     ).toBeInTheDocument();
     expect(

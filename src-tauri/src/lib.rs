@@ -7,6 +7,16 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Install before Tauri builds or loads stores, including startup panics.
+    if let Some(config) = dirs::config_dir() {
+        let identifier =
+            serde_json::from_str::<serde_json::Value>(include_str!("../tauri.conf.json"))
+                .ok()
+                .and_then(|v| v["identifier"].as_str().map(str::to_owned));
+        if let Some(identifier) = identifier {
+            connection::diagnostics::install_panic_hook(config.join(identifier).join("logs"));
+        }
+    }
     let cleanup_state = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
     tauri::Builder::default()
         .setup(|app| {
@@ -61,6 +71,7 @@ pub fn run() {
             connection::connection_disconnect,
             connection::connection_reset,
             connection::connection_diagnostics,
+            connection::diagnostics_export::diagnostics_export,
             connection::rooms_snapshot,
             connection::rooms_refresh,
             connection::rooms_join,

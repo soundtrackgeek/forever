@@ -520,7 +520,24 @@ can be exported, backed up, or moved to another PC.
   can stay in the WebView.
 - Add **Export / Import settings** and a "Reset section to defaults" control.
 
-### 15. Logging, rotation, and diagnostics export
+### 15. Logging, rotation, and diagnostics export - DONE
+
+**Implemented in 0.0.68 (2026-10-24):** structured `tracing` records use a
+`tracing-appender` daily UTC writer with strict seven-file retention and a 4 MiB
+daily cap that survives restarts. Recent activity and logging health remain
+available in Settings. An early panic hook saves one atomic local report with
+build/platform/timestamp/source location, omitting arbitrary payloads and stacks.
+**Export diagnostics** saves a ZIP with filtered event logs, versions, a safe
+settings summary, and the latest panic report. Credentials, IPs, usernames,
+hostnames, paths, search text, and all free-form messages are excluded. Reads are
+bounded; malformed records are counted; exports cannot overwrite application
+data and are published atomically. Legacy logs remain untouched and are excluded.
+Regression coverage includes retention/restarts, size caps, concurrent records,
+an actual child-process panic, ZIP contents/privacy, invalid destinations,
+cancellation, failure/retry, and duplicate-click prevention. Browser preview is
+explicit about requiring the desktop app. This captures Rust panics, not native
+access violations, forced termination, or power loss. No remote crash reporting
+or telemetry was added. The original findings follow for context.
 
 **Today:** `logs/connection.log` is opened in append mode on every record and
 never rotated

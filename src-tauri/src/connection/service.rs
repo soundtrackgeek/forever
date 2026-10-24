@@ -460,6 +460,7 @@ impl ConnectionManager {
         paths: ConnectionPaths,
         download_directory: PathBuf,
     ) -> Result<Self, ConnectionServiceError> {
+        let diagnostics = Diagnostics::new(paths.diagnostics);
         let store_files: Vec<_> = [
             paths.settings,
             paths.transfers,
@@ -478,7 +479,6 @@ impl ConnectionManager {
         .collect();
         let settings = AppSettings::open(store_files[10].clone(), &store_files[..10]);
         let preferences = settings.get();
-        let diagnostics = Diagnostics::new(paths.diagnostics)?;
         let profile = settings.load()?;
         let snapshot = profile
             .as_ref()
@@ -829,6 +829,10 @@ impl ConnectionManager {
 
     pub fn diagnostics(&self) -> Vec<DiagnosticEntry> {
         self.diagnostics.recent()
+    }
+
+    pub(super) fn diagnostic_logger(&self) -> Diagnostics {
+        self.diagnostics.clone()
     }
 
     pub async fn test_reachability(&self) -> Result<ReachabilitySnapshot, String> {

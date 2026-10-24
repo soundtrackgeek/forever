@@ -36,15 +36,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.66",
-  version: "0.0.67",
-  body: `## What's new in Forever 0.0.67
+  currentVersion: "0.0.67",
+  version: "0.0.68",
+  body: `## What's new in Forever 0.0.68
 
 ### Changed
 
-- All preferences and pinned searches share one versioned settings file.
-- Export and review imports without copying passwords or activity history.
-- Reset one settings section while keeping your other preferences.`,
+- Daily diagnostic logs keep seven files with a bounded size.
+- Export a private diagnostics ZIP from Settings for bug reports.
+- Local panic reports capture the source location without secret payloads.`,
   date: "2026-10-24",
 };
 

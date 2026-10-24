@@ -99,7 +99,7 @@ function previewBootstrap(): ConnectionBootstrap {
         }
       : offlineSearchNetwork(),
     diagnosticsPath:
-      "C:\\Users\\AppData\\Roaming\\com.soundtrackgeek.forever\\logs\\connection.log",
+      "C:\\Users\\AppData\\Roaming\\com.soundtrackgeek.forever\\logs",
     diagnostics: [
       {
         timestampMs: now() - 82_000,

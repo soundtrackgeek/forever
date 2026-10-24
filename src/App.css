@@ -7944,6 +7944,18 @@ form.settings-panel {
   padding: 13px;
 }
 
+.diagnostics-export {
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  padding-top: 12px;
+}
+
+.diagnostics-export > p {
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .diagnostics-path {
   overflow: hidden;
   margin-top: 10px !important;

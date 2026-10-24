@@ -2,7 +2,8 @@ mod album_query;
 pub(crate) mod app_settings;
 mod branch;
 mod credentials;
-mod diagnostics;
+pub(crate) mod diagnostics;
+pub(crate) mod diagnostics_export;
 mod distributed;
 mod downloads;
 mod folders;
@@ -67,7 +68,7 @@ pub fn initialize(app: &AppHandle) -> Result<ConnectionManager, String> {
             messages: config_directory.join("messages.json"),
             rooms: config_directory.join("rooms.json"),
             wanted: config_directory.join("wanted.json"),
-            diagnostics: config_directory.join("logs").join("connection.log"),
+            diagnostics: config_directory.join("logs"),
         },
         download_directory,
     )

@@ -1,4 +1,5 @@
 import { SettingsPortability } from "./SettingsPortability";
+import { DiagnosticsExport } from "./DiagnosticsExport";
 import { UploadPolicySettings } from "./UploadPolicySettings";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ReachabilitySettings } from "./ReachabilitySettings";
@@ -554,11 +555,12 @@ export function ConnectionSettings({
             <p className="diagnostics-path" title={diagnosticsPath}>
               {diagnosticsPath}
             </p>
+            <DiagnosticsExport />
           </section>
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.66</h2>
+              <h2>Forever 0.0.68</h2>
               <p>Updates install from signed GitHub Releases.</p>
               <label className="musicbrainz-fallback-field">
                 <span>MusicBrainz fallback tracks</span>
