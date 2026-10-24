@@ -436,6 +436,8 @@ type DownloadTasks = HashMap<String, (u32, Arc<AtomicBool>)>;
 
 #[derive(Clone)]
 pub struct TransferHub {
+    pub(super) file_operations: Arc<Mutex<()>>,
+    filing_releases: Arc<Mutex<HashSet<String>>>,
     source_reliability: Arc<Mutex<HashMap<String, SourceReliability>>>,
     auto_mirror_minutes: Arc<AtomicU32>,
     scheduler: super::download_scheduler::DownloadScheduler,
@@ -490,6 +492,8 @@ impl TransferHub {
             },
         )?;
         let hub = Self {
+            file_operations: Arc::new(Mutex::new(())),
+            filing_releases: Arc::new(Mutex::new(HashSet::new())),
             source_reliability: Arc::new(Mutex::new(store.source_reliability)),
             auto_mirror_minutes: Arc::new(AtomicU32::new(settings.auto_mirror_minutes)),
             scheduler: super::download_scheduler::DownloadScheduler::default(),
@@ -513,6 +517,73 @@ impl TransferHub {
     pub fn snapshot(&self) -> TransferQueueSnapshot {
         let mut revision = self.publication.lock().unwrap_or_else(|p| p.into_inner());
         self.snapshot_at(&mut revision)
+    }
+
+    pub(super) fn hold_filing(&self, release: &str) {
+        self.filing_releases
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(release.into());
+    }
+    pub(super) fn release_filing(&self, release: &str) {
+        self.filing_releases
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(release);
+    }
+    fn guard_filing(
+        &self,
+        release: Option<&str>,
+        transfer: Option<&str>,
+    ) -> Result<std::sync::MutexGuard<'_, ()>, TransferError> {
+        let guard = self.file_operations.try_lock().map_err(|_| {
+            TransferError::StoreWrite(
+                "Filing is changing files. Try again when it finishes.".into(),
+            )
+        })?;
+        let releases = self
+            .filing_releases
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let owned = release.is_some_and(|r| releases.contains(r))
+            || transfer.is_some_and(|id| {
+                self.transfers
+                    .read()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .iter()
+                    .any(|t| {
+                        t.id == id && t.release_id.as_ref().is_some_and(|r| releases.contains(r))
+                    })
+            });
+        if owned {
+            return Err(TransferError::StoreWrite("Undo this arrival in Filing history before changing or removing its transfer record.".into()));
+        }
+        drop(releases);
+        Ok(guard)
+    }
+    pub(super) fn commit_filing(
+        &self,
+        plan: &super::filing::FilingPlan,
+        undo: bool,
+    ) -> Result<(), String> {
+        let sizes = if undo {
+            vec![]
+        } else {
+            plan.files
+                .iter()
+                .map(|f| {
+                    fs::metadata(&f.destination)
+                        .map(|m| m.len())
+                        .map_err(|e| e.to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        {
+            let mut transfers = self.transfers.write().unwrap_or_else(|p| p.into_inner());
+            apply_filing_paths(&mut transfers, plan, undo, &sizes)?;
+        }
+        self.persist_and_publish().map_err(|e| e.to_string())?;
+        self.writer.flush()
     }
 
     // All IPC snapshots and batches share an ordering, including command replies.
@@ -808,6 +879,7 @@ impl TransferHub {
     }
 
     pub fn pause(&self, id: &str) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(None, Some(id))?;
         self.abort(id);
         let mut found = false;
         self.mutate(|transfers| {
@@ -831,6 +903,7 @@ impl TransferHub {
     }
 
     pub fn resume(&self, id: &str) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(None, Some(id))?;
         let mut found = false;
         self.mutate(|transfers| {
             if let Some(transfer) = transfers.iter_mut().find(|transfer| transfer.id == id) {
@@ -865,6 +938,7 @@ impl TransferHub {
     }
 
     pub fn cancel(&self, id: &str) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(None, Some(id))?;
         self.abort(id);
         let removed = {
             let mut transfers = self
@@ -885,6 +959,7 @@ impl TransferHub {
     }
 
     pub fn pause_release(&self, release_id: &str) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(Some(release_id), None)?;
         self.mutate_release(release_id, |transfer| {
             if transfer.status != TransferStatus::Completed {
                 transfer.status = TransferStatus::Paused;
@@ -894,6 +969,7 @@ impl TransferHub {
     }
 
     pub fn resume_release(&self, release_id: &str) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(Some(release_id), None)?;
         self.mutate_release(release_id, |transfer| {
             if matches!(
                 transfer.status,
@@ -914,6 +990,7 @@ impl TransferHub {
     }
 
     pub fn cancel_release(&self, release_id: &str) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(Some(release_id), None)?;
         let ids: Vec<String> = self
             .transfers
             .read()
@@ -1086,6 +1163,7 @@ impl TransferHub {
         &self,
         release_id: &str,
     ) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(Some(release_id), None)?;
         let mut found = false;
         let mut recoverable = false;
         self.mutate(|transfers| {
@@ -1139,6 +1217,7 @@ impl TransferHub {
         username: &str,
         remote_folder: &str,
     ) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(Some(release_id), None)?;
         let active_ids = self
             .transfers
             .read()
@@ -1368,6 +1447,7 @@ impl TransferHub {
         &self,
         request: PatchReleaseFileRequest,
     ) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(Some(&request.release_id), None)?;
         validate_patch_request(&request)?;
 
         let mut transfers = self
@@ -1575,6 +1655,7 @@ impl TransferHub {
     }
 
     pub fn clear_completed(&self) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(None, None)?;
         self.mutate(|transfers| {
             let completed_release_ids: Vec<String> = transfers
                 .iter()
@@ -1607,6 +1688,7 @@ impl TransferHub {
         release_id: &str,
         filed: bool,
     ) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(Some(release_id), None)?;
         {
             let mut transfers = self
                 .transfers
@@ -1622,6 +1704,7 @@ impl TransferHub {
         &self,
         release_ids: &[String],
     ) -> Result<TransferQueueSnapshot, TransferError> {
+        let _filing = self.guard_filing(None, None)?;
         {
             let mut transfers = self
                 .transfers
@@ -2362,6 +2445,45 @@ fn prepare_transfers_for_restart(
             transfer.updated_at_ms = now;
         }
     }
+}
+
+pub(super) fn apply_filing_paths(
+    transfers: &mut [TransferSnapshot],
+    plan: &super::filing::FilingPlan,
+    undo: bool,
+    sizes: &[u64],
+) -> Result<(), String> {
+    if !undo
+        && (sizes.len() != plan.files.len()
+            || plan.originals.iter().any(|o| {
+                !transfers
+                    .iter()
+                    .any(|t| t.id == o.id && t.status == TransferStatus::Completed)
+            }))
+    {
+        return Err("Arrival history changed during filing.".into());
+    }
+    for (index, (original, file)) in plan.originals.iter().zip(&plan.files).enumerate() {
+        // Clearing transfer history never discards the independent undo journal.
+        let Some(current) = transfers.iter_mut().find(|t| t.id == original.id) else {
+            continue;
+        };
+        if undo {
+            *current = original.clone();
+        } else {
+            current.local_path = file.destination.to_string_lossy().into_owned();
+            current.release_folder = Some(plan.album_directory.to_string_lossy().into_owned());
+            current.size_bytes = sizes[index];
+            current.transferred_bytes = sizes[index];
+            current.filed_at_ms = Some(timestamp_ms());
+            current.verification_status = VerificationStatus::Verified;
+            current.verification_message = None;
+            current.verified_at_ms = Some(timestamp_ms());
+            current.soundcheck = None;
+        }
+        current.updated_at_ms = timestamp_ms();
+    }
+    Ok(())
 }
 
 fn set_release_filed_state(

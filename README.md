@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.73` adds sonic evidence to Deep Soundcheck,
-> with spectrograms, advisory quality verdicts, and per-track replacement review.
+> **Status:** pre-alpha. Version `0.0.74` adds reviewed tagging and filing in Arrival Desk,
+> with MusicBrainz tags, artwork, naming templates, and durable undo.
 
-If `0.0.16` is installed, download and run the latest `0.0.73` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.74` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -87,7 +87,8 @@ configuration and transfers.
   Forever downloads to the external collection
 - **Arrival Desk** inside Archive separates completed album downloads into
   **Ready to file**, **Filed away**, **Moved**, and **Needs attention** lanes,
-  with manual filing confirmation, undo, reveal, verification, per-release
+  with reviewed **File into library**, original-file undo, manual filing
+  confirmation, reveal, verification, per-release
   history removal, and a bulk clear for filed history that never deletes files
 - **Soundcheck** automatically performs a quick, read-only inspection of newly
   completed audio and persists codec, container, duration, bitrate, sample rate,
@@ -513,6 +514,32 @@ stored only in Forever and can be undone. **Clear filed history** and the row
 trash controls remove completed transfer records only—they never delete music
 or write to Music Library. Use **Reconcile now** for an immediate read-only
 check; otherwise Forever rechecks automatically every five minutes.
+
+Choose **File into library** to select a library root and naming template, choose
+an official MusicBrainz edition, explicitly assign each downloaded file to a
+track, and review current versus proposed tags and complete paths. Manual tags
+work without MusicBrainz. Optional Cover Art Archive front artwork is fetched
+and shown in the preview before embedding. **Apply filing** requires review;
+existing destination files are never overwritten. Supported writable containers
+are MP3, FLAC, M4A/MP4, Ogg Vorbis/Opus, WAV, AIFF, APE, and WavPack, subject to
+Lofty's parser and tag read-back checks. Unsupported or malformed audio blocks
+filing rather than being silently omitted. Downloaded companion files are kept.
+
+**Filing settings & history** saves defaults in the unified settings store and
+provides undo even after transfer history is cleared. The optional incomplete
+folder applies only to newly queued downloads; completed files stay there until
+you explicitly file them. Existing downloads and `.part` resume paths stay put.
+Original files are retained as `.forever-undo-*` siblings in the download folder,
+so filing needs additional disk space. They are excluded from Forever shares.
+Undo previews the original paths and restores exact bytes; later file edits or
+conflicts block undo without overwriting them. Interrupted operations remain
+reviewable after restart. Keep the filing journal and original backups together.
+
+The optional **beets hand-off** supplies a quoted PowerShell `beet import -t`
+command for an installed beets CLI. Run and review that external import yourself;
+Forever does not launch it or undo changes made by beets. Music Library's SQLite
+database remains read-only, and filing does not import into that catalog.
+See [tagging and filing behavior and recovery](docs/tagging-filing.md).
 
 Open **Archive → Missing shelf** to browse or search artists found in Music
 Library. Forever initially shows a bounded list and does not scan every artist's

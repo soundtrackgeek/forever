@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useSyncExternalStore } from "react";
+import { defaultFilingSettings, type FilingSettings } from "./filing";
 import type { ConnectionProfile, UploadPolicy, WantedPreferences } from "./types";
 import type { AlbumFilter } from "./components/AlbumSearchWorkspace";
 import { normalizeAdvancedFilters, sortLabels, type AdvancedSearchFilters, type SearchFilter, type SearchSort } from "./utils/searchResults";
@@ -12,7 +13,7 @@ export type UpdateCheckIntervalMinutes = 0 | 1 | 5 | 15 | 30 | 60 | 360;
 export type Preferences = { updateCheckIntervalMinutes: UpdateCheckIntervalMinutes; updateChannel: UpdateChannel; messageNotificationsEnabled: boolean; roomNotificationsEnabled: boolean; musicBrainzFallbackTrackCount: number };
 export type Settings = {
   version: number; revision: number; webviewMigrated: boolean; connection: ConnectionProfile | null;
-  transfers: { maxConcurrentDownloads: number; relaySuggestionMinutes: number; autoMirrorMinutes: number; soundcheckEnabled: boolean };
+  transfers: { maxConcurrentDownloads: number; relaySuggestionMinutes: number; autoMirrorMinutes: number; soundcheckEnabled: boolean; filing?: FilingSettings };
   sharing: { version: number; uploadSlots: number; uploadPolicy: UploadPolicy; roots: { id: string; path: string; alias: string; enabled: boolean; addedAtMs: number }[] };
   wanted: { intervalMinutes: 0 | 15 | 30 | 60; defaultPreferences: WantedPreferences };
   archiveDatabasePath: string | null; preferences: Preferences; dialMemory: DialMemory;
@@ -21,7 +22,7 @@ export type SettingsPatch = Partial<Preferences & Settings["transfers"] & Pick<S
 export type SettingsSection = "connection" | "transfers" | "sharing" | "wanted" | "archive" | "preferences" | "searches";
 export const defaultSettings = (): Settings => ({
   version: 1, revision: 0, webviewMigrated: false, connection: null,
-  transfers: { maxConcurrentDownloads: 3, relaySuggestionMinutes: 10, autoMirrorMinutes: 0, soundcheckEnabled: true },
+  transfers: { maxConcurrentDownloads: 3, relaySuggestionMinutes: 10, autoMirrorMinutes: 0, soundcheckEnabled: true, filing: defaultFilingSettings() },
   sharing: { version: 3, uploadSlots: 1, uploadPolicy: { maxFilesPerUser: 100, maxMegabytesPerUser: 10000, prioritizeFavorites: false, prioritizePrivileged: false }, roots: [] },
   wanted: { intervalMinutes: 30, defaultPreferences: { formatPreference: "preferLossless", minimumBitrateKbps: 320, minimumTrackCount: null } },
   archiveDatabasePath: null,

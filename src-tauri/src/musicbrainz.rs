@@ -159,6 +159,33 @@ pub struct MusicBrainzClient {
 }
 
 impl MusicBrainzClient {
+    pub async fn filing_metadata(
+        &self,
+        group: &str,
+        release: &str,
+    ) -> Result<Vec<crate::connection::filing::TrackTags>, String> {
+        if !is_musicbrainz_id(group) || !is_musicbrainz_id(release) {
+            return Err("Choose a valid MusicBrainz group and edition.".into());
+        }
+        let deadline = Instant::now() + LOOKUP_TIMEOUT;
+        let _lookup = self.lookup_slot(deadline).await?;
+        let response: serde_json::Value = self
+            .transport
+            .get(
+                &format!("/release/{release}"),
+                &[
+                    ("inc", "recordings+artist-credits+release-groups".into()),
+                    ("fmt", "json".into()),
+                ],
+                deadline,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let validation: OfficialTracklistResponse =
+            serde_json::from_value(response.clone()).map_err(|e| e.to_string())?;
+        validate_edition(&validation, group)?;
+        filing_track_tags(&response, group, release)
+    }
     pub fn initialize(app: &tauri::AppHandle) -> Self {
         let app_handle = app.clone();
         let status = StatusHub::new(move |status| {
@@ -528,6 +555,58 @@ fn flatten_official_tracklist(mut response: OfficialTracklistResponse) -> Vec<Al
     tracks
 }
 
+fn filing_track_tags(
+    response: &serde_json::Value,
+    group: &str,
+    release: &str,
+) -> Result<Vec<crate::connection::filing::TrackTags>, String> {
+    fn credit(value: &serde_json::Value) -> String {
+        value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|c| {
+                format!(
+                    "{}{}",
+                    c["name"]
+                        .as_str()
+                        .or_else(|| c["artist"]["name"].as_str())
+                        .unwrap_or(""),
+                    c["joinphrase"].as_str().unwrap_or("")
+                )
+            })
+            .collect()
+    }
+    let album_artist = credit(&response["artist-credit"]);
+    let mut result = Vec::new();
+    for medium in response["media"].as_array().into_iter().flatten() {
+        for track in medium["tracks"].as_array().into_iter().flatten() {
+            let artist = credit(&track["artist-credit"]);
+            result.push(crate::connection::filing::TrackTags {
+                title: track["title"].as_str().unwrap_or("").into(),
+                artist: if artist.is_empty() {
+                    album_artist.clone()
+                } else {
+                    artist
+                },
+                album_artist: album_artist.clone(),
+                album: response["title"].as_str().unwrap_or("").into(),
+                date: response["date"].as_str().unwrap_or("").into(),
+                disc: medium["position"].as_u64().unwrap_or(1) as u32,
+                track: track["position"].as_u64().unwrap_or(1) as u32,
+                release_group_id: Some(group.into()),
+                release_id: Some(release.into()),
+                recording_id: track["recording"]["id"].as_str().map(str::to_owned),
+            });
+        }
+    }
+    result.sort_by_key(|t| (t.disc, t.track));
+    if result.is_empty() || result.len() > 500 {
+        return Err("This edition has no usable tracklist (maximum 500 tracks).".into());
+    }
+    Ok(result)
+}
+
 pub(crate) fn is_musicbrainz_id(value: &str) -> bool {
     let sections: Vec<_> = value.split('-').collect();
     sections.len() == 5
@@ -593,6 +672,24 @@ pub async fn album_editions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filing_metadata_preserves_disc_positions_track_credits_and_recording_identity() {
+        let response = serde_json::json!({"title":"Album", "date":"2001-02", "artist-credit":[{"name":"Album Artist"}], "media":[
+            {"position":2,"tracks":[{"position":1,"title":"Second Disc", "artist-credit":[{"name":"Guest", "joinphrase":" & "},{"name":"Singer"}], "recording":{"id":"recording-two"}}]},
+            {"position":1,"tracks":[{"position":1,"title":"First Disc", "recording":{"id":"recording-one"}}]}
+        ]});
+        let tags = filing_track_tags(&response, "group", "release").unwrap();
+        assert_eq!(tags[0].disc, 1);
+        assert_eq!(tags[1].disc, 2);
+        assert_eq!(tags[1].track, 1);
+        assert_eq!(tags[0].artist, "Album Artist");
+        assert_eq!(tags[1].artist, "Guest & Singer");
+        assert_eq!(tags[1].album_artist, "Album Artist");
+        assert_eq!(tags[1].recording_id.as_deref(), Some("recording-two"));
+        assert_eq!(tags[0].date, "2001-02");
+        assert_eq!(tags[0].release_id.as_deref(), Some("release"));
+    }
 
     #[test]
     fn edition_catalog_uses_media_counts_and_keeps_region_and_version_labels() {

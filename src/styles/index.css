@@ -20,6 +20,7 @@
 @import "./workspaces/archive.css";
 @import "./workspaces/wanted.css";
 @import "./workspaces/arrivals.css";
+@import "./workspaces/filing.css";
 @import "./workspaces/wanted-list.css";
 @import "./workspaces/missing.css";
 @import "./shared/smart-matches.css";

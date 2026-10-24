@@ -22,6 +22,11 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(connection::initialize(app.handle())?);
+            app.manage(connection::filing::FilingHub::new(
+                app.path().app_config_dir()?.join("filing.json"),
+                app.state::<connection::ConnectionManager>()
+                    .filing_transfers(),
+            ));
             app.manage(archive::initialize(app.handle())?);
             app.manage(musicbrainz::MusicBrainzClient::initialize(app.handle()));
             Ok(())
@@ -32,6 +37,13 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            connection::filing::filing_history,
+            connection::filing::filing_notices,
+            connection::filing::filing_preview,
+            connection::filing::filing_apply,
+            connection::filing::filing_undo_preview,
+            connection::filing::filing_undo,
+            connection::filing::filing_metadata,
             updater::updater_check,
             connection::settings_commands::settings_get,
             connection::settings_commands::settings_patch,

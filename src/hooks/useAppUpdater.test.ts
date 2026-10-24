@@ -12,7 +12,7 @@ vi.mock("@tauri-apps/plugin-updater", () => ({ Update: class {
   close() { return close(this.rid); }
   downloadAndInstall() { return download(this.rid); }
 } }));
-const metadata = (rid = 1) => ({ rid, version: "0.0.73", currentVersion: "0.0.72", rawJson: {} });
+const metadata = (rid = 1) => ({ rid, version: "0.0.74", currentVersion: "0.0.73", rawJson: {} });
 const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 function choose(channel: UpdateChannel) {
   act(() => acceptSettings({ ...getSettingsState().settings, revision: getSettingsState().settings.revision + 1,

@@ -7,6 +7,7 @@ pub(crate) mod diagnostics_export;
 mod distributed;
 mod download_scheduler;
 mod downloads;
+pub(crate) mod filing;
 mod folders;
 mod local_shares;
 mod messages;

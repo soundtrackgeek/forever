@@ -275,6 +275,9 @@ pub struct ConnectionPaths {
 }
 
 impl ConnectionManager {
+    pub(crate) fn filing_transfers(&self) -> TransferHub {
+        self.transfers.clone()
+    }
     pub fn new(
         app: AppHandle,
         paths: ConnectionPaths,
@@ -1244,9 +1247,17 @@ impl ConnectionManager {
             .load()?
             .ok_or(ConnectionServiceError::NotConfigured)?;
         self.people.remember(&request.username)?;
-        let snapshot = self
-            .transfers
-            .enqueue(request, Path::new(&profile.download_directory))?;
+        let snapshot = self.transfers.enqueue(
+            request,
+            self.settings
+                .get()
+                .transfers
+                .filing
+                .incomplete_directory
+                .as_deref()
+                .map(Path::new)
+                .unwrap_or(Path::new(&profile.download_directory)),
+        )?;
         self.schedule_downloads();
         Ok(snapshot)
     }
@@ -1260,9 +1271,17 @@ impl ConnectionManager {
             .load()?
             .ok_or(ConnectionServiceError::NotConfigured)?;
         self.people.remember(&request.username)?;
-        let snapshot = self
-            .transfers
-            .enqueue_release(request, Path::new(&profile.download_directory))?;
+        let snapshot = self.transfers.enqueue_release(
+            request,
+            self.settings
+                .get()
+                .transfers
+                .filing
+                .incomplete_directory
+                .as_deref()
+                .map(Path::new)
+                .unwrap_or(Path::new(&profile.download_directory)),
+        )?;
         self.schedule_downloads();
         Ok(snapshot)
     }

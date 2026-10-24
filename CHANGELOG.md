@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.0.74] - 2026-10-24
+
+### Added
+
+- Arrival Desk tagging and filing with current/proposed tag and path previews,
+  explicit MusicBrainz edition and track mapping, optional Cover Art Archive
+  front-cover preview/embedding, and safe naming templates.
+- Staged Lofty writes with read-back verification, no-overwrite publication,
+  retained original files, SHA-256 conflict checks, and durable filing history
+  with reviewed undo and interruption recovery. Companion files are retained.
+- Unified filing defaults for library root, naming, artwork, and an optional
+  incomplete folder used by new downloads; existing resume paths stay intact.
+- Optional quoted PowerShell hand-off to beets interactive import. External
+  beets changes remain outside Forever undo; Music Library stays read-only.
+
+### Changed
+
+- Transfer paths and sizes follow filed files; undo restores original history
+  data without recreating transfer records the user deliberately cleared.
+- Patch Bay and transfer mutations are guarded during filing and while an
+  arrival owns retained originals; file work stays off the network executor.
+
 ## [0.0.73] - 2026-10-24
 
 ### Added

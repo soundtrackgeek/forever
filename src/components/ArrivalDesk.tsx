@@ -23,6 +23,7 @@ import { formatAlbumBytes } from "../utils/albumSources";
 import { buildPatchBayIssues } from "../utils/patchBay";
 import type { TransferGroup } from "../utils/transfers";
 import { PatchBayPanel } from "./PatchBayPanel";
+import { FilingPanel } from "./FilingPanel";
 
 type ArrivalDeskProps = {
   groups: TransferGroup[];
@@ -106,6 +107,7 @@ export function ArrivalDesk({
   onOpenTransfer,
 }: ArrivalDeskProps) {
   const [filter, setFilter] = useState<ArrivalFilter>("all");
+  const [filing, setFiling] = useState<TransferGroup | "settings" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [openPatchIds, setOpenPatchIds] = useState<Set<string>>(() => new Set());
   const [patchBusyIssueId, setPatchBusyIssueId] = useState<string | null>(null);
@@ -143,9 +145,10 @@ export function ArrivalDesk({
         <div>
           <small>ARRIVAL DESK</small>
           <h2>Downloads, on their way home.</h2>
-          <p>Finish the journey from Soulseek to your real collection. Forever observes Music Library in read-only mode and never moves or imports a file.</p>
+          <p>Finish the journey with reviewed tags and filing into your library folder. Forever observes Music Library’s database in read-only mode.</p>
         </div>
         <div className="arrival-hero-actions">
+          <button type="button" onClick={() => setFiling("settings")}>Filing settings & history</button>
           <span><LockKey size={13} /> Music Library · read-only</span>
           <span className={soundcheckEnabled ? "is-soundcheck-live" : ""}><Waveform size={13} /> Soundcheck · {soundcheckEnabled ? "automatic" : "manual"}</span>
           <button type="button" disabled={refreshing} onClick={() => void perform("refresh", onRefreshArchive)}>
@@ -154,6 +157,8 @@ export function ArrivalDesk({
           </button>
         </div>
       </section>
+
+      {filing && <FilingPanel key={filing === "settings" ? "settings" : filing.id} group={filing === "settings" ? null : filing} onClose={() => setFiling(null)} />}
 
       <section className="arrival-summary" aria-label="Arrival Desk status">
         <article className="is-ready"><span><FolderOpen size={18} /></span><div><small>Ready to file</small><strong>{stateCount(arrivals, "ready")}</strong><p>verified downloads</p></div></article>
@@ -219,6 +224,7 @@ export function ArrivalDesk({
                 <p>{arrival.repairing ? "A selected track is moving through Patch Bay" : arrival.archiveOwned ? "Matched in Music Library" : arrival.manuallyFiled ? "Confirmed by you" : copy.detail}</p>
               </div>
               <div className="arrival-row-actions">
+                {releaseId && arrival.group.status === "completed" ? <button type="button" className="is-primary" onClick={() => setFiling(arrival.group)}>File into library</button> : null}
                 {arrival.state === "ready" && releaseId ? (
                   <button type="button" className="is-primary" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-file`, () => onSetReleaseFiled(releaseId, true))}><Archive size={15} /> {actionBusy ? "Filing…" : "Mark as filed"}</button>
                 ) : null}

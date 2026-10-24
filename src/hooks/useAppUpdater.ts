@@ -36,15 +36,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.72",
-  version: "0.0.73",
-  body: `## What's new in Forever 0.0.73
+  currentVersion: "0.0.73",
+  version: "0.0.74",
+  body: `## What's new in Forever 0.0.74
 
 ### Changed
 
-- Inspect sonic evidence and spectrograms with Deep Soundcheck.
-- Review suspect transcodes and replace individual tracks in Patch Bay.
-- Keep advisory sonic observations in local source history.`,
+- Preview MusicBrainz tags, cover artwork, and library destination paths.
+- File completed arrivals with original-file backups and reviewed undo.
+- Save naming templates and an incomplete folder, with an optional beets hand-off.`,
   date: "2026-10-24",
 };
 

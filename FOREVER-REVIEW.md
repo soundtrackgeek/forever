@@ -768,7 +768,22 @@ element for common formats. For FLAC, ALAC, or gapless playback, decode with
 symphonia and output through `cpal`/`rodio` from Rust. Add queue-from-album,
 waveform scrubbing, and "play from Arrival Desk".
 
-### 2. Tagging and filing pipeline
+### 2. Tagging and filing pipeline - DONE
+
+**Implemented in 0.0.74 (2026-10-24):** Arrival Desk now previews current and
+proposed tags, explicit MusicBrainz edition/track assignments, CAA front cover,
+and sanitized template destinations before filing. Lofty writes staged copies
+and reads tags back; SHA-256 guards and no-overwrite publication retain originals
+for journaled undo, including interrupted operations. Companion files and
+track/album artist distinctions are preserved. Unified preferences include the
+library root, naming template, artwork, and an optional incomplete folder for
+new downloads. A reviewed PowerShell command hands off to an installed beets
+CLI; beets execution and undo remain external. Music Library stays read-only.
+Tests cover real WAV/FLAC writes, exact-byte undo, collisions, changed files,
+junctions, interruption boundaries, metadata projection, and UI review states.
+Browser validation uses simulated IPC; public metadata services, external beets,
+physical power loss, and an installed desktop session are not end-to-end tested.
+The original proposal follows for context.
 
 Forever already knows the MusicBrainz release group and tracklist for many
 downloads. Writing that into the files closes the loop from search to finished
