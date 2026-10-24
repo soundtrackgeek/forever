@@ -1,0 +1,46 @@
+[package]
+name = "forever-protocol-fuzz"
+version = "0.1.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[features]
+fuzzing = ["dep:libfuzzer-sys"]
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", optional = true }
+flate2 = "1"
+md5 = "0.8"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "rt", "time"] }
+zeroize = "1"
+
+[[bin]]
+name = "server_frames"
+path = "fuzz_targets/server_frames.rs"
+test = false
+doc = false
+bench = false
+required-features = ["fuzzing"]
+
+[[bin]]
+name = "peer_frames"
+path = "fuzz_targets/peer_frames.rs"
+test = false
+doc = false
+bench = false
+required-features = ["fuzzing"]
+
+[[bin]]
+name = "distributed_frames"
+path = "fuzz_targets/distributed_frames.rs"
+test = false
+doc = false
+bench = false
+required-features = ["fuzzing"]

@@ -553,7 +553,23 @@ without bound. No panic hook or crash capture exists, which hurt during the
   with credentials and IPs stripped, for bug reports.
 - Optional and opt-in: crash reporting with `tauri-plugin-sentry` (see Part 3).
 
-### 16. Break up the connection actor
+### 16. Break up the connection actor - DONE
+
+**Implemented in 0.0.69 (2026-10-24):** the connection facade delegates session
+setup/event pumping, hub/server dispatch, commands, distributed topology, peer IO,
+and reconnect/search policy to focused modules. Registered hubs share
+`on_server_frame`, `on_connected`, and `on_disconnected` hooks; explicit disconnect
+now also requeues uploads, clears server privileges, and fails unsent messages.
+Hub-owned timers feed a bounded session queue and stop with the attempt. Download
+scheduling wakes on lifecycle changes or an eligible retry deadline, preserving
+lane/source limits without the one-second poll. Three seeded cargo-fuzz targets
+cover production parsers without Tauri, with an independent CI smoke workflow.
+Regression coverage includes routing, malformed frames, reconnect state, retry
+eligibility, timer cancellation, and existing fragmented-frame/loopback tests.
+See [architecture notes](docs/connection-architecture.md) and
+[fuzz instructions](src-tauri/fuzz/README.md). Live public-network interoperability
+and installed-app transfers were not validated for this refactor. Original
+findings follow for context.
 
 **Today:** `connect_once` spans about 870 lines
 ([service.rs:1815](src-tauri/src/connection/service.rs:1815)). One

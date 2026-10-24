@@ -1033,17 +1033,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.68 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.69 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Daily diagnostic logs keep seven files with a bounded size.",
+        "Download queues wake immediately on changes and at retry deadlines.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Export a private diagnostics ZIP from Settings for bug reports.",
+        "Connection hubs share consistent disconnect and reconnect cleanup.",
       ),
     ).toBeInTheDocument();
     expect(

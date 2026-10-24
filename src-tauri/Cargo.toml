@@ -5,7 +5,7 @@ resolver = "2"
 
 [package]
 name = "forever"
-version = "0.0.68"
+version = "0.0.69"
 description = "A polished, modern desktop client for the Soulseek network."
 authors = ["soundtrackgeek"]
 edition = "2021"
@@ -58,3 +58,6 @@ tracing-subscriber = { version = "0.3", features = ["json"] }
 time = "0.3"
 regex = "1"
 zip = { version = "4.6", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }

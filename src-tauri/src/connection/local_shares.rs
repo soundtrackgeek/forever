@@ -1278,6 +1278,24 @@ pub enum LocalSharesError {
     Json(#[from] serde_json::Error),
 }
 
+impl LocalSharesHub {
+    pub(super) fn start_session_timer(
+        &self,
+        sender: tokio::sync::mpsc::Sender<super::session_timer::SessionEvent>,
+        mut announced: (u32, u32),
+    ) -> super::session_timer::SessionTimer {
+        let hub = self.clone();
+        super::session_timer::spawn_when(std::time::Duration::from_secs(1), sender, move || {
+            let counts = hub.counts();
+            if counts == announced {
+                return None;
+            }
+            announced = counts;
+            Some(super::session_timer::SessionEvent::Shares)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

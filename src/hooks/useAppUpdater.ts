@@ -36,15 +36,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.67",
-  version: "0.0.68",
-  body: `## What's new in Forever 0.0.68
+  currentVersion: "0.0.68",
+  version: "0.0.69",
+  body: `## What's new in Forever 0.0.69
 
 ### Changed
 
-- Daily diagnostic logs keep seven files with a bounded size.
-- Export a private diagnostics ZIP from Settings for bug reports.
-- Local panic reports capture the source location without secret payloads.`,
+- Download queues wake immediately on changes and at retry deadlines.
+- Connection hubs share consistent disconnect and reconnect cleanup.
+- Protocol parsers have dedicated fuzz targets and regression coverage.`,
   date: "2026-10-24",
 };
 

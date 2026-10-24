@@ -1,0 +1,5 @@
+/target/
+/artifacts/
+/coverage/
+# Keep reviewed seeds in seeds/; libFuzzer owns and extends corpus/.
+/corpus/

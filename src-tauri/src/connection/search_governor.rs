@@ -114,6 +114,19 @@ impl SearchGovernor {
     }
 }
 
+impl SearchGovernor {
+    pub(super) fn start_session_timer(
+        &self,
+        sender: tokio::sync::mpsc::Sender<super::session_timer::SessionEvent>,
+    ) -> super::session_timer::SessionTimer {
+        super::session_timer::spawn(
+            Duration::from_millis(250),
+            sender,
+            super::session_timer::SessionEvent::Search,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

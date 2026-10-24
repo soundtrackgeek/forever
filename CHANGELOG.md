@@ -5,6 +5,31 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.69] - 2026-10-24
+
+### Changed
+
+- Split the connection service into session, hub/server dispatch, command,
+  distributed-network, peer IO, and reconnect/search modules, retaining one server
+  writer and the cancellation-safe frame reader.
+- Hubs share frame and lifecycle hooks. Their timers use a bounded session queue,
+  skip missed ticks, and cancel when a connection attempt ends.
+- Download scheduling wakes on queue/lifecycle changes and retry deadlines,
+  preserving lane and source limits without polling once per second.
+
+### Fixed
+
+- Explicit disconnect now applies the same upload, privilege, and unsent-message
+  cleanup as an interrupted connection. Old attempts check their generation before
+  applying disconnect cleanup.
+
+### Added
+
+- Seeded cargo-fuzz targets for server, peer/compressed-response, and distributed
+  parsers, plus a standalone parser harness and bounded CI fuzz smoke workflow.
+- Regression tests for hub dispatch, malformed frames, reconnect state, upload
+  recovery, retry eligibility, scheduler wakeups, and timer cancellation.
+
 ## [0.0.68] - 2026-10-24
 
 ### Added

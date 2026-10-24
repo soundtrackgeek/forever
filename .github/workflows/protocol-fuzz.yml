@@ -1,0 +1,47 @@
+name: Protocol fuzz smoke
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src-tauri/src/connection/protocol.rs"
+      - "src-tauri/fuzz/**"
+      - ".github/workflows/protocol-fuzz.yml"
+  pull_request:
+    paths:
+      - "src-tauri/src/connection/protocol.rs"
+      - "src-tauri/fuzz/**"
+      - ".github/workflows/protocol-fuzz.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [server_frames, peer_frames, distributed_frames]
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri/fuzz -> target
+          key: fuzz-${{ matrix.target }}
+      - run: cargo test --locked --manifest-path fuzz/Cargo.toml --lib
+      - run: cargo install cargo-fuzz --locked
+      - run: mkdir -p fuzz/corpus/${{ matrix.target }}
+      - run: cargo fuzz run ${{ matrix.target }} --features fuzzing fuzz/corpus/${{ matrix.target }} fuzz/seeds/${{ matrix.target }} -- -max_total_time=30 -max_len=65536
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: src-tauri/fuzz/artifacts/
+          if-no-files-found: ignore

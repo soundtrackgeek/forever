@@ -415,6 +415,7 @@ struct TransferStore {
 
 #[derive(Clone)]
 pub struct TransferHub {
+    scheduler: super::download_scheduler::DownloadScheduler,
     app: AppHandle,
     writer: Arc<TransferWriter<TransferStore>>,
     telemetry: Arc<Mutex<TransferTelemetry>>,
@@ -466,6 +467,7 @@ impl TransferHub {
             },
         )?;
         let hub = Self {
+            scheduler: super::download_scheduler::DownloadScheduler::default(),
             app,
             writer: Arc::new(writer),
             telemetry: Arc::new(Mutex::new(TransferTelemetry::default())),
@@ -616,6 +618,7 @@ impl TransferHub {
             drop(transfers);
             let _ = self.persist();
         }
+        self.scheduler.changed();
         let mut revision = self.publication.lock().unwrap_or_else(|p| p.into_inner());
         let _ = self
             .app
@@ -1532,6 +1535,25 @@ impl TransferHub {
             .ok_or(TransferError::ReleaseNotFound)
     }
 
+    pub(super) fn wake_scheduler(&self) {
+        self.scheduler.changed();
+    }
+
+    pub(super) async fn scheduling_changed(&self) {
+        let deadline = if self.safety_state() == TransferSafetyState::Running {
+            let transfers = self.transfers.read().unwrap_or_else(|p| p.into_inner());
+            next_retry_deadline(
+                &transfers,
+                self.max_concurrent_downloads.load(Ordering::SeqCst),
+            )
+        } else {
+            None
+        };
+        self.scheduler
+            .wait(deadline.map(|at| Duration::from_millis(at.saturating_sub(timestamp_ms()))))
+            .await;
+    }
+
     pub fn activate_next(&self, connection_token: u32) -> Option<TransferTicket> {
         if self.safety_state() != TransferSafetyState::Running {
             return None;
@@ -1950,6 +1972,7 @@ impl TransferHub {
     }
 
     fn persist_and_publish(&self) -> Result<(), TransferError> {
+        self.scheduler.changed();
         let mut revision = self.publication.lock().unwrap_or_else(|p| p.into_inner());
         let snapshot = self.snapshot_at(&mut revision);
         self.queue_store(&snapshot);
@@ -2348,6 +2371,28 @@ fn reset_runtime_state(transfer: &mut TransferSnapshot) {
     transfer.connection_token = None;
     transfer.transfer_token = None;
     transfer.waiting_since_ms = None;
+}
+
+// Deadlines blocked by a lane or the same source sleep until that lifecycle
+// changes. In particular, an overdue retry must never create a busy loop.
+fn next_retry_deadline(transfers: &[TransferSnapshot], limit: u8) -> Option<u64> {
+    let active: Vec<_> = transfers
+        .iter()
+        .filter(|t| t.status.occupies_slot())
+        .collect();
+    if active.len() >= usize::from(limit) {
+        return None;
+    }
+    transfers
+        .iter()
+        .filter(|t| {
+            t.status == TransferStatus::Retrying
+                && !active
+                    .iter()
+                    .any(|a| a.username.eq_ignore_ascii_case(&t.username))
+        })
+        .map(|t| t.retry_at_ms.unwrap_or(0))
+        .min()
 }
 
 fn next_download_index(
@@ -3669,6 +3714,56 @@ mod tests {
         ];
         assert_eq!(next_download_index(&transfers, 3, timestamp_ms()), Some(2));
         assert_eq!(next_download_index(&transfers, 1, timestamp_ms()), None);
+    }
+
+    #[test]
+    fn retry_deadlines_wait_for_slot_release_and_ignore_completed_history() {
+        let mut active = release_transfer(
+            "active",
+            "a",
+            "source",
+            "a.flac",
+            TransferStatus::Downloading,
+            0,
+        );
+        let mut retry = release_transfer(
+            "retry",
+            "b",
+            "SOURCE",
+            "b.flac",
+            TransferStatus::Retrying,
+            0,
+        );
+        retry.retry_at_ms = Some(5_000);
+        let mut other =
+            release_transfer("other", "c", "other", "c.flac", TransferStatus::Retrying, 0);
+        other.retry_at_ms = Some(15_000);
+        let history = release_transfer("done", "d", "old", "d.flac", TransferStatus::Completed, 0);
+        assert_eq!(
+            next_retry_deadline(&[active.clone(), retry.clone(), other.clone()], 1),
+            None
+        );
+        assert_eq!(
+            next_retry_deadline(
+                &[
+                    active.clone(),
+                    retry.clone(),
+                    other.clone(),
+                    history.clone()
+                ],
+                3
+            ),
+            Some(15_000)
+        );
+        active.status = TransferStatus::Completed;
+        assert_eq!(
+            next_retry_deadline(&[active, retry.clone(), other], 3),
+            Some(5_000)
+        );
+        assert_eq!(next_download_index(&[retry.clone()], 1, 4_999), None);
+        assert_eq!(next_download_index(&[retry.clone()], 1, 5_000), Some(0));
+        retry.status = TransferStatus::Paused;
+        assert_eq!(next_retry_deadline(&[retry, history], 3), None);
     }
 
     #[test]

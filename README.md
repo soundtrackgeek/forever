@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.68` adds bounded daily diagnostic logs,
-> local panic reports, and a privacy-filtered diagnostics ZIP export.
+> **Status:** pre-alpha. Version `0.0.69` separates the connection service into
+> focused modules, makes download scheduling event-driven, and adds parser fuzzing.
 
-If `0.0.16` is installed, download and run the latest `0.0.68` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.69` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -351,6 +351,12 @@ still require testing on the user's actual network.
   [Tauri documentation](https://v2.tauri.app/start/prerequisites/)
 
 ## Development
+
+The connection backend uses registered hub handlers and shared session lifecycle
+hooks. Downloads wake on queue changes and retry deadlines. See
+[connection architecture](docs/connection-architecture.md) for module ownership,
+timer behavior, and regression coverage, and [protocol fuzzing](src-tauri/fuzz/README.md)
+for the standalone parser targets and local/CI commands.
 
 ```powershell
 npm install

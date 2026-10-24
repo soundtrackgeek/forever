@@ -117,7 +117,7 @@ impl UploadHub {
         )
     }
 
-    fn load(
+    pub(super) fn load(
         publish_snapshot: Arc<dyn Fn(UploadQueueSnapshot) + Send + Sync>,
         path: JsonFile,
         policy: UploadPolicy,
@@ -878,6 +878,19 @@ fn check_user_limits(
         return Err(UploadError::TooManyMegabytes);
     }
     Ok(())
+}
+
+impl UploadHub {
+    pub(super) fn start_session_timer(
+        &self,
+        sender: tokio::sync::mpsc::Sender<super::session_timer::SessionEvent>,
+    ) -> super::session_timer::SessionTimer {
+        super::session_timer::spawn(
+            std::time::Duration::from_secs(1),
+            sender,
+            super::session_timer::SessionEvent::Uploads,
+        )
+    }
 }
 
 #[cfg(test)]

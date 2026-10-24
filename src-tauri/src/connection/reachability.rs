@@ -605,6 +605,19 @@ async fn create_mapping(local_ip: IpAddr, port: u16) -> Result<Mapping, String> 
     Ok(Mapping::Nat(mapping))
 }
 
+impl ReachabilityHub {
+    pub(super) fn start_session_timer(
+        &self,
+        sender: tokio::sync::mpsc::Sender<super::session_timer::SessionEvent>,
+    ) -> super::session_timer::SessionTimer {
+        super::session_timer::spawn(
+            Duration::from_secs(1),
+            sender,
+            super::session_timer::SessionEvent::Network,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
