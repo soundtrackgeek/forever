@@ -1038,17 +1038,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.65 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.66 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Shared audio now includes bitrate, duration, sample rate, and bit depth.",
+        "MusicBrainz artist, catalog, edition, and tracklist caches survive restarts.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Unchanged files reuse a persistent local index.",
+        "Busy MusicBrainz requests use bounded retries with a visible cooldown.",
       ),
     ).toBeInTheDocument();
     expect(

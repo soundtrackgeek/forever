@@ -1,20 +1,19 @@
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-use tauri::State;
-use tokio::sync::{Mutex, RwLock};
+mod cache;
+mod status;
+mod transport;
 
-const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "Forever/0.0.61 (https://github.com/soundtrackgeek/forever)";
-const REQUEST_INTERVAL: Duration = Duration::from_millis(1_050);
-const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+use cache::{Cache, Entity};
+use serde::{Deserialize, Serialize};
+use status::StatusHub;
+use std::{collections::HashMap, path::PathBuf};
+use tauri::{Emitter, Manager, State};
+use tokio::{
+    sync::{Mutex, MutexGuard},
+    time::{timeout_at, Instant},
+};
+use transport::{Transport, LOOKUP_TIMEOUT};
+
 const MAX_CATALOG_PAGES: usize = 3;
-const MAX_ARTIST_CACHE_ENTRIES: usize = 64;
-const MAX_CATALOG_CACHE_ENTRIES: usize = 32;
-const MAX_TRACK_COUNT_CACHE_ENTRIES: usize = 128;
 const MAX_ARTIST_QUERY_LENGTH: usize = 180;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -24,7 +23,7 @@ pub struct AlbumArtist {
     pub name: String,
     pub disambiguation: Option<String>,
     pub country: Option<String>,
-    #[serde(rename(deserialize = "type", serialize = "artistType"))]
+    #[serde(rename = "artistType", alias = "type")]
     pub artist_type: Option<String>,
     pub score: u8,
 }
@@ -39,17 +38,11 @@ struct ArtistSearchResponse {
 pub struct AlbumReleaseGroup {
     pub id: String,
     pub title: String,
-    #[serde(
-        rename(deserialize = "first-release-date", serialize = "firstReleaseDate"),
-        default
-    )]
+    #[serde(rename = "firstReleaseDate", alias = "first-release-date", default)]
     pub first_release_date: String,
-    #[serde(rename(deserialize = "primary-type", serialize = "primaryType"))]
+    #[serde(rename = "primaryType", alias = "primary-type")]
     pub primary_type: Option<String>,
-    #[serde(
-        rename(deserialize = "secondary-types", serialize = "secondaryTypes"),
-        default
-    )]
+    #[serde(rename = "secondaryTypes", alias = "secondary-types", default)]
     pub secondary_types: Vec<String>,
     #[serde(default)]
     pub cover_art_url: String,
@@ -76,7 +69,7 @@ pub struct AlbumEdition {
     pub country: Option<String>,
     #[serde(default)]
     pub disambiguation: String,
-    #[serde(rename(deserialize = "track-count", serialize = "trackCount"))]
+    #[serde(rename = "trackCount", alias = "track-count")]
     pub track_count: Option<u32>,
     #[serde(default)]
     pub media: Vec<EditionMedium>,
@@ -86,13 +79,13 @@ pub struct AlbumEdition {
 #[serde(rename_all(serialize = "camelCase"))]
 pub struct EditionMedium {
     pub format: Option<String>,
-    #[serde(rename(deserialize = "track-count", serialize = "trackCount"))]
+    #[serde(rename = "trackCount", alias = "track-count")]
     pub track_count: Option<u32>,
 }
 
 type OfficialRelease = AlbumEdition;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AlbumEditions {
     pub releases: Vec<AlbumEdition>,
@@ -142,7 +135,7 @@ struct OfficialTrack {
 
 pub use forever_matching::AlbumTrack;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AlbumCatalog {
     pub artist_id: String,
@@ -150,149 +143,134 @@ pub struct AlbumCatalog {
     pub truncated: bool,
 }
 
-#[derive(Clone)]
-struct CacheEntry<T> {
-    stored_at: Instant,
-    value: T,
+#[derive(Deserialize, Serialize)]
+struct CachedTracklist {
+    release_group_id: String,
+    tracks: Vec<AlbumTrack>,
 }
 
 pub struct MusicBrainzClient {
-    client: Result<reqwest::Client, String>,
-    request_gate: Arc<Mutex<Instant>>,
-    artist_cache: RwLock<HashMap<String, CacheEntry<Vec<AlbumArtist>>>>,
-    catalog_cache: RwLock<HashMap<String, CacheEntry<AlbumCatalog>>>,
-    edition_cache: RwLock<HashMap<String, CacheEntry<AlbumEditions>>>,
-    tracklist_cache: RwLock<HashMap<String, CacheEntry<Vec<AlbumTrack>>>>,
+    transport: Transport,
+    cache: Cache,
+    status: StatusHub,
+    // Coalesce concurrent cache misses, including foreground and Wanted work.
+    // Cache hits do not wait for network traffic.
+    lookup_gate: Mutex<()>,
 }
 
 impl MusicBrainzClient {
-    pub fn new() -> Self {
-        // Reqwest's rustls-no-provider feature deliberately panics while building a
-        // client unless the host application installs a provider first. Keep that
-        // requirement beside the only client that needs it so startup ordering
-        // cannot accidentally regress again.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .timeout(Duration::from_secs(15))
-            .build()
-            .map_err(|error| format!("Could not prepare album discovery: {error}"));
+    pub fn initialize(app: &tauri::AppHandle) -> Self {
+        let app_handle = app.clone();
+        let status = StatusHub::new(move |status| {
+            let _ = app_handle.emit("forever://musicbrainz-status", status);
+        });
+        let path = match app.path().app_cache_dir() {
+            Ok(directory) => Some(directory.join("musicbrainz-cache.sqlite3")),
+            Err(error) => {
+                status.cache_warning(format!(
+                    "MusicBrainz disk cache unavailable; using a session cache. {error}"
+                ));
+                None
+            }
+        };
+        Self::with_cache(path, status)
+    }
+
+    fn with_cache(path: Option<PathBuf>, status: StatusHub) -> Self {
         Self {
-            client,
-            request_gate: Arc::new(Mutex::new(
-                Instant::now()
-                    .checked_sub(REQUEST_INTERVAL)
-                    .unwrap_or_else(Instant::now),
-            )),
-            artist_cache: RwLock::new(HashMap::new()),
-            catalog_cache: RwLock::new(HashMap::new()),
-            edition_cache: RwLock::new(HashMap::new()),
-            tracklist_cache: RwLock::new(HashMap::new()),
+            transport: Transport::new(status.clone()),
+            cache: Cache::new(path, status.clone()),
+            status,
+            lookup_gate: Mutex::new(()),
         }
     }
 
-    fn client(&self) -> Result<&reqwest::Client, String> {
-        self.client.as_ref().map_err(Clone::clone)
-    }
-
-    async fn wait_for_request_slot(&self) {
-        let mut previous = self.request_gate.lock().await;
-        let remaining = REQUEST_INTERVAL.saturating_sub(previous.elapsed());
-        if !remaining.is_zero() {
-            tokio::time::sleep(remaining).await;
-        }
-        *previous = Instant::now();
+    async fn lookup_slot(&self, deadline: Instant) -> Result<MutexGuard<'_, ()>, String> {
+        timeout_at(deadline, self.lookup_gate.lock())
+            .await
+            .map_err(|_| "MusicBrainz is busy with other lookups. Try again in a moment.".into())
     }
 
     pub async fn search_artists(&self, query: &str) -> Result<Vec<AlbumArtist>, String> {
         let query = query.trim();
         if query.is_empty() {
-            return Err("Enter an artist name to discover albums.".to_owned());
+            return Err("Enter an artist name to discover albums.".into());
         }
         if query.chars().count() > MAX_ARTIST_QUERY_LENGTH || query.chars().any(char::is_control) {
-            return Err("Keep the artist name under 180 visible characters.".to_owned());
+            return Err("Keep the artist name under 180 visible characters.".into());
         }
-        let cache_key = query.to_lowercase();
-        if let Some(cached) = self.artist_cache.read().await.get(&cache_key) {
-            if cached.stored_at.elapsed() <= CACHE_TTL {
-                return Ok(cached.value.clone());
-            }
+        let key = query.to_lowercase();
+        if let Some(value) = self.cache.get(Entity::Artists, &key).await {
+            return Ok(value);
         }
-
-        self.wait_for_request_slot().await;
+        let deadline = Instant::now() + LOOKUP_TIMEOUT;
+        let _lookup = self.lookup_slot(deadline).await?;
+        if let Some(value) = self.cache.get(Entity::Artists, &key).await {
+            return Ok(value);
+        }
         let escaped = query.replace('\\', "\\\\").replace('"', "\\\"");
-        let response = self
-            .client()?
-            .get(format!("{MUSICBRAINZ_API}/artist"))
-            .query(&[
-                ("query", format!("artist:\"{escaped}\"")),
-                ("fmt", "json".to_owned()),
-                ("limit", "8".to_owned()),
-            ])
-            .send()
+        let response: ArtistSearchResponse = self
+            .transport
+            .get(
+                "/artist",
+                &[
+                    ("query", format!("artist:\"{escaped}\"")),
+                    ("fmt", "json".into()),
+                    ("limit", "8".into()),
+                ],
+                deadline,
+            )
             .await
-            .map_err(request_error)?
-            .error_for_status()
-            .map_err(request_error)?
-            .json::<ArtistSearchResponse>()
-            .await
-            .map_err(request_error)?;
+            .map_err(|e| e.to_string())?;
         let mut artists = response.artists;
         artists.sort_by_key(|artist| std::cmp::Reverse(artist.score));
-        let mut cache = self.artist_cache.write().await;
-        trim_cache(&mut cache, &cache_key, MAX_ARTIST_CACHE_ENTRIES);
-        cache.insert(
-            cache_key,
-            CacheEntry {
-                stored_at: Instant::now(),
-                value: artists.clone(),
-            },
-        );
+        self.cache.put(Entity::Artists, &key, &artists).await;
         Ok(artists)
     }
 
     pub async fn catalog(&self, artist_id: &str) -> Result<AlbumCatalog, String> {
-        let artist_id = artist_id.trim();
-        if !is_musicbrainz_id(artist_id) {
-            return Err("Choose a valid MusicBrainz artist before loading albums.".to_owned());
+        let id = artist_id.trim().to_ascii_lowercase();
+        if !is_musicbrainz_id(&id) {
+            return Err("Choose a valid MusicBrainz artist before loading albums.".into());
         }
-        if let Some(cached) = self.catalog_cache.read().await.get(artist_id) {
-            if cached.stored_at.elapsed() <= CACHE_TTL {
-                return Ok(cached.value.clone());
-            }
+        if let Some(value) = self.cache.get(Entity::Catalog, &id).await {
+            return Ok(value);
         }
-
+        let deadline = Instant::now() + LOOKUP_TIMEOUT;
+        let _lookup = self.lookup_slot(deadline).await?;
+        if let Some(value) = self.cache.get(Entity::Catalog, &id).await {
+            return Ok(value);
+        }
         let mut albums = Vec::new();
-        let mut total = 0_usize;
-        let mut offset = 0_usize;
+        let mut total = 0;
+        let mut offset = 0;
         for _ in 0..MAX_CATALOG_PAGES {
-            self.wait_for_request_slot().await;
-            let response = self
-                .client()?
-                .get(format!("{MUSICBRAINZ_API}/release-group"))
-                .query(&[
-                    ("artist", artist_id.to_owned()),
-                    ("type", "album|ep".to_owned()),
-                    ("fmt", "json".to_owned()),
-                    ("limit", "100".to_owned()),
-                    ("offset", offset.to_string()),
-                ])
-                .send()
+            let response: ReleaseGroupResponse = self
+                .transport
+                .get(
+                    "/release-group",
+                    &[
+                        ("artist", id.clone()),
+                        ("type", "album|ep".into()),
+                        ("fmt", "json".into()),
+                        ("limit", "100".into()),
+                        ("offset", offset.to_string()),
+                    ],
+                    deadline,
+                )
                 .await
-                .map_err(request_error)?
-                .error_for_status()
-                .map_err(request_error)?
-                .json::<ReleaseGroupResponse>()
-                .await
-                .map_err(request_error)?;
+                .map_err(|e| e.to_string())?;
             total = response.count;
-            offset = response.offset + response.release_groups.len();
+            let empty = response.release_groups.is_empty();
+            let next = response
+                .offset
+                .saturating_add(response.release_groups.len());
             albums.extend(response.release_groups);
-            if offset >= total {
+            if empty || next <= offset || next >= total {
                 break;
             }
+            offset = next;
         }
-
         for album in &mut albums {
             album.cover_art_url = format!(
                 "https://coverartarchive.org/release-group/{}/front-250",
@@ -306,77 +284,61 @@ impl MusicBrainzClient {
                 .then_with(|| left.first_release_date.cmp(&right.first_release_date))
                 .then_with(|| left.title.cmp(&right.title))
         });
-        albums.dedup_by(|left, right| left.id == right.id);
+        let mut seen = std::collections::HashSet::new();
+        albums.retain(|album| seen.insert(album.id.clone()));
         let catalog = AlbumCatalog {
-            artist_id: artist_id.to_owned(),
+            artist_id: id.clone(),
             truncated: albums.len() < total,
             albums,
         };
-        let mut cache = self.catalog_cache.write().await;
-        trim_cache(&mut cache, artist_id, MAX_CATALOG_CACHE_ENTRIES);
-        cache.insert(
-            artist_id.to_owned(),
-            CacheEntry {
-                stored_at: Instant::now(),
-                value: catalog.clone(),
-            },
-        );
+        self.cache.put(Entity::Catalog, &id, &catalog).await;
         Ok(catalog)
     }
 
     pub async fn editions(&self, release_group_id: &str) -> Result<AlbumEditions, String> {
-        let id = release_group_id.trim();
-        if !is_musicbrainz_id(id) {
+        let id = release_group_id.trim().to_ascii_lowercase();
+        if !is_musicbrainz_id(&id) {
             return Err("Choose a valid MusicBrainz album before loading editions.".into());
         }
-        if let Some(cached) = self.edition_cache.read().await.get(id) {
-            if cached.stored_at.elapsed() <= CACHE_TTL {
-                return Ok(cached.value.clone());
-            }
+        if let Some(value) = self.cache.get(Entity::Editions, &id).await {
+            return Ok(value);
+        }
+        let deadline = Instant::now() + LOOKUP_TIMEOUT;
+        let _lookup = self.lookup_slot(deadline).await?;
+        if let Some(value) = self.cache.get(Entity::Editions, &id).await {
+            return Ok(value);
         }
         let mut releases = Vec::new();
         let mut offset = 0;
         let mut total = 0;
-        // Bounded browse: at most 500 official editions. Expose incomplete lists.
         for _ in 0..5 {
-            self.wait_for_request_slot().await;
-            let response = self
-                .client()?
-                .get(format!("{MUSICBRAINZ_API}/release"))
-                .query(&[
-                    ("release-group", id.to_owned()),
-                    ("status", "official".into()),
-                    ("inc", "media".into()),
-                    ("fmt", "json".into()),
-                    ("limit", "100".into()),
-                    ("offset", offset.to_string()),
-                ])
-                .send()
+            let response: OfficialReleaseResponse = self
+                .transport
+                .get(
+                    "/release",
+                    &[
+                        ("release-group", id.clone()),
+                        ("status", "official".into()),
+                        ("inc", "media".into()),
+                        ("fmt", "json".into()),
+                        ("limit", "100".into()),
+                        ("offset", offset.to_string()),
+                    ],
+                    deadline,
+                )
                 .await
-                .map_err(request_error)?
-                .error_for_status()
-                .map_err(request_error)?
-                .json::<OfficialReleaseResponse>()
-                .await
-                .map_err(request_error)?;
+                .map_err(|e| e.to_string())?;
             total = response.count;
-            let empty = response.releases.is_empty();
-            offset = response.offset + response.releases.len();
+            let next = response.offset.saturating_add(response.releases.len());
+            let stalled = response.releases.is_empty() || next <= offset;
             releases.extend(response.releases);
-            if empty || offset >= total {
+            offset = next;
+            if stalled || offset >= total {
                 break;
             }
         }
         let editions = prepare_editions(releases, offset < total);
-        let mut cache = self.edition_cache.write().await;
-        trim_cache(&mut cache, id, MAX_TRACK_COUNT_CACHE_ENTRIES);
-        cache.insert(
-            id.into(),
-            CacheEntry {
-                stored_at: Instant::now(),
-                value: editions.clone(),
-            },
-        );
+        self.cache.put(Entity::Editions, &id, &editions).await;
         Ok(editions)
     }
 
@@ -384,8 +346,9 @@ impl MusicBrainzClient {
         &self,
         release_group_id: &str,
     ) -> Result<Option<u32>, String> {
-        let editions = self.editions(release_group_id).await?;
-        Ok(canonical_track_count(&editions.releases))
+        Ok(canonical_track_count(
+            &self.editions(release_group_id).await?.releases,
+        ))
     }
 
     pub async fn edition_tracklist(
@@ -398,50 +361,72 @@ impl MusicBrainzClient {
         {
             return Err("Choose a valid MusicBrainz album and edition.".into());
         }
+        let group = release_group_id.to_ascii_lowercase();
         let selected = match release_id {
-            Some(id) => id.to_owned(),
+            Some(id) => id.to_ascii_lowercase(),
             None => self
-                .editions(release_group_id)
+                .editions(&group)
                 .await?
                 .default_release_id
                 .ok_or("MusicBrainz has no official tracklist for this album yet.")?,
-        };
-        let key = format!("{release_group_id}/{selected}");
-        if let Some(cached) = self.tracklist_cache.read().await.get(&key) {
-            if cached.stored_at.elapsed() <= CACHE_TTL {
-                return Ok(cached.value.clone());
-            }
         }
-        self.wait_for_request_slot().await;
-        let response = self
-            .client()?
-            .get(format!("{MUSICBRAINZ_API}/release/{selected}"))
-            .query(&[("inc", "recordings+release-groups"), ("fmt", "json")])
-            .send()
+        .to_ascii_lowercase();
+        if let Some(value) = self.cached_tracks(&selected, &group).await? {
+            return Ok(value);
+        }
+        let deadline = Instant::now() + LOOKUP_TIMEOUT;
+        let _lookup = self.lookup_slot(deadline).await?;
+        if let Some(value) = self.cached_tracks(&selected, &group).await? {
+            return Ok(value);
+        }
+        let response: OfficialTracklistResponse = self
+            .transport
+            .get(
+                &format!("/release/{selected}"),
+                &[
+                    ("inc", "recordings+release-groups".into()),
+                    ("fmt", "json".into()),
+                ],
+                deadline,
+            )
             .await
-            .map_err(request_error)?
-            .error_for_status()
-            .map_err(request_error)?
-            .json::<OfficialTracklistResponse>()
-            .await
-            .map_err(request_error)?;
-        validate_edition(&response, release_group_id)?;
+            .map_err(|e| e.to_string())?;
+        validate_edition(&response, &group)?;
         let tracks = flatten_official_tracklist(response);
         if tracks.is_empty() {
             return Err(
                 "MusicBrainz returned an empty official tracklist for this edition.".into(),
             );
         }
-        let mut cache = self.tracklist_cache.write().await;
-        trim_cache(&mut cache, &key, MAX_TRACK_COUNT_CACHE_ENTRIES);
-        cache.insert(
-            key,
-            CacheEntry {
-                stored_at: Instant::now(),
-                value: tracks.clone(),
-            },
-        );
+        self.cache
+            .put(
+                Entity::Tracklist,
+                &selected,
+                &CachedTracklist {
+                    release_group_id: group,
+                    tracks: tracks.clone(),
+                },
+            )
+            .await;
         Ok(tracks)
+    }
+
+    async fn cached_tracks(
+        &self,
+        release: &str,
+        group: &str,
+    ) -> Result<Option<Vec<AlbumTrack>>, String> {
+        match self
+            .cache
+            .get::<CachedTracklist>(Entity::Tracklist, release)
+            .await
+        {
+            Some(value) if !value.release_group_id.eq_ignore_ascii_case(group) => {
+                Err("This official edition does not belong to the selected album.".into())
+            }
+            Some(value) if !value.tracks.is_empty() => Ok(Some(value.tracks)),
+            _ => Ok(None),
+        }
     }
 }
 
@@ -543,19 +528,6 @@ fn flatten_official_tracklist(mut response: OfficialTracklistResponse) -> Vec<Al
     tracks
 }
 
-fn trim_cache<T>(cache: &mut HashMap<String, CacheEntry<T>>, incoming: &str, limit: usize) {
-    if cache.len() < limit || cache.contains_key(incoming) {
-        return;
-    }
-    let oldest = cache
-        .iter()
-        .max_by_key(|(_, entry)| entry.stored_at.elapsed())
-        .map(|(key, _)| key.clone());
-    if let Some(key) = oldest {
-        cache.remove(&key);
-    }
-}
-
 pub(crate) fn is_musicbrainz_id(value: &str) -> bool {
     let sections: Vec<_> = value.split('-').collect();
     sections.len() == 5
@@ -570,14 +542,9 @@ pub(crate) fn is_musicbrainz_id(value: &str) -> bool {
             })
 }
 
-fn request_error(error: reqwest::Error) -> String {
-    if error.is_timeout() {
-        "MusicBrainz took too long to answer. Try again in a moment.".to_owned()
-    } else if error.is_connect() {
-        "Forever could not reach MusicBrainz. Check your internet connection.".to_owned()
-    } else {
-        format!("MusicBrainz could not complete album discovery: {error}")
-    }
+#[tauri::command]
+pub fn musicbrainz_status(client: State<'_, MusicBrainzClient>) -> status::ClientStatus {
+    client.status.snapshot()
 }
 
 #[tauri::command]
@@ -711,10 +678,10 @@ mod tests {
 
     #[test]
     fn constructs_the_album_client_with_a_tls_provider() {
-        let client = MusicBrainzClient::new();
+        let client = MusicBrainzClient::with_cache(None, StatusHub::default());
 
         assert!(rustls::crypto::CryptoProvider::get_default().is_some());
-        assert!(client.client.is_ok());
+        assert!(client.transport.is_ready());
     }
 
     #[test]

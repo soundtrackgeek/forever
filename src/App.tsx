@@ -33,6 +33,7 @@ import { useAlbumDiscovery } from "./hooks/useAlbumDiscovery";
 import { useDialMemory } from "./hooks/useDialMemory";
 import { useSoulseekConnection } from "./hooks/useSoulseekConnection";
 import { StorageNotices } from "./components/StorageNotices";
+import { MusicBrainzNotice } from "./components/MusicBrainzNotice";
 import { useSoulseekFolders } from "./hooks/useSoulseekFolders";
 import { useSoulseekPeople } from "./hooks/useSoulseekPeople";
 import { useSoulseekSearch } from "./hooks/useSoulseekSearch";
@@ -831,6 +832,7 @@ function App() {
       </header>
 
       <StorageNotices notices={connection.storageNotices} />
+      <MusicBrainzNotice />
       <div className={`app-shell ${isFileSearchView ? "" : "is-single-view"}`}>
         <AppSidebar
           activeView={activeView}

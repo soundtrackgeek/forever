@@ -463,7 +463,20 @@ scan, and nothing watches the shared folders for changes.
 - Persist the index keyed by `(path, size, mtime)` so rescans are incremental.
 - Add a file watcher (the `notify` crate) with debounced partial rescans.
 
-### 13. MusicBrainz client hardening and persistent cache
+### 13. MusicBrainz client hardening and persistent cache - DONE
+
+**Implemented in 0.0.66 (2026-10-24):** the build version supplies the User-Agent.
+One shared transport paces requests and retries 429/503 at most twice, respects
+Retry-After seconds/HTTP dates and deadlines, bounds response bodies, and publishes
+a cooldown countdown. A versioned SQLite cache persists artist searches for one
+day, catalogs/edition lists for seven days, and verified release-MBID tracklists
+without time expiry. Cache hits bypass network waits, concurrent misses coalesce,
+and cached tracklists retain album identity checks. Disk errors preserve files
+and fall back to session storage with a notice; rows and payload bytes are bounded.
+Local HTTP, restart/expiry/corruption, identity, concurrency, and UI regression
+coverage exercises these paths. Public-service outages have not been simulated
+against MusicBrainz itself. No-expiry tracklists remain subject to oldest-entry
+eviction; metadata refresh controls are outside this item. Original findings follow.
 
 **Today:** The User-Agent is a hard-coded string, `"Forever/0.0.53 (…)"`
 ([musicbrainz.rs:11](src-tauri/src/musicbrainz.rs:11)). Every release has to bump

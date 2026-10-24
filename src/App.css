@@ -2623,6 +2623,27 @@ button:disabled {
   background-clip: content-box;
 }
 
+.musicbrainz-notice {
+  position: fixed;
+  z-index: 215;
+  bottom: calc(var(--transfer-height) + 16px);
+  right: 18px;
+  width: min(460px, calc(100vw - 36px));
+  max-height: 30vh;
+  overflow: auto;
+  padding: 12px 16px;
+  border: 1px solid #806432;
+  border-radius: 10px;
+  background: #211c18;
+  color: #efdfc3;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.musicbrainz-notice p { margin: 0; }
+.musicbrainz-notice div + div, .musicbrainz-notice p + div { margin-top: 8px; }
+.musicbrainz-notice button { margin-top: 8px; color: inherit; padding: 4px 8px; border: 1px solid #806432; border-radius: 5px; background: transparent; cursor: pointer; }
+
 .storage-notices {
   position: fixed;
   z-index: 220;

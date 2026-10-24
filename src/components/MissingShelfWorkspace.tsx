@@ -413,7 +413,7 @@ export function MissingShelfWorkspace({
           <>
             <header className="missing-catalog-heading">
               <span>
-                <small>Missing albums · {catalogSource === "archiveCache" ? "Music Library cache" : "MusicBrainz live"}</small>
+                <small>Missing albums · {catalogSource === "archiveCache" ? "Music Library cache" : "MusicBrainz catalog"}</small>
                 <h2>{selectedArtist.canonicalName ?? selectedArtist.name}</h2>
                 <p>{catalogSource === "archiveCache" ? date(catalogFetchedAt) : "Looked up after you selected this artist"} · Archive remains read-only</p>
               </span>

@@ -5,6 +5,28 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.66] - 2026-10-24
+
+### Added
+
+- A persistent SQLite MusicBrainz cache for artist searches (one day), catalogs
+  and edition lists (seven days), and verified tracklists keyed by release MBID
+  (no time expiry), with bounded storage and session-cache fallback on disk errors.
+- A MusicBrainz status notice showing the shared cooldown countdown and cache
+  failures; cached data remains available while live requests are throttled.
+
+### Fixed
+
+- MusicBrainz requests now use the build version in their identifying User-Agent,
+  share one request governor, and retry HTTP 429/503 at most twice using exponential
+  backoff and Retry-After seconds or HTTP dates. Deadlines include queueing;
+  redirects and implicit HTTP retries cannot bypass request pacing.
+- Concurrent metadata misses reuse the completed lookup. Persistent serialization
+  preserves artist types, release dates/types, edition counts, and track durations;
+  cached tracklists still enforce the selected album's identity.
+- Invalid/oversized responses and empty or unverified tracklists are not cached;
+  unreadable rows are discarded and unsupported/corrupt cache files are preserved.
+
 ## [0.0.65] - 2026-10-24
 
 ### Added

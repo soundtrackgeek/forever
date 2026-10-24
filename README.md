@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.65` adds audio quality attributes to shares,
+> **Status:** pre-alpha. Version `0.0.66` adds audio quality attributes to shares,
 > a persistent incremental index, and automatic folder watching.
 
-If `0.0.16` is installed, download and run the latest `0.0.65` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.66` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -618,7 +618,7 @@ profile, including when no source is currently recommended. The release list
 shows dates, regions, edition descriptions, media formats, track counts, and a
 short release ID to distinguish otherwise identical entries. **Automatic** uses
 the earliest official edition with the common original-year track count.
-The list is cached for six hours, bounded to 500 releases, and explicitly marked
+The list is cached for seven days across restarts, bounded to 500 releases, and explicitly marked
 when incomplete. Selection validates official status and release-group membership,
 is saved per Wanted album in schema 4, clears old recommendations, and applies to
 background checks and foreground comparisons. Existing Wanted albums migrate to
@@ -890,11 +890,33 @@ connection between the client and Soulseek server. Use a unique password that
 you do not reuse for another service.
 
 Album discovery sends the artist name over HTTPS to MusicBrainz and loads
-available release artwork from the Cover Art Archive. Artist and release-group
-responses are held in bounded memory caches for up to six hours and are not
-written to Forever's configuration files. Requests use Forever's identifying
-User-Agent, a 15-second timeout, and a rate below one MusicBrainz request per
-second.
+available release artwork from the Cover Art Archive. Metadata is cached locally
+in `%LOCALAPPDATA%\com.soundtrackgeek.forever\musicbrainz-cache.sqlite3` on Windows
+(Tauri's application cache directory). Artist searches expire after one day;
+catalogs and edition lists after seven days. Verified official tracklists are
+keyed by release MBID, retain the album identity check, and have no time expiry.
+This cache survives restarts and is separate from the read-only Music Library
+Archive. Fresh cached lookups work offline and while live requests are throttled;
+expired entries require an online refresh when requested.
+
+The cache retains at most 4,096 entries and 64 MiB of JSON payloads, evicting the
+oldest entries (including tracklists) when full; SQLite indexes, free pages, and
+WAL files add disk overhead. Cache I/O runs off the async executor. Corrupt or
+unsupported database files are preserved, disk failures use a session-only cache,
+and a dismissible notice explains the fallback. To force fresh metadata or remove
+saved artist searches, close Forever and delete `musicbrainz-cache.sqlite3` and
+its `-wal`/`-shm` companions from that directory; the cache is rebuilt on demand.
+
+All MusicBrainz callers share the build-version User-Agent and a governor that
+spaces requests by at least 1.05 seconds. HTTP 429/503 gets at most two retries
+after exponential backoff or a longer `Retry-After` delay (seconds or HTTP date).
+A visible countdown explains the shared cooldown. Each HTTP attempt has a
+15-second timeout, and each catalog, edition-list, or tracklist lookup stage has
+a 45-second network/queue budget. Longer provider cooldowns return a retry-later
+error and continue to block new requests until the requested time. Identical
+concurrent misses reuse the first completed lookup. Responses are limited to
+4 MiB; invalid responses and unverified/empty tracklists are never cached.
+This follows [MusicBrainz's rate-limit guidance](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting).
 
 Live searches are sent to the Soulseek server, and responding peers connect to
 Forever’s configured listening port (or fallback) or receive an indirect connection attempt.

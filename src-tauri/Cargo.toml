@@ -5,7 +5,7 @@ resolver = "2"
 
 [package]
 name = "forever"
-version = "0.0.65"
+version = "0.0.66"
 description = "A polished, modern desktop client for the Soulseek network."
 authors = ["soundtrackgeek"]
 edition = "2021"
@@ -50,3 +50,4 @@ igd-next = { version = "0.17.1", features = ["aio_tokio"] }
 crab_nat = "0.8.1"
 netdev = "0.46.3"
 notify = "8.2"
+httpdate = "1"

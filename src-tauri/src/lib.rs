@@ -12,7 +12,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(connection::initialize(app.handle())?);
             app.manage(archive::initialize(app.handle())?);
-            app.manage(musicbrainz::MusicBrainzClient::new());
+            app.manage(musicbrainz::MusicBrainzClient::initialize(app.handle()));
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -125,6 +125,7 @@ pub fn run() {
             musicbrainz::album_official_track_count,
             musicbrainz::album_official_tracklist,
             musicbrainz::album_editions,
+            musicbrainz::musicbrainz_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
