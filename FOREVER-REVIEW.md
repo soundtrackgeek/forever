@@ -588,7 +588,21 @@ feature makes this loop harder to reason about and test.
 - Add `cargo-fuzz` targets for `parse_*` functions in `protocol.rs`. The bounded
   parsers are a natural fit for fuzzing.
 
-### 17. Frontend shell: routing, code-splitting, and CSS
+### 17. Frontend shell: routing, code-splitting, and CSS - DONE
+
+**Implemented in 0.0.70 (2026-10-24):** a typed registry owns navigation and
+ten lazy workspace entries, each with a loading/error boundary that keeps the
+sidebar and transfer shelf usable. A selector-based provider owns long-lived
+connection, transfer, Wanted and other cross-workspace state; stable actions
+call the latest committed controller without invalidating unrelated selectors.
+The shell, route adapters and background coordination are separate modules.
+Workspace/shared CSS files replace `App.css`, with shared palette, spacing and
+radius tokens and the existing cascade order. CSS deliberately loads once:
+overlapping shared selectors must not change appearance as views are visited.
+Dead placeholders are removed, including the fresh-profile Settings fallback.
+Build verification checks ten separate lazy chunks; regressions cover retained
+navigation flows, selector isolation, loading, failures and stale route loads.
+The original findings and proposal follow for context.
 
 **Today:** `App.tsx` switches views with a long nested ternary and owns most
 cross-feature state, passed down as props. All of the CSS is in one

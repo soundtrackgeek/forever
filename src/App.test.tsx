@@ -14,45 +14,68 @@ beforeAll(async () => {
   await prepareMatchingRuntime();
 }, 120_000);
 
+// Workspace imports resolve asynchronously; exercise real lazy routes in these flows.
+async function waitForWorkspace() {
+  await waitFor(() => expect(document.querySelector('.workspace-status[role="status"]')).toBeNull(), { timeout: 10000 });
+}
+async function renderApp() {
+  const view = render(<App />);
+  await waitForWorkspace();
+  return view;
+}
+async function click(element: Element) {
+  await act(async () => { fireEvent.click(element); });
+  if (!vi.isFakeTimers()) await waitForWorkspace();
+}
+
 describe("Forever shell", () => {
+  it("opens real Settings after a fresh profile chooses to explore offline", async () => {
+    window.history.replaceState({}, "", "/?onboarding=1");
+    await renderApp();
+    await click(screen.getByRole("button", { name: /Explore offline/ }));
+    await click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("spinbutton", { name: /Listening port/ })).toBeInTheDocument();
+    expect(screen.queryByText(/will live here|will arrive after/)).not.toBeInTheDocument();
+  });
+
   it("remembers a review edition and checks its bonus tracks before recommending the folder", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Wanted 3" }));
-    fireEvent.click(screen.getByRole("button", { name: "Check A Sonic Holiday now" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Review match" }, { timeout: 10_000 }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Archive" }));
+    await click(screen.getByRole("tab", { name: "Wanted 3" }));
+    await click(screen.getByRole("button", { name: "Check A Sonic Holiday now" }));
+    await click(await screen.findByRole("button", { name: "Review match" }, { timeout: 10_000 }));
     await screen.findByText("Exact tracklist", {}, { timeout: 10000 });
     fireEvent.change(screen.getByRole("combobox", { name: "MusicBrainz edition" }), {
       target: { value: "preview-deluxe" },
     });
     await screen.findByText("1 missing", {}, { timeout: 10000 });
     expect(screen.queryByRole("button", { name: "Queue complete album" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close Smart Match review" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit A Sonic Holiday Smart Match profile" }));
+    await click(screen.getByRole("button", { name: "Close Smart Match review" }));
+    await click(screen.getByRole("button", { name: "Edit A Sonic Holiday Smart Match profile" }));
     expect(await screen.findByRole("combobox", { name: "MusicBrainz edition" })).toHaveValue("preview-deluxe");
   });
   it("saves the listening port and network preferences before reconnecting", async () => {
-    vi.useFakeTimers();
-    const { unmount } = render(<App />);
+    const { unmount } = await renderApp();
     try {
-      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+      await click(screen.getByRole("button", { name: "Settings" }));
+      vi.useFakeTimers();
       fireEvent.change(screen.getByRole("spinbutton", { name: /Listening port/ }), { target: { value: "2240" } });
-      fireEvent.click(screen.getByRole("checkbox", { name: /Automatic router mapping/ }));
-      fireEvent.click(screen.getByRole("checkbox", { name: /Help relay global searches/ }));
+      await click(screen.getByRole("checkbox", { name: /Automatic router mapping/ }));
+      await click(screen.getByRole("checkbox", { name: /Help relay global searches/ }));
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+        await click(screen.getByRole("button", { name: "Save changes" }));
         await vi.advanceTimersByTimeAsync(240);
       });
       expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Test direct connections" })).toBeDisabled();
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Connect now" }));
+        await click(screen.getByRole("button", { name: "Connect now" }));
         await vi.advanceTimersByTimeAsync(780);
       });
       expect(screen.getByRole("button", { name: "Test direct connections" })).toBeEnabled();
       expect(screen.getByText("2240 / 2240")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Home" }));
-      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+      await click(screen.getByRole("button", { name: "Home" }));
+      await click(screen.getByRole("button", { name: "Settings" }));
       expect(screen.getByRole("spinbutton", { name: /Listening port/ })).toHaveValue(2240);
       expect(screen.getByRole("checkbox", { name: /Automatic router mapping/ })).not.toBeChecked();
       expect(screen.getByRole("checkbox", { name: /Help relay global searches/ })).not.toBeChecked();
@@ -61,18 +84,18 @@ describe("Forever shell", () => {
       vi.useRealTimers();
     }
   });
-  it("keeps navigation usable after storage recovery and lets the notice be dismissed", () => {
+  it("keeps navigation usable after storage recovery and lets the notice be dismissed", async () => {
     window.history.replaceState({}, "", "/?storageRecovery=1");
-    render(<App />);
+    await renderApp();
     expect(screen.getByRole("status", { name: "Saved data notice" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await click(screen.getByRole("button", { name: "Search" }));
     expect(screen.getByRole("heading", { name: "Across the network" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByRole("status", { name: "Saved data notice" })).not.toBeInTheDocument();
   });
 
-  it("opens The Listening Post first and routes every live signal to its exact workspace", () => {
-    render(<App />);
+  it("opens The Listening Post first and routes every live signal to its exact workspace", async () => {
+    await renderApp();
 
     expect(screen.getByRole("heading", { name: "The Listening Post" })).toBeInTheDocument();
     expect(screen.getByText("Everything worth hearing, waiting in one place.")).toBeInTheDocument();
@@ -83,31 +106,31 @@ describe("Forever shell", () => {
     expect(screen.getByText("72,366")).toBeInTheDocument();
     expect(screen.getByText("6")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Open transfer/ }));
+    await click(screen.getByRole("button", { name: /Open transfer/ }));
     expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument();
     expect(document.querySelector(".release-transfer-card.is-focus-target")).toHaveTextContent("Night Geometry");
 
-    fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    fireEvent.click(screen.getByRole("button", { name: /2 new Wanted matches/ }));
+    await click(screen.getByRole("button", { name: "Home" }));
+    await click(screen.getByRole("button", { name: /2 new Wanted matches/ }));
     expect(screen.getByRole("tab", { name: "Wanted 3" })).toHaveAttribute("aria-selected", "true");
 
-    fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    fireEvent.click(screen.getByRole("button", { name: /1 room mention/ }));
+    await click(screen.getByRole("button", { name: "Home" }));
+    await click(screen.getByRole("button", { name: /1 room mention/ }));
     expect(screen.getByRole("heading", { name: "Lossless Listening" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    fireEvent.click(screen.getByRole("button", { name: /1 unread message/ }));
+    await click(screen.getByRole("button", { name: "Home" }));
+    await click(screen.getByRole("button", { name: /1 unread message/ }));
     expect(screen.getByRole("region", { name: "Midnight Inbox" })).toBeInTheDocument();
     expect(screen.getByText(/late-night radio session/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Missing Shelf" }));
+    await click(screen.getByRole("button", { name: "Home" }));
+    await click(screen.getByRole("button", { name: "Open Missing Shelf" }));
     expect(screen.getByRole("tab", { name: "Missing shelf" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("renders the Midnight Radio search workspace", () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  it("renders the Midnight Radio search workspace", async () => {
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Search" }));
 
     expect(screen.getByRole("heading", { name: "Across the network" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("night geometry")).toBeInTheDocument();
@@ -115,20 +138,20 @@ describe("Forever shell", () => {
   });
 
   it("keeps independent Dial Memory searches and reopens a recently closed preset", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Search" }));
 
     expect(screen.getByRole("tab", { name: /night geometryFiles 6 results/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: /Def LeppardAlbums 8 albums/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /rare Bowie demosFiles/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unpin Kate Bush" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTitle("New search (Ctrl+T)"));
+    await click(screen.getByTitle("New search (Ctrl+T)"));
     const input = screen.getByRole("textbox", { name: "Search the network" });
     fireEvent.change(input, { target: { value: "Def Leppard Hysteria" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    fireEvent.click(screen.getByRole("tab", { name: /night geometryFiles 6 results/ }));
+    await click(screen.getByRole("tab", { name: /night geometryFiles 6 results/ }));
     expect(screen.getAllByRole("heading", { name: "Night Geometry" })).toHaveLength(2);
     const background = await screen.findByRole(
       "tab",
@@ -136,17 +159,17 @@ describe("Forever shell", () => {
       { timeout: 1_800 },
     );
 
-    fireEvent.click(background);
+    await click(background);
     expect(screen.getByDisplayValue("Def Leppard Hysteria")).toBeInTheDocument();
     expect(screen.getAllByText(/1987 - Hysteria \[FLAC\]/).length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Pin Def Leppard Hysteria" }));
+    await click(screen.getByRole("button", { name: "Pin Def Leppard Hysteria" }));
     expect(screen.getByRole("button", { name: "Unpin Def Leppard Hysteria" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close Def Leppard Hysteria" }));
+    await click(screen.getByRole("button", { name: "Close Def Leppard Hysteria" }));
     expect(screen.queryByDisplayValue("Def Leppard Hysteria")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Recently closed/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Def Leppard Hysteria/ }));
+    await click(screen.getByRole("button", { name: /Recently closed/ }));
+    await click(screen.getByRole("menuitem", { name: /Def Leppard Hysteria/ }));
     expect(screen.getByDisplayValue("Def Leppard Hysteria")).toBeInTheDocument();
     expect(screen.getByText("No signals found")).toBeInTheDocument();
 
@@ -159,8 +182,8 @@ describe("Forever shell", () => {
     expect(selected).toHaveAttribute("aria-selected", "false");
   });
 
-  it("keeps the transfer shelf collapsed by default and toggles it on demand", () => {
-    render(<App />);
+  it("keeps the transfer shelf collapsed by default and toggles it on demand", async () => {
+    await renderApp();
 
     const transferPanel = screen
       .getByRole("region", { name: "Transfer activity" })
@@ -174,7 +197,7 @@ describe("Forever shell", () => {
       screen.queryByRole("button", { name: "Pause Night Geometry" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(expand);
+    await click(expand);
 
     expect(transferPanel).toBeVisible();
     expect(screen.getByText("Release queue")).toBeInTheDocument();
@@ -186,16 +209,16 @@ describe("Forever shell", () => {
     });
     expect(collapse).toHaveAttribute("aria-expanded", "true");
 
-    fireEvent.click(collapse);
+    await click(collapse);
     expect(
       screen.getByRole("button", { name: "Expand transfer activity" }),
     ).toBeInTheDocument();
     expect(transferPanel).not.toBeVisible();
 
-    fireEvent.click(
+    await click(
       screen.getByRole("button", { name: "Expand transfer activity" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "View all transfers" }));
+    await click(screen.getByRole("button", { name: "View all transfers" }));
     expect(
       screen.getByRole("heading", { name: "Transfers" }),
     ).toBeInTheDocument();
@@ -205,32 +228,32 @@ describe("Forever shell", () => {
   });
 
   it("joins, reads, and writes in the public Rooms workspace", async () => {
-    render(<App />);
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Rooms" }));
+    await click(screen.getByRole("button", { name: "Rooms" }));
     expect(screen.getByRole("heading", { name: "Rooms" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Lossless Listening" })).toBeInTheDocument();
     expect(screen.getByText(/Japanese pressing/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
-    fireEvent.click(screen.getByRole("button", { name: /Post-Punk/ }));
+    await click(screen.getByRole("button", { name: "All" }));
+    await click(screen.getByRole("button", { name: /Post-Punk/ }));
     expect(screen.getByText(/previewing directory/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Join" }));
+    await click(screen.getByRole("button", { name: "Join" }));
 
     const composer = await screen.findByRole("textbox", { name: "Message Post-Punk" });
     fireEvent.change(composer, { target: { value: "The signal is clear." } });
     fireEvent.keyDown(composer, { key: "Enter" });
     expect(await screen.findByText("The signal is clear.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await click(screen.getByRole("button", { name: "Search" }));
     expect(
       screen.getByRole("heading", { name: "Across the network" }),
     ).toBeInTheDocument();
   });
 
   it("streams a search and shows an empty state when no responses match", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Search" }));
 
     const search = screen.getByRole("textbox", { name: "Search the network" });
     fireEvent.change(search, { target: { value: "unfindable transmission" } });
@@ -249,12 +272,12 @@ describe("Forever shell", () => {
     );
   });
 
-  it("filters preview results by real audio type counts", () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  it("filters preview results by real audio type counts", async () => {
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Search" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "All types" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Compressed audio 1" }));
+    await click(screen.getByRole("button", { name: "All types" }));
+    await click(screen.getByRole("menuitem", { name: "Compressed audio 1" }));
 
     expect(
       screen.getByText("1 result"),
@@ -263,10 +286,10 @@ describe("Forever shell", () => {
   });
 
   it("discovers an artist's albums and groups Soulseek files into downloadable sources", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Search" }));
 
-    fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
+    await click(screen.getByRole("tab", { name: "Albums" }));
     expect(
       screen.getByRole("heading", { name: "Find the record. Then find the files." }),
     ).toBeInTheDocument();
@@ -280,7 +303,7 @@ describe("Forever shell", () => {
       .getByRole("heading", { name: "Slang" })
       .closest("article") as HTMLElement;
     expect(await within(slang).findByText("Don’t own")).toBeInTheDocument();
-    fireEvent.click(
+    await click(
       within(hysteria).getByRole("button", { name: "Search Soulseek for Hysteria" }),
     );
 
@@ -314,9 +337,9 @@ describe("Forever shell", () => {
     expect(within(trackPreview).getByText("12")).toBeInTheDocument();
     fireEvent.mouseLeave(previewTracks);
 
-    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel Night Geometry" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel Spheric Dusk" }));
+    await click(screen.getByRole("button", { name: "Transfers" }));
+    await click(screen.getByRole("button", { name: "Cancel Night Geometry" }));
+    await click(screen.getByRole("button", { name: "Cancel Spheric Dusk" }));
     await waitFor(() => {
       expect(
         screen.queryByRole("button", { name: "Cancel Night Geometry" }),
@@ -325,10 +348,10 @@ describe("Forever shell", () => {
         screen.queryByRole("button", { name: "Cancel Spheric Dusk" }),
       ).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await click(screen.getByRole("button", { name: "Search" }));
 
     const readyDownloadButtons = await screen.findAllByRole("button", { name: "Download album" }, { timeout: 5_000 });
-    fireEvent.click(readyDownloadButtons[0]);
+    await click(readyDownloadButtons[0]);
     const downloading = await screen.findByRole(
       "button",
       { name: /Downloading · \d+%/ },
@@ -342,7 +365,7 @@ describe("Forever shell", () => {
       screen.queryByRole("heading", { name: "Transfers" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Download album" })[0]);
+    await click(screen.getAllByRole("button", { name: "Download album" })[0]);
     const queued = await screen.findByRole(
       "button",
       { name: "Queued #1" },
@@ -351,7 +374,7 @@ describe("Forever shell", () => {
     expect(queued).toHaveClass("is-queued");
     expect(queued).toBeEnabled();
     expect(await screen.findByText("Release queued")).toBeInTheDocument();
-    fireEvent.click(queued);
+    await click(queued);
     expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument();
     expect(document.querySelector(".release-transfer-card.is-focus-target")).toBeInTheDocument();
     expect(
@@ -360,9 +383,9 @@ describe("Forever shell", () => {
   }, 10_000);
 
   it("uses Music Library as a read-only Archive without adopting downloads", async () => {
-    render(<App />);
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await click(screen.getByRole("button", { name: "Archive" }));
 
     expect(
       screen.getByRole("heading", { name: "Your collection, without touching it." }),
@@ -380,9 +403,9 @@ describe("Forever shell", () => {
   });
 
   it("reconciles completed downloads at the Arrival Desk without writing to Music Library", async () => {
-    render(<App />);
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Arrival Desk" }));
+    await click(screen.getByRole("button", { name: "Open Arrival Desk" }));
 
     expect(screen.getByRole("tab", { name: "Arrivals 2" })).toHaveAttribute(
       "aria-selected",
@@ -395,7 +418,7 @@ describe("Forever shell", () => {
 
     const afterMidnight = screen.getByText("After Midnight").closest("article") as HTMLElement;
     expect(within(afterMidnight).getByText("Ready to file")).toBeInTheDocument();
-    fireEvent.click(within(afterMidnight).getByRole("button", { name: "Mark as filed" }));
+    await click(within(afterMidnight).getByRole("button", { name: "Mark as filed" }));
 
     await waitFor(() => {
       expect(within(afterMidnight).getByText("Filed away")).toBeInTheDocument();
@@ -411,17 +434,17 @@ describe("Forever shell", () => {
   });
 
   it("finds collection gaps and adds a batch to Wanted with one Smart Match profile", async () => {
-    render(<App />);
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Missing shelf" }));
+    await click(screen.getByRole("button", { name: "Archive" }));
+    await click(screen.getByRole("tab", { name: "Missing shelf" }));
 
     expect(screen.getByRole("heading", { name: "Def Leppard" })).toBeInTheDocument();
     expect(screen.getByText("3/10")).toBeInTheDocument();
     expect(screen.getByText(/Music Library cache/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Select Adrenalize" }));
-    fireEvent.click(screen.getByRole("button", { name: "Select Slang" }));
+    await click(screen.getByRole("button", { name: "Select Adrenalize" }));
+    await click(screen.getByRole("button", { name: "Select Slang" }));
     expect(screen.getByText("2 missing selected")).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("combobox", { name: "Bulk format preference" }), {
@@ -435,12 +458,12 @@ describe("Forever shell", () => {
     });
     fireEvent.change(trackMode, { target: { value: "musicbrainz" } });
     expect(screen.queryByRole("spinbutton", { name: "Bulk custom track count" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Add 2 to Wanted" }));
+    await click(screen.getByRole("button", { name: "Add 2 to Wanted" }));
     expect(await screen.findByText("2 added to Wanted")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Live" }));
+    await click(screen.getByRole("tab", { name: "Live" }));
     expect(screen.getByText("Viva! Hysteria")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Wanted 5" }));
+    await click(screen.getByRole("tab", { name: "Wanted 5" }));
     const adrenalize = screen.getByText("Adrenalize").closest("article") as HTMLElement;
     const slang = screen.getByText("Slang").closest("article") as HTMLElement;
     expect(within(adrenalize).getByText("Lossless only · 10+ tracks")).toBeInTheDocument();
@@ -448,9 +471,9 @@ describe("Forever shell", () => {
   });
 
   it("uses the persisted Settings fallback when a MusicBrainz count is unavailable", async () => {
-    const view = render(<App />);
+    const view = await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await click(screen.getByRole("button", { name: "Settings" }));
     const fallback = screen.getByRole("spinbutton", {
       name: "MusicBrainz fallback track count",
     });
@@ -459,19 +482,19 @@ describe("Forever shell", () => {
     expect(getSettingsState().settings.preferences.musicBrainzFallbackTrackCount).toBe(6);
 
     view.unmount();
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.getByRole("spinbutton", {
       name: "MusicBrainz fallback track count",
     })).toHaveValue(6);
 
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Missing shelf" }));
-    fireEvent.click(screen.getByRole("button", { name: "Select Songs From the Sparkle Lounge" }));
+    await click(screen.getByRole("button", { name: "Archive" }));
+    await click(screen.getByRole("tab", { name: "Missing shelf" }));
+    await click(screen.getByRole("button", { name: "Select Songs From the Sparkle Lounge" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Bulk track count mode" }), {
       target: { value: "musicbrainz" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add 1 to Wanted" }));
+    await click(screen.getByRole("button", { name: "Add 1 to Wanted" }));
 
     expect(await screen.findByText("1 added to Wanted")).toBeInTheDocument();
     expect(
@@ -480,19 +503,19 @@ describe("Forever shell", () => {
       ),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Wanted 4" }));
+    await click(screen.getByRole("tab", { name: "Wanted 4" }));
     const fallbackAlbum = screen.getByText("Songs From the Sparkle Lounge").closest("article") as HTMLElement;
     expect(within(fallbackAlbum).getByText("Prefer FLAC · 320+ kbps · 6+ tracks")).toBeInTheDocument();
   });
 
   it("scans one missing album, previews sources, downloads the best copy, and starts a watch", async () => {
-    render(<App />);
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Missing shelf" }));
+    await click(screen.getByRole("button", { name: "Archive" }));
+    await click(screen.getByRole("tab", { name: "Missing shelf" }));
 
     const adrenalize = screen.getByText("Adrenalize").closest("article") as HTMLElement;
-    fireEvent.click(within(adrenalize).getByRole("button", { name: /Not scanned/ }));
+    await click(within(adrenalize).getByRole("button", { name: /Not scanned/ }));
     expect(screen.getByText(/Shelf Radar · 0\/1/)).toBeInTheDocument();
 
     const lossless = await within(adrenalize).findByRole(
@@ -500,54 +523,54 @@ describe("Forever shell", () => {
       { name: /Lossless found/ },
       { timeout: 1_800 },
     );
-    fireEvent.click(lossless);
+    await click(lossless);
 
     expect(screen.getByText("2 sources on radar")).toBeInTheDocument();
     expect(screen.getByText("rockvault")).toBeInTheDocument();
     const trackDetails = screen.getAllByText("Tracks")[0].closest("details") as HTMLDetailsElement;
-    fireEvent.click(within(trackDetails).getByText("Tracks"));
+    await click(within(trackDetails).getByText("Tracks"));
     expect(within(trackDetails).getByText(/01 - Let’s Get Rocked\.flac/)).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download best" }, { timeout: 5_000 }));
+    await click(await screen.findByRole("button", { name: "Download best" }, { timeout: 5_000 }));
     const queuedBest = await screen.findByRole("button", { name: "Queued #2" });
     expect(queuedBest).toBeEnabled();
     expect(screen.getByRole("button", { name: /Queued.*Adrenalize from rockvault/ })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Download best" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Watch for better" }));
+    await click(screen.getByRole("button", { name: "Watch for better" }));
     await waitFor(() => expect(within(adrenalize).getAllByText("Wanted").length).toBeGreaterThan(0));
-    fireEvent.click(queuedBest);
+    await click(queuedBest);
     expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument();
     expect(document.querySelector(".release-transfer-card.is-focus-target")).toHaveTextContent("Def Leppard - Adrenalize (1992)");
   });
 
   it("watches missing albums and opens newly available sources without changing Archive", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Search" }));
 
-    fireEvent.click(screen.getByRole("tab", { name: "Albums" }));
+    await click(screen.getByRole("tab", { name: "Albums" }));
     const adrenalize = screen
       .getByRole("heading", { name: "Adrenalize" })
       .closest("article") as HTMLElement;
-    fireEvent.click(
+    await click(
       within(adrenalize).getByRole("button", { name: "Add Adrenalize to Wanted" }),
     );
     expect(
       within(adrenalize).getByRole("button", { name: "Remove Adrenalize from Wanted" }),
     ).toHaveAttribute("aria-pressed", "true");
 
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Wanted 4" }));
+    await click(screen.getByRole("button", { name: "Archive" }));
+    await click(screen.getByRole("tab", { name: "Wanted 4" }));
     expect(screen.getByText("High ’n’ Dry")).toBeInTheDocument();
     expect(screen.getByText("4 matching")).toBeInTheDocument();
 
     const highAndDry = screen.getByText("High ’n’ Dry").closest("article") as HTMLElement;
-    fireEvent.click(within(highAndDry).getByRole("button", { name: "Edit High ’n’ Dry Smart Match profile" }));
-    fireEvent.click(screen.getByRole("radio", { name: /Lossless only/ }));
+    await click(within(highAndDry).getByRole("button", { name: "Edit High ’n’ Dry Smart Match profile" }));
+    await click(screen.getByRole("radio", { name: /Lossless only/ }));
     fireEvent.change(screen.getByRole("spinbutton", { name: /Minimum track count/ }), {
       target: { value: "10" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save match profile" }));
+    await click(screen.getByRole("button", { name: "Save match profile" }));
     expect(await screen.findByText("Lossless only · 10+ tracks")).toBeInTheDocument();
 
     const rhythm = screen.getByRole("combobox", { name: "Preferred rhythm" });
@@ -555,21 +578,21 @@ describe("Forever shell", () => {
     await waitFor(() => expect(rhythm).toHaveValue("15"));
     expect(await screen.findByText(/Capacity: .*every 36 min at current list size/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: /Waiting/ }));
+    await click(screen.getByRole("tab", { name: /Waiting/ }));
     const sonicHoliday = screen.getByText("A Sonic Holiday").closest("article") as HTMLElement;
-    fireEvent.click(within(sonicHoliday).getByRole("button", { name: "Check A Sonic Holiday now" }));
+    await click(within(sonicHoliday).getByRole("button", { name: "Check A Sonic Holiday now" }));
     expect(within(sonicHoliday).getByText("Checking")).toBeInTheDocument();
 
     expect(
       await screen.findByText(/FLAC · 11 tracks · free slot for Engine Alley/, {}, { timeout: 1_500 }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Review match" }));
+    await click(screen.getByRole("button", { name: "Review match" }));
     expect(screen.getByRole("heading", { name: "Review the best transmission." })).toBeInTheDocument();
     expect(await screen.findByText("Folder verified")).toBeInTheDocument();
     expect(screen.getByText("Companion")).toBeInTheDocument();
     expect(await screen.findByText("Exact tracklist")).toBeInTheDocument();
     expect(screen.getByText(/11\/11 titles matched/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Compare alternatives" }));
+    await click(screen.getByRole("button", { name: "Compare alternatives" }));
     expect(
       screen.getByRole("heading", { name: "A Sonic Holiday — Engine Alley" }),
     ).toBeInTheDocument();
@@ -589,13 +612,13 @@ describe("Forever shell", () => {
     expect(within(unclearSource).getByText("1 / 11")).toBeInTheDocument();
     expect(within(unclearSource).getByText("Unclear match")).toBeInTheDocument();
     expect(within(unclearSource).queryByText("Smart Match")).not.toBeInTheDocument();
-    fireEvent.click(within(unclearSource).getByRole("button", { name: /Show tracklist confidence/ }));
+    await click(within(unclearSource).getByRole("button", { name: /Show tracklist confidence/ }));
     expect(within(unclearSource).getByText("Infamy")).toBeInTheDocument();
     expect(within(unclearSource).getByText(/Thresholds\.mp3/)).toBeInTheDocument();
-    fireEvent.click(within(unclearSource).getByRole("button", { name: "Download album" }));
+    await click(within(unclearSource).getByRole("button", { name: "Download album" }));
     expect(screen.getByText("Tracklist needs a closer look.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download anyway from signalnoise" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText("A Sonic Holiday - Sampler")).not.toBeInTheDocument();
     const sonicReport = screen
       .getByRole("heading", { name: "A Sonic Holiday — Engine Alley" })
@@ -603,31 +626,31 @@ describe("Forever shell", () => {
     expect(within(sonicReport).getByText("24")).toBeInTheDocument();
     expect(within(sonicReport).getAllByText("2")).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Individual files" }));
+    await click(screen.getByRole("tab", { name: "Individual files" }));
     expect(await screen.findByText("26 files")).toBeInTheDocument();
     expect(screen.getAllByText(/A Sonic Holiday/).length).toBeGreaterThan(1);
   });
 
   it("reviews and queues the best matching source while preserving companion files", async () => {
-    render(<App />);
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Wanted 3" }));
+    await click(screen.getByRole("button", { name: "Archive" }));
+    await click(screen.getByRole("tab", { name: "Wanted 3" }));
 
     const highAndDry = screen.getByText("High ’n’ Dry").closest("article") as HTMLElement;
-    fireEvent.click(within(highAndDry).getByRole("button", { name: "Download best" }));
+    await click(within(highAndDry).getByRole("button", { name: "Download best" }));
     expect(screen.getByRole("heading", { name: "Review the best transmission." })).toBeInTheDocument();
     expect(await screen.findByText("Folder verified")).toBeInTheDocument();
     expect(screen.getByText("Companion")).toBeInTheDocument();
     const queueComplete = await screen.findByRole("button", { name: "Queue complete album" });
     await waitFor(() => expect(queueComplete).toBeEnabled());
-    fireEvent.click(queueComplete);
+    await click(queueComplete);
 
     expect(await within(screen.getByRole("dialog")).findByRole("button", { name: "Queued" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Close Smart Match review" }));
+    await click(screen.getByRole("button", { name: "Close Smart Match review" }));
     expect(within(highAndDry).getByRole("button", { name: /Queued #\d+/ })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole("tab", { name: /Fulfilled/ }));
+    await click(screen.getByRole("tab", { name: /Fulfilled/ }));
     expect(screen.getByText("Hysteria")).toBeInTheDocument();
     expect(screen.getByText(/Fulfilled by Forever/)).toBeInTheDocument();
     expect(screen.getByText("Verified download")).toBeInTheDocument();
@@ -635,9 +658,9 @@ describe("Forever shell", () => {
   });
 
   it("opens Browse as a dedicated workspace before requesting a user's shares", async () => {
-    render(<App />);
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse" }));
+    await click(screen.getByRole("button", { name: "Browse" }));
     expect(
       screen.getByRole("heading", { name: "Browse a listener’s shelves." }),
     ).toBeInTheDocument();
@@ -650,7 +673,7 @@ describe("Forever shell", () => {
       screen.getByRole("textbox", { name: "Soulseek username to browse" }),
       { target: { value: "audiophile92" } },
     );
-    fireEvent.click(screen.getByRole("button", { name: "Browse shares" }));
+    await click(screen.getByRole("button", { name: "Browse shares" }));
 
     await waitFor(() =>
       expect(
@@ -660,23 +683,23 @@ describe("Forever shell", () => {
   });
 
   it("browses a folder, selects files, and queues a complete release", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Search" }));
 
-    fireEvent.click(
+    await click(
       screen.getByRole("button", { name: "Expand transfer activity" }),
     );
-    fireEvent.click(
+    await click(
       screen.getByRole("button", { name: "Pause Night Geometry" }),
     );
     expect(
       screen.getByRole("button", { name: "Resume Night Geometry" }),
     ).toBeInTheDocument();
 
-    fireEvent.click(
+    await click(
       screen.getByRole("button", { name: "Resume Night Geometry" }),
     );
-    fireEvent.click(
+    await click(
       screen.getByRole("button", { name: "Cancel Night Geometry" }),
     );
     await waitFor(() =>
@@ -684,20 +707,20 @@ describe("Forever shell", () => {
         screen.queryByRole("button", { name: "Cancel Night Geometry" }),
       ).not.toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Browse folder" }));
+    await click(screen.getByRole("button", { name: "Browse folder" }));
 
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Download 12 files" }),
       ).toBeInTheDocument(),
     );
-    fireEvent.click(
+    await click(
       screen.getByRole("button", { name: "Deselect 01 - Thresholds.flac" }),
     );
     expect(
       screen.getByRole("button", { name: "Download 11 files" }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Download 11 files" }));
+    await click(screen.getByRole("button", { name: "Download 11 files" }));
 
     await waitFor(() =>
       expect(
@@ -708,10 +731,10 @@ describe("Forever shell", () => {
   });
 
   it("explores a user's complete shares and downloads a selection", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Search" }));
 
-    fireEvent.click(
+    await click(
       screen.getAllByRole("button", {
         name: "Browse files shared by audiophile92",
       })[0],
@@ -722,28 +745,28 @@ describe("Forever shell", () => {
       ).toBeInTheDocument(),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Select folder" }));
+    await click(screen.getByRole("button", { name: "Select folder" }));
     expect(screen.getByText("14 files selected")).toBeInTheDocument();
-    fireEvent.click(
+    await click(
       screen.getByRole("button", { name: "Deselect 01 - Thresholds.flac" }),
     );
     expect(screen.getByText("13 files selected")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Download selection" }));
+    await click(screen.getByRole("button", { name: "Download selection" }));
 
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Downloading · \d+%|Queued #\d+/ })).toBeInTheDocument(),
     );
     expect(screen.getByRole("heading", { name: /audiophile92’s shares/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Downloading · \d+%|Queued #\d+/ }));
+    await click(screen.getByRole("button", { name: /Downloading · \d+%|Queued #\d+/ }));
     expect(screen.getByRole("heading", { name: "Transfers" })).toBeInTheDocument();
     expect(document.querySelector(".release-transfer-card.is-focus-target")).toHaveTextContent("audiophile92 selection");
   });
 
   it("searches folders and expands or collapses the share hierarchy", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Search" }));
 
-    fireEvent.click(
+    await click(
       screen.getAllByRole("button", {
         name: "Browse files shared by audiophile92",
       })[0],
@@ -754,11 +777,11 @@ describe("Forever shell", () => {
     expect(within(shares).getByRole("button", { name: "Collapse Music" })).toBeInTheDocument();
     expect(within(shares).getByRole("button", { name: "Collapse Liminal Structures" })).toBeInTheDocument();
 
-    fireEvent.click(within(shares).getByRole("button", { name: "Collapse Liminal Structures" }));
+    await click(within(shares).getByRole("button", { name: "Collapse Liminal Structures" }));
     expect(
       within(shares).queryByRole("button", { name: /^Night Geometry/ }),
     ).not.toBeInTheDocument();
-    fireEvent.click(within(shares).getByRole("button", { name: "Expand Liminal Structures" }));
+    await click(within(shares).getByRole("button", { name: "Expand Liminal Structures" }));
     expect(
       within(shares).getByRole("button", { name: /^Night Geometry/ }),
     ).toBeInTheDocument();
@@ -766,7 +789,7 @@ describe("Forever shell", () => {
     fireEvent.change(within(shares).getByRole("textbox", { name: "Search this user's shares" }), {
       target: { value: "Signal Bloom" },
     });
-    fireEvent.click(within(shares).getByRole("button", { name: "Search" }));
+    await click(within(shares).getByRole("button", { name: "Search" }));
     expect(
       within(shares).getByRole("button", {
         name: "Open folder Music\\Electronic\\Liminal Structures\\Signal Bloom",
@@ -775,10 +798,10 @@ describe("Forever shell", () => {
     expect(within(shares).getByText("1 folder · 3 files for “Signal Bloom”")).toBeInTheDocument();
   });
 
-  it("opens the release-grouped Transfers workspace and filters completed releases", () => {
-    render(<App />);
+  it("opens the release-grouped Transfers workspace and filters completed releases", async () => {
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
+    await click(screen.getByRole("button", { name: "Transfers" }));
     const workspace = screen
       .getByRole("heading", { name: "Transfers" })
       .closest("section") as HTMLElement;
@@ -787,46 +810,46 @@ describe("Forever shell", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText(/Album ETA 1m 24s/).length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Completed 2" }));
+    await click(screen.getByRole("tab", { name: "Completed 2" }));
     expect(within(workspace).getByText("Apex Horizon (Deluxe)")).toBeInTheDocument();
     expect(within(workspace).queryByText("Spheric Dusk")).not.toBeInTheDocument();
   });
 
   it("treats Archive-owned departed audio as filed away and switches exact alternative sources", async () => {
-    render(<App />);
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
+    await click(screen.getByRole("button", { name: "Transfers" }));
     expect(screen.getByLabelText("Finish Line release health")).toBeInTheDocument();
     const workspace = screen.getByRole("heading", { name: "Transfers" }).closest("section") as HTMLElement;
 
-    fireEvent.click(screen.getByRole("tab", { name: "Completed 2" }));
+    await click(screen.getByRole("tab", { name: "Completed 2" }));
     const apex = within(workspace).getByText("Apex Horizon (Deluxe)").closest("article") as HTMLElement;
     await waitFor(() => expect(within(apex).getByText("Filed away")).toBeInTheDocument());
     expect(within(apex).getByText(/1 file moved from downloads · Archive owns album/)).toBeInTheDocument();
     expect(within(apex).getByText("Filed away in Music Library")).toBeInTheDocument();
     expect(within(apex).queryByText("Needs attention")).not.toBeInTheDocument();
     expect(within(apex).getByRole("button", { name: "Download Apex Horizon (Deluxe) again" })).toBeInTheDocument();
-    fireEvent.click(within(apex).getByRole("button", { name: "Expand Apex Horizon (Deluxe)" }));
+    await click(within(apex).getByRole("button", { name: "Expand Apex Horizon (Deluxe)" }));
     expect(within(apex).getAllByRole("button", { name: "Download Apex Horizon (Deluxe) again" })).toHaveLength(2);
     expect(within(apex).queryByRole("button", { name: "Reveal 01 - First Light.mp3" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: /All/ }));
+    await click(screen.getByRole("tab", { name: /All/ }));
     expect(within(workspace).getByText("Apex Horizon (Deluxe)")).toBeInTheDocument();
 
     const spheric = within(workspace).getByText("Spheric Dusk").closest("article") as HTMLElement;
-    fireEvent.click(within(spheric).getByRole("button", { name: "Expand Spheric Dusk" }));
+    await click(within(spheric).getByRole("button", { name: "Expand Spheric Dusk" }));
     const alternatives = within(spheric).getByText("Alternative signals").closest("details") as HTMLElement;
-    fireEvent.click(within(alternatives).getByText("Alternative signals"));
+    await click(within(alternatives).getByText("Alternative signals"));
     expect(within(alternatives).getByText("2/2 exact")).toBeInTheDocument();
-    fireEvent.click(within(alternatives).getByRole("button", { name: /signalrelay/ }));
+    await click(within(alternatives).getByRole("button", { name: /signalrelay/ }));
     await waitFor(() => expect(within(spheric).getAllByText("signalrelay").length).toBeGreaterThan(0));
   });
 
-  it("shows outgoing uploads with live progress in Transfers", () => {
-    render(<App />);
+  it("shows outgoing uploads with live progress in Transfers", async () => {
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Uploads 1" }));
+    await click(screen.getByRole("button", { name: "Transfers" }));
+    await click(screen.getByRole("tab", { name: "Uploads 1" }));
 
     expect(screen.getByText("04 Endorphin.flac")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /lowlight.fm/ })).toBeInTheDocument();
@@ -834,10 +857,10 @@ describe("Forever shell", () => {
   });
 
   it("opens a source's shares from transfer history", async () => {
-    render(<App />);
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Transfers" }));
-    fireEvent.click(screen.getAllByRole("button", { name: /audiophile92/ })[0]);
+    await click(screen.getByRole("button", { name: "Transfers" }));
+    await click(screen.getAllByRole("button", { name: /audiophile92/ })[0]);
 
     await waitFor(() =>
       expect(
@@ -847,10 +870,10 @@ describe("Forever shell", () => {
     expect(screen.getByRole("heading", { name: "audiophile92" })).toBeInTheDocument();
   });
 
-  it("opens People with live presence, country flags, favorites, and profile details", () => {
-    render(<App />);
+  it("opens People with live presence, country flags, favorites, and profile details", async () => {
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "People" }));
+    await click(screen.getByRole("button", { name: "People" }));
 
     expect(
       screen.getByRole("heading", { name: "Your corner of the network" }),
@@ -861,14 +884,14 @@ describe("Forever shell", () => {
     expect(screen.getByText("field recordings")).toBeInTheDocument();
 
     const saved = screen.getByRole("button", { name: "Saved" });
-    fireEvent.click(saved);
+    await click(saved);
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 
   it("opens the Midnight Inbox from a person profile and sends a message", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "People" }));
-    fireEvent.click(screen.getByRole("button", { name: "Message" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "People" }));
+    await click(screen.getByRole("button", { name: "Message" }));
 
     const inbox = screen.getByRole("region", { name: "Midnight Inbox" });
     expect(within(inbox).getByRole("heading", { name: "Midnight Inbox" })).toBeInTheDocument();
@@ -876,13 +899,13 @@ describe("Forever shell", () => {
     const composer = within(inbox).getByRole("textbox", { name: "Message audiophile92" });
     expect(composer).toBeEnabled();
     fireEvent.change(composer, { target: { value: "That would be wonderful." } });
-    fireEvent.click(within(inbox).getByRole("button", { name: "Send" }));
+    await click(within(inbox).getByRole("button", { name: "Send" }));
     expect(await within(inbox).findByText("That would be wonderful.")).toBeInTheDocument();
   });
 
   it("searches message history and retries a failed transmission", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Messages" }));
 
     const inbox = screen.getByRole("region", { name: "Midnight Inbox" });
     fireEvent.change(
@@ -892,40 +915,40 @@ describe("Forever shell", () => {
     const vinylConversation = await within(inbox).findByRole("button", {
       name: /vinyljunkie/,
     });
-    fireEvent.click(vinylConversation);
+    await click(vinylConversation);
     expect(within(inbox).getByText("Failed")).toBeInTheDocument();
-    fireEvent.click(within(inbox).getByRole("button", { name: "Retry" }));
+    await click(within(inbox).getByRole("button", { name: "Retry" }));
     await waitFor(() =>
       expect(within(inbox).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument(),
     );
   });
 
   it("starts a new exact-username conversation and preserves its draft", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
-    fireEvent.click(screen.getByRole("button", { name: "New message" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Messages" }));
+    await click(screen.getByRole("button", { name: "New message" }));
     fireEvent.change(screen.getByLabelText("Exact Soulseek username"), {
       target: { value: "fieldrecorder" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open new conversation" }));
+    await click(screen.getByRole("button", { name: "Open new conversation" }));
 
     const composer = await screen.findByRole("textbox", { name: "Message fieldrecorder" });
     fireEvent.change(composer, { target: { value: "Holding this thought for later." } });
     expect(window.localStorage.getItem(MESSAGE_DRAFTS_STORAGE_KEY)).toContain(
       "Holding this thought for later.",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
-    fireEvent.click(screen.getByRole("button", { name: "Messages" }));
+    await click(screen.getByRole("button", { name: "Search" }));
+    await click(screen.getByRole("button", { name: "Messages" }));
     expect(screen.getByRole("textbox", { name: "Message fieldrecorder" })).toHaveValue(
       "Holding this thought for later.",
     );
   });
 
-  it("opens a user profile directly from a search result", () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  it("opens a user profile directly from a search result", async () => {
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Search" }));
 
-    fireEvent.click(
+    await click(
       screen.getAllByRole("button", { name: "View audiophile92's profile" })[0],
     );
 
@@ -936,25 +959,25 @@ describe("Forever shell", () => {
   });
 
   it("retains saved upload policy when returning to Settings", async () => {
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.change(screen.getByRole("spinbutton", { name: "Files per user" }), { target: { value: "50" } });
     fireEvent.change(screen.getByRole("spinbutton", { name: "MB per user" }), { target: { value: "2500" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Favorites first within each turn" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save upload policy" }));
+    await click(screen.getByRole("checkbox", { name: "Favorites first within each turn" }));
+    await click(screen.getByRole("button", { name: "Save upload policy" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Save upload policy" })).toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await click(screen.getByRole("button", { name: "Home" }));
+    await click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.getByRole("spinbutton", { name: "Files per user" })).toHaveValue(50);
     expect(screen.getByRole("spinbutton", { name: "MB per user" })).toHaveValue(2500);
     expect(screen.getByRole("checkbox", { name: "Favorites first within each turn" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Privileged users first within each turn" })).not.toBeChecked();
   });
 
-  it("opens the live connection settings from the sidebar", () => {
-    render(<App />);
+  it("opens the live connection settings from the sidebar", async () => {
+    await renderApp();
 
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await click(screen.getByRole("button", { name: "Settings" }));
 
     expect(
       screen.getByRole("heading", { name: "Connection" }),
@@ -972,22 +995,22 @@ describe("Forever shell", () => {
       name: /Private-message alerts/,
     });
     expect(notifications).toBeChecked();
-    fireEvent.click(notifications);
+    await click(notifications);
     expect(getSettingsState().settings.preferences.messageNotificationsEnabled).toBe(false);
     const roomNotifications = screen.getByRole("checkbox", {
       name: /Room alerts/,
     });
     expect(roomNotifications).toBeChecked();
-    fireEvent.click(roomNotifications);
+    await click(roomNotifications);
     expect(getSettingsState().settings.preferences.roomNotificationsEnabled).toBe(false);
   });
 
-  it("checks for updates every five minutes by default and saves a new cadence", () => {
+  it("checks for updates every five minutes by default and saves a new cadence", async () => {
     const intervalSpy = vi.spyOn(window, "setInterval");
-    const view = render(<App />);
+    const view = await renderApp();
 
     expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 300_000);
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await click(screen.getByRole("button", { name: "Settings" }));
 
     const interval = screen.getByRole("combobox", {
       name: /Automatic update checks/,
@@ -1014,12 +1037,12 @@ describe("Forever shell", () => {
       name: /Automatic Soundcheck/,
     });
     expect(soundcheck).toBeChecked();
-    fireEvent.click(soundcheck);
+    await click(soundcheck);
     expect(soundcheck).not.toBeChecked();
 
     view.unmount();
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await renderApp();
+    await click(screen.getByRole("button", { name: "Settings" }));
     expect(
       screen.getByRole("combobox", { name: /Automatic update checks/ }),
     ).toHaveValue("15");
@@ -1027,29 +1050,29 @@ describe("Forever shell", () => {
 
   it("shows the release changelog in the update prompt", async () => {
     window.history.replaceState({}, "", "/?update=available");
-    render(<App />);
+    await renderApp();
 
-    fireEvent.click(
+    await click(
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.69 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.70 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Download queues wake immediately on changes and at retry deadlines.",
+        "Workspaces load on demand while searches and transfers keep running.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Connection hubs share consistent disconnect and reconnect cleanup.",
+        "Shared state uses selectors to avoid unrelated workspace updates.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("region", { name: "Safe Passage update choices" }),
     ).toBeInTheDocument();
-    fireEvent.click(
+    await click(
       screen.getByRole("button", { name: /Finish active files first/ }),
     );
     expect(await screen.findByText("Update scheduled")).toBeInTheDocument();
@@ -1061,7 +1084,7 @@ describe("Forever shell", () => {
 
   it("guides a fresh profile through its first connection", async () => {
     window.history.replaceState({}, "", "/?onboarding=1");
-    render(<App />);
+    await renderApp();
 
     expect(
       screen.getByRole("heading", { name: "Tune into Soulseek" }),
@@ -1074,7 +1097,7 @@ describe("Forever shell", () => {
     fireEvent.change(screen.getByLabelText("Password"), {
       target: { value: "not-logged-or-persisted-by-the-preview" },
     });
-    fireEvent.click(
+    await click(
       screen.getByRole("button", { name: "Connect to Soulseek" }),
     );
 

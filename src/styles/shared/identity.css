@@ -1,0 +1,20 @@
+/* Keep v0.0.13 cross-workspace identity treatments above legacy workspace rules. */
+.source-profile {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.source-profile-actions {
+  display: grid;
+  gap: 5px;
+}
+
+.source-profile-actions .browse-user-shares {
+  margin: 0;
+}
+
+.transfer-user-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

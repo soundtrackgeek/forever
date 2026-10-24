@@ -1,0 +1,124 @@
+/* v0.0.25 — Wanted Signals. */
+.album-card-actions {
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.album-card-copy .album-card-actions button {
+  min-height: 27px;
+  margin-top: 0;
+}
+
+.wanted-toggle {
+  display: inline-flex;
+  width: max-content;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  color: #b5a3da;
+  font-family: inherit;
+  font-size: 8px;
+  font-weight: 650;
+  background: rgba(99, 71, 152, 0.1);
+  border: 1px solid rgba(140, 106, 200, 0.34);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.wanted-toggle:hover:not(:disabled) {
+  color: #d3c4ef;
+  border-color: rgba(160, 125, 221, 0.62);
+}
+
+.wanted-toggle.is-watched {
+  color: #f2ba59;
+  background: rgba(205, 144, 44, 0.09);
+  border-color: rgba(227, 162, 56, 0.38);
+}
+
+.wanted-toggle:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
+.wanted-toggle.is-compact {
+  min-height: 27px;
+  padding-inline: 7px;
+}
+
+.album-search-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.tracklist-signal {
+  display: inline-flex;
+  min-height: 25px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  color: #858b9e;
+  font-size: 8px;
+  background: rgba(21, 26, 40, 0.78);
+  border: 1px solid #30364a;
+  border-radius: 14px;
+}
+
+.tracklist-signal.is-ready { color: #7bc989; border-color: rgba(70, 145, 85, .42); }
+.tracklist-signal.is-loading { color: #b59ad5; }
+
+.live-search-card .album-search-statuses .archive-ownership {
+  margin-top: 0;
+}
+
+.archive-tabs {
+  display: flex;
+  max-width: 1220px;
+  gap: 3px;
+  margin: 18px auto 0;
+  border-bottom: 1px solid #282d40;
+}
+
+.archive-tabs button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  color: #777d91;
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 610;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.archive-tabs button:hover {
+  color: #c4c0ce;
+}
+
+.archive-tabs button.is-active {
+  color: #f1b755;
+  border-bottom-color: #e9a941;
+}
+
+.archive-tabs button small {
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  padding-inline: 5px;
+  place-items: center;
+  color: #b8a7d9;
+  font-size: 7px;
+  background: #211a31;
+  border-radius: 9px;
+}

@@ -31,6 +31,7 @@ export default defineConfig(async () => ({
     },
   },
   build: {
+    manifest: true,
     rollupOptions: {
       output: {
         manualChunks(id) {

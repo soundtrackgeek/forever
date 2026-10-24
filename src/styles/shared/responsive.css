@@ -1,0 +1,172 @@
+@media (max-width: 1260px) {
+  .app-shell {
+    grid-template-columns: 176px minmax(580px, 1fr) 318px;
+  }
+
+  .app-shell.is-single-view {
+    grid-template-columns: 176px 1fr;
+  }
+
+  .sidebar {
+    padding-inline: 10px;
+  }
+
+  .nav-item {
+    padding-inline: 14px;
+  }
+
+  .featured-release {
+    grid-template-columns: 190px minmax(230px, 1fr) 185px;
+    gap: 0 22px;
+  }
+
+  .featured-art {
+    max-height: 186px;
+  }
+
+  .view-release-button {
+    width: 178px;
+  }
+
+  .result-header {
+    grid-template-columns: minmax(250px, 1.4fr) 118px 100px 82px minmax(135px, 0.9fr) 118px;
+  }
+
+  .result-select {
+    grid-template-columns: minmax(250px, 1.4fr) 118px 100px 82px minmax(135px, 0.9fr);
+  }
+
+  .album-source-table {
+    --album-source-columns: minmax(105px, 0.6fr) minmax(185px, 1.35fr) 56px 88px 86px 210px;
+  }
+
+  .album-source-header span:nth-child(5),
+  .album-source-row > .album-source-size {
+    display: none;
+  }
+}
+
+@media (max-width: 1080px) {
+  :root {
+    --transfer-expanded-height: 139px;
+  }
+
+  .app-shell {
+    grid-template-columns: 76px minmax(0, 1fr) 300px;
+  }
+
+  .app-shell.is-single-view {
+    grid-template-columns: 76px 1fr;
+  }
+
+  .wordmark {
+    justify-content: center;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .wordmark::after {
+    color: var(--amber);
+    font-size: 18px;
+    letter-spacing: 0;
+    content: "F";
+  }
+
+  .nav-item {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .nav-item span,
+  .profile-copy,
+  .profile-caret {
+    display: none;
+  }
+
+  .profile-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 8px 0;
+  }
+
+  .sidebar-actions {
+    justify-content: center;
+    flex-wrap: wrap;
+    padding-inline: 0;
+  }
+
+  .network-toolbar {
+    grid-template-columns: minmax(330px, 1fr) 126px;
+  }
+
+  .network-status {
+    display: none;
+  }
+
+  .featured-release {
+    grid-template-columns: 164px minmax(210px, 1fr);
+  }
+
+  .featured-release > .availability-bars,
+  .view-release-button {
+    display: none;
+  }
+
+  .result-header {
+    grid-template-columns: minmax(240px, 1.4fr) 105px 95px 75px minmax(110px, 0.8fr) 112px;
+  }
+
+  .result-select {
+    grid-template-columns: minmax(240px, 1.4fr) 105px 95px 75px minmax(110px, 0.8fr);
+  }
+
+  .availability-cell {
+    grid-template-columns: 1fr;
+  }
+
+  .availability-cell > .availability-bars {
+    display: none;
+  }
+
+  .results-toolbar p > span {
+    display: none;
+  }
+
+  .album-source-table {
+    --album-source-columns: minmax(100px, 0.55fr) minmax(175px, 1.3fr) 52px 82px 82px 196px;
+  }
+
+  .album-source-actions > .album-source-download {
+    min-width: 122px;
+    padding-inline: 8px;
+  }
+
+  .album-source-folder {
+    padding-right: 10px;
+  }
+
+  .transfer-shelf-panel {
+    grid-template-columns: 205px minmax(0, 1fr);
+  }
+
+  .transfer-summary {
+    grid-template-columns: 70px minmax(0, 1fr);
+  }
+
+  .transfer-summary img {
+    width: 70px;
+    height: 70px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,36 @@
+/* Keep this order: shared and workspace selectors intentionally overlap.
+ * Load styles once so visiting a lazy workspace cannot change the cascade. */
+@import "./tokens.css";
+@import "./workspaces/home.css";
+@import "./workspaces/people.css";
+@import "./workspaces/messages.css";
+@import "./shell.css";
+@import "./workspaces/search.css";
+@import "./shared/inspector.css";
+@import "./shared/transfer-shelf.css";
+@import "./shared/updates.css";
+@import "./shared/responsive.css";
+@import "./workspaces/transfers.css";
+@import "./workspaces/settings.css";
+@import "./workspaces/sharing.css";
+@import "./shared/accessibility.css";
+@import "./workspaces/browse.css";
+@import "./workspaces/discovery.css";
+@import "./shared/identity.css";
+@import "./workspaces/archive.css";
+@import "./workspaces/wanted.css";
+@import "./workspaces/arrivals.css";
+@import "./workspaces/wanted-list.css";
+@import "./workspaces/missing.css";
+@import "./shared/smart-matches.css";
+@import "./workspaces/radar.css";
+@import "./shared/finish-line.css";
+@import "./shared/relay.css";
+@import "./shared/breadcrumbs.css";
+@import "./workspaces/rooms.css";
+@import "./shared/patch-bay.css";
+@import "./workspaces/reachability.css";
+@import "./shared/editions.css";
+@import "./workspaces/upload-policy.css";
+@import "./workspaces/settings-portability.css";
+@import "./workspace-status.css";

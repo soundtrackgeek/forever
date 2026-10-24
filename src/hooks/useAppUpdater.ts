@@ -36,15 +36,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.68",
-  version: "0.0.69",
-  body: `## What's new in Forever 0.0.69
+  currentVersion: "0.0.69",
+  version: "0.0.70",
+  body: `## What's new in Forever 0.0.70
 
 ### Changed
 
-- Download queues wake immediately on changes and at retry deadlines.
-- Connection hubs share consistent disconnect and reconnect cleanup.
-- Protocol parsers have dedicated fuzz targets and regression coverage.`,
+- Workspaces load on demand while searches and transfers keep running.
+- Shared state uses selectors to avoid unrelated workspace updates.
+- Workspace styles share the Midnight Radio palette, spacing, and radii.`,
   date: "2026-10-24",
 };
 

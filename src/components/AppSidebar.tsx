@@ -1,40 +1,18 @@
-import {
-  ArrowsClockwise,
-  Archive,
-  AddressBook,
-  ChatCircleDots,
-  CaretDown,
-  DownloadSimple,
-  GearSix,
-  FolderOpen,
-  House,
-  MagnifyingGlass,
-  UsersThree,
-} from "@phosphor-icons/react";
+import { ArrowsClockwise, CaretDown, GearSix } from "@phosphor-icons/react";
 import type { UpdateStatus } from "../hooks/useAppUpdater";
+import { primaryViews, type ViewId } from "../shell/views";
 import type { ConnectionState } from "../types";
 
 type AppSidebarProps = {
-  activeView: string;
+  activeView: ViewId;
   updateStatus: UpdateStatus;
   username: string | null;
   connectionState: ConnectionState;
   unreadMessages: number;
   unreadRooms: number;
-  onNavigate: (view: string) => void;
+  onNavigate: (view: ViewId) => void;
   onCheckForUpdates: () => void;
 };
-
-const navItems = [
-  { id: "home", label: "Home", icon: House },
-  { id: "search", label: "Search", icon: MagnifyingGlass },
-  { id: "browse", label: "Browse", icon: FolderOpen },
-  { id: "messages", label: "Messages", icon: ChatCircleDots },
-  { id: "people", label: "People", icon: AddressBook },
-  { id: "rooms", label: "Rooms", icon: UsersThree },
-  { id: "transfers", label: "Transfers", icon: DownloadSimple },
-  { id: "archive", label: "Archive", icon: Archive },
-];
 
 export function AppSidebar({
   activeView,
@@ -80,7 +58,7 @@ export function AppSidebar({
       </div>
 
       <nav className="primary-nav" aria-label="Primary">
-        {navItems.map((item) => {
+        {primaryViews.map((item) => {
           const Icon = item.icon;
           const isActive = activeView === item.id;
 

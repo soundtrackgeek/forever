@@ -1067,6 +1067,26 @@ installer is downloaded.
 
 ## Project structure
 
+The frontend shell uses a typed workspace registry and lazy routes. The sidebar,
+transfer shelf and live connection/search/transfer/Wanted listeners remain
+available as workspaces load. Search presets, message drafts and exact targets
+such as a transfer or Archive tab retain their existing navigation behavior.
+Settings is available with suggested defaults even before an account is saved.
+
+`src/shell/` contains the provider, selector store, background controller and
+route adapters. Subscribe to the fields a view needs with `useShell`; keep live
+listeners in the provider, above the lazy boundaries. Shared actions always use
+the latest committed state. Routing remains internal to the desktop app and
+does not add browser URLs or history.
+
+`src/styles/tokens.css` owns the Midnight Radio palette, spacing and radii;
+`workspaces/` and `shared/` contain the corresponding styles. The ordered
+`src/styles/index.css` entry loads them once, preserving the existing cascade
+between overlapping selectors. JavaScript workspaces are split on demand;
+CSS remains one initial stylesheet. `npm run build` also runs
+`npm run verify:bundles` to check that all ten workspace chunks stay outside
+the eager startup import graph.
+
 ```text
 src/                    React interface, connection UX, and updater experience
 src-tauri/              Rust/Tauri app, Soulseek connection service, and bundling

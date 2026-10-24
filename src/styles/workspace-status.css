@@ -1,0 +1,10 @@
+.workspace-status {
+  grid-column: 2 / -1;
+  min-width: 0;
+  padding: var(--space-6);
+  color: var(--text-soft);
+  background: var(--bg);
+}
+
+.workspace-status h1 { color: var(--text); font-size: 20px; }
+.workspace-status p { max-width: 520px; line-height: 1.6; }

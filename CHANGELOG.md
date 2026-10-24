@@ -5,6 +5,32 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.70] - 2026-10-24
+
+### Changed
+
+- A typed workspace registry replaces the shell's nested view switch. Home,
+  file/album search, Browse, Messages, People, Rooms, Transfers, Archive and
+  Settings load on demand with local loading and error boundaries.
+- Shared connection, transfer, Wanted and navigation state lives above the
+  routes in a selector-based provider. Workspace changes retain live listeners,
+  search presets, selected people, message drafts and cross-workspace targets;
+  unrelated subscribers do not render on transfer progress alone.
+- Split the large application stylesheet into workspace and shared files with
+  Midnight Radio color, spacing and radius tokens. Styles load once in their
+  existing cascade order, preserving the appearance across navigation.
+
+### Fixed
+
+- Settings opens the real connection form with suggested defaults when a fresh
+  profile explores offline; removed the obsolete placeholder views and copy.
+
+### Added
+
+- Build verification for all ten lazy workspace chunks and regression coverage
+  for selector isolation, current action closures, chunk failures, late route
+  resolution and existing navigation flows through asynchronous workspace loads.
+
 ## [0.0.69] - 2026-10-24
 
 ### Changed
