@@ -414,7 +414,8 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
 - Persistent local shared-folder configuration with native selection,
   enable/disable, removal, rescanning, virtual aliases, and indexed totals
 - Cached audio headers publish duration, estimated average bitrate, sample rate,
-  and bit depth in search, browse, and folder responses. Debounced folder watching
+  and bit depth in search, browse, and folder responses. Files already measured by
+  Music Library reuse its bitrate and duration instead of being re-probed. Debounced folder watching
   updates changed subtrees; Settings shows watcher health and cache reuse.
 - Bounded background indexing for complete release folders—including audio,
   artwork, lyrics, cue sheets, logs, booklets, checksums, playlists, archives,

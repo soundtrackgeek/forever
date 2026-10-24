@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -123,8 +123,59 @@ fn modified_key(metadata: &fs::Metadata) -> Option<String> {
         .map(|time| time.as_nanos().to_string())
 }
 
+// Music Library already measured these files; its database is only ever read.
+fn open_library(path: &Path) -> Option<Connection> {
+    let db = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    db.busy_timeout(std::time::Duration::from_secs(2)).ok()?;
+    db.prepare("SELECT file_path, filename, size_bytes, modified_ns, bitrate_kbps, duration_ms, missing FROM music_doctor_track_quality LIMIT 0")
+        .ok()?;
+    Some(db)
+}
+
+fn library_quality(
+    db: &Connection,
+    path: &Path,
+    metadata: &fs::Metadata,
+    mtime: &str,
+) -> Option<AudioQuality> {
+    let folder = path.parent()?.to_string_lossy();
+    let folder = folder.strip_prefix(r"\\?\").unwrap_or(&folder);
+    let filename = path.file_name()?.to_string_lossy();
+    let (size, modified, bitrate, duration_ms): (i64, i64, Option<u32>, Option<u64>) = db
+        .prepare_cached(
+            "SELECT size_bytes, modified_ns, bitrate_kbps, duration_ms FROM music_doctor_track_quality
+             WHERE file_path=?1 AND filename=?2 AND missing=0",
+        )
+        .ok()?
+        .query_row(params![folder, filename], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .optional()
+        .ok()??;
+    // Only trust a measurement of this exact version of the file.
+    if u64::try_from(size).ok()? != metadata.len() || modified.to_string() != mtime {
+        return None;
+    }
+    let bitrate = bitrate.filter(|v| *v > 0);
+    let duration_seconds = duration_ms
+        .filter(|v| *v > 0)
+        .and_then(|ms| u32::try_from((ms + 500) / 1000).ok())
+        .map(|v| v.max(1));
+    (bitrate.is_some() || duration_seconds.is_some()).then_some(AudioQuality {
+        bitrate,
+        duration_seconds,
+        sample_rate: None,
+        bit_depth: None,
+    })
+}
+
 pub(super) struct IndexCache {
     db: Option<Connection>,
+    library: Option<Connection>,
     pub error: Option<String>,
     pub reused: u32,
     pub inspected: u32,
@@ -147,12 +198,14 @@ impl IndexCache {
         match result {
             Ok(db) => Self {
                 db: Some(db),
+                library: None,
                 error: None,
                 reused: 0,
                 inspected: 0,
             },
             Err(error) => Self {
                 db: None,
+                library: None,
                 error: Some(format!(
                     "Share cache unavailable; headers will be read again: {error}"
                 )),
@@ -160,6 +213,11 @@ impl IndexCache {
                 inspected: 0,
             },
         }
+    }
+
+    pub fn with_library(mut self, path: &Path) -> Self {
+        self.library = open_library(path);
+        self
     }
 
     pub fn quality(&mut self, path: &Path, metadata: &fs::Metadata) -> AudioQuality {
@@ -184,6 +242,12 @@ impl IndexCache {
                 }
                 Err(error) => self.error = Some(format!("Share cache read failed: {error}")),
                 _ => {}
+            }
+        }
+        if let (Some(library), Some(mtime)) = (&self.library, &mtime) {
+            if let Some(quality) = library_quality(library, path, metadata, mtime) {
+                self.reused += 1;
+                return quality;
             }
         }
         self.inspected += 1;

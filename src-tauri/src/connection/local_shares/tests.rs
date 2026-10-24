@@ -320,3 +320,41 @@ fn partial_scan_never_follows_a_directory_junction() {
     fs::remove_dir(music.join("link")).unwrap();
     assert!(outside.join("Private.wav").exists());
 }
+
+#[test]
+fn music_library_measurements_skip_header_reads_only_for_unchanged_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let mp3 = temp.path().join("tone.mp3");
+    fs::write(
+        &mp3,
+        include_bytes!("../../../test-fixtures/shares/tone.mp3"),
+    )
+    .unwrap();
+    let metadata = fs::metadata(&mp3).unwrap();
+    let modified = metadata
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as i64;
+    let library = temp.path().join("music-library.sqlite3");
+    let db = rusqlite::Connection::open(&library).unwrap();
+    db.execute_batch("CREATE TABLE music_doctor_track_quality (file_path TEXT, filename TEXT, size_bytes INTEGER, modified_ns INTEGER, bitrate_kbps INTEGER, duration_ms INTEGER, missing INTEGER);").unwrap();
+    let insert = |size: u64| {
+        db.execute("DELETE FROM music_doctor_track_quality", []).unwrap();
+        db.execute(
+            "INSERT INTO music_doctor_track_quality VALUES (?1,'tone.mp3',?2,?3,320,262034,0)",
+            rusqlite::params![temp.path().to_string_lossy(), size as i64, modified],
+        )
+        .unwrap();
+    };
+    insert(metadata.len());
+    let mut cache = IndexCache::open(Path::new(":memory:")).with_library(&library);
+    let quality = cache.quality(&mp3, &metadata);
+    assert_eq!((quality.bitrate, quality.duration_seconds), (Some(320), Some(262)));
+    assert_eq!((cache.reused, cache.inspected), (1, 0));
+    insert(metadata.len() + 1);
+    let mut cache = IndexCache::open(Path::new(":memory:")).with_library(&library);
+    cache.quality(&mp3, &metadata);
+    assert_eq!((cache.reused, cache.inspected), (0, 1));
+}

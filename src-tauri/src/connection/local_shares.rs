@@ -547,7 +547,8 @@ impl LocalSharesHub {
             .unwrap_or_else(|p| p.into_inner())
             .roots
             .clone();
-        let mut cache = IndexCache::open(&self.path.path().with_file_name("share-index.sqlite3"));
+        let mut cache = IndexCache::open(&self.path.path().with_file_name("share-index.sqlite3"))
+            .with_library(&crate::archive::settings::database_path(&self.app));
         let previous = {
             let index = self.index.read().unwrap_or_else(|p| p.into_inner());
             ShareIndex {

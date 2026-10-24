@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.79] - 2026-10-24
+
+### Changed
+
+- Shared-folder scans now reuse bitrate and duration already measured by Music
+  Library (read-only), skipping the audio header probe for files whose size and
+  modified time still match. New folders index much faster; unmatched or changed
+  files are still inspected, and sample rate/bit depth come from Forever's own cache.
+
 ## [0.0.78] - 2026-10-24
 
 ### Added
