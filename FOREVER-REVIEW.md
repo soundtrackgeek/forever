@@ -618,7 +618,7 @@ reads "Home discovery will arrive after the first search-and-download release."
   (Zustand or React context with selectors) to cut prop drilling and re-renders.
 - Remove dead placeholder copy and views.
 
-### 18. Smarter retries and opt-in automatic failover
+### 18. Smarter retries and opt-in automatic failover - DONE
 
 **Implemented in 0.0.71 (2026-10-24):** Download lanes offers a separate
 **Auto-switch to exact mirrors** delay (Off by default, 5–60 minutes). Recovery
