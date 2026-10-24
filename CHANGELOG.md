@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.80] - 2026-10-24
+
+### Fixed
+
+- Rust formatting in the Music Library share-measurement test, which failed the
+  0.0.79 release checks.
+
 ## [0.0.79] - 2026-10-24
 
 ### Changed

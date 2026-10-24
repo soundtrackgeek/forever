@@ -341,7 +341,8 @@ fn music_library_measurements_skip_header_reads_only_for_unchanged_files() {
     let db = rusqlite::Connection::open(&library).unwrap();
     db.execute_batch("CREATE TABLE music_doctor_track_quality (file_path TEXT, filename TEXT, size_bytes INTEGER, modified_ns INTEGER, bitrate_kbps INTEGER, duration_ms INTEGER, missing INTEGER);").unwrap();
     let insert = |size: u64| {
-        db.execute("DELETE FROM music_doctor_track_quality", []).unwrap();
+        db.execute("DELETE FROM music_doctor_track_quality", [])
+            .unwrap();
         db.execute(
             "INSERT INTO music_doctor_track_quality VALUES (?1,'tone.mp3',?2,?3,320,262034,0)",
             rusqlite::params![temp.path().to_string_lossy(), size as i64, modified],
@@ -351,7 +352,10 @@ fn music_library_measurements_skip_header_reads_only_for_unchanged_files() {
     insert(metadata.len());
     let mut cache = IndexCache::open(Path::new(":memory:")).with_library(&library);
     let quality = cache.quality(&mp3, &metadata);
-    assert_eq!((quality.bitrate, quality.duration_seconds), (Some(320), Some(262)));
+    assert_eq!(
+        (quality.bitrate, quality.duration_seconds),
+        (Some(320), Some(262))
+    );
     assert_eq!((cache.reused, cache.inspected), (1, 0));
     insert(metadata.len() + 1);
     let mut cache = IndexCache::open(Path::new(":memory:")).with_library(&library);
