@@ -14,6 +14,11 @@ export const mirror: ReleaseAlternativeSource = { username: "mirror", remoteFold
 export const memory: SourceReliability = { successes: 2, failures: 4, denials: 2, starts: 3, typicalStartDelayMs: 60_000, typicalSpeed: 100, updatedAtMs: 1 };
 
 describe("source recovery", () => {
+  it("uses advisory sonic history without inventing transfer failures", () => {
+    const reviewed = { ...memory, sonicObservations: [{ key: "one", concern: true }] };
+    expect(reliabilityScore(reviewed)).toBe(reliabilityScore(memory) - 25);
+    expect(reviewed.failures).toBe(memory.failures);
+  });
   it("requires opt-in, elapsed wait and excludes paused, downloading and exhausted releases", () => {
     expect(stalledForRecovery([waiting], 0, 600_001)).toBe(false);
     expect(stalledForRecovery([waiting], 10, 600_000)).toBe(false);

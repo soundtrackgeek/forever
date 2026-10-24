@@ -1382,8 +1382,10 @@ pub(super) async fn receive_file(
         .map_err(|error| format!("Forever could not secure the completed file: {error}"))?;
     drop(file);
 
-    transfers
-        .complete(plan)
+    let plan = plan.clone();
+    tokio::task::spawn_blocking(move || transfers.complete(&plan))
+        .await
+        .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
     Ok(())
 }

@@ -1,12 +1,18 @@
 use serde::{Deserialize, Serialize};
-use std::{fs::File, path::Path, sync::OnceLock};
+pub mod sonic;
+use sonic::{Analyzer, SonicEvidence};
+use std::{
+    fs::File,
+    path::Path,
+    sync::{Mutex, OnceLock},
+};
 use symphonia::{
     core::{
         codecs::{
             audio::{
                 well_known::{
                     CODEC_ID_AAC, CODEC_ID_ALAC, CODEC_ID_FLAC, CODEC_ID_MP3, CODEC_ID_OPUS,
-                    CODEC_ID_VORBIS,
+                    CODEC_ID_PCM_F64BE_PLANAR, CODEC_ID_PCM_S32LE, CODEC_ID_VORBIS,
                 },
                 AudioCodecId, AudioDecoderOptions,
             },
@@ -56,6 +62,35 @@ pub struct SoundcheckResult {
     pub track_number: Option<u32>,
     pub track_total: Option<u32>,
     pub issues: Vec<String>,
+    #[serde(default)]
+    pub sonic: Option<SonicEvidence>,
+    #[serde(default)]
+    pub source_stamp: Option<SourceStamp>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceStamp {
+    pub size_bytes: u64,
+    pub modified_at_ns: Option<String>,
+}
+
+pub fn source_stamp(path: &Path) -> Option<SourceStamp> {
+    std::fs::metadata(path).ok().map(|m| SourceStamp {
+        size_bytes: m.len(),
+        modified_at_ns: m
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos().to_string()),
+    })
+}
+
+impl SoundcheckResult {
+    pub fn repairable(&self) -> bool {
+        self.status == SoundcheckStatus::Failed
+            || self.sonic.as_ref().is_some_and(SonicEvidence::needs_review)
+    }
 }
 
 pub fn is_audio_path(path: &Path) -> bool {
@@ -100,6 +135,8 @@ fn inspect_probed_file(
     deep: bool,
     checked_at_ms: u64,
 ) -> Result<SoundcheckResult, String> {
+    static DEEP_SCAN: Mutex<()> = Mutex::new(());
+    let _deep_guard = deep.then(|| DEEP_SCAN.lock().unwrap_or_else(|p| p.into_inner()));
     let source = File::open(path)
         .map_err(|error| format!("Forever could not open this audio file: {error}"))?;
     let stream = MediaSourceStream::new(Box::new(source), Default::default());
@@ -183,6 +220,7 @@ fn inspect_probed_file(
         ));
     }
 
+    let mut sonic = None;
     if deep {
         if registration.is_none() {
             return Ok(SoundcheckResult {
@@ -199,6 +237,8 @@ fn inspect_probed_file(
                 track_number,
                 track_total,
                 issues,
+                sonic: None,
+                source_stamp: source_stamp(path),
             });
         }
         let mut decoder = codecs()
@@ -207,6 +247,9 @@ fn inspect_probed_file(
                 format!("The {codec} stream could not be opened for decoding: {error}")
             })?;
         let mut packets = 0_u64;
+        let lossless = is_lossless_codec(params.codec);
+        let mut analyzer = None;
+        let mut analysis_unavailable = false;
         loop {
             let packet = match format.next_packet() {
                 Ok(Some(packet)) => packet,
@@ -219,9 +262,26 @@ fn inspect_probed_file(
             if packet.track_id != track.id {
                 continue;
             }
-            decoder
+            let decoded = decoder
                 .decode(&packet)
                 .map_err(|error| format!("A damaged audio frame was found: {error}"))?;
+            if !analysis_unavailable && analyzer.is_none() {
+                match Analyzer::new(
+                    decoded.spec().rate(),
+                    decoded.num_planes(),
+                    params.bits_per_sample.or(params.bits_per_coded_sample),
+                    lossless,
+                ) {
+                    Ok(value) => analyzer = Some(value),
+                    Err(message) => {
+                        issues.push(message);
+                        analysis_unavailable = true;
+                    }
+                }
+            }
+            if let Some(analyzer) = &mut analyzer {
+                analyzer.push(&decoded)?;
+            }
             packets = packets.saturating_add(1);
         }
         if packets == 0 {
@@ -229,6 +289,10 @@ fn inspect_probed_file(
         }
         if decoder.finalize().verify_ok == Some(false) {
             return Err("The decoder's embedded integrity check did not match.".to_owned());
+        }
+        sonic = analyzer.map(Analyzer::finish);
+        if let Some(evidence) = &sonic {
+            issues.extend(evidence.issues());
         }
     }
 
@@ -256,6 +320,8 @@ fn inspect_probed_file(
         track_number,
         track_total,
         issues,
+        sonic,
+        source_stamp: source_stamp(path),
     })
 }
 
@@ -266,6 +332,11 @@ fn codecs() -> &'static CodecRegistry {
         default::register_enabled_codecs(&mut codecs);
         codecs
     })
+}
+
+fn is_lossless_codec(codec: AudioCodecId) -> bool {
+    matches!(codec, CODEC_ID_FLAC | CODEC_ID_ALAC)
+        || (CODEC_ID_PCM_S32LE..=CODEC_ID_PCM_F64BE_PLANAR).contains(&codec)
 }
 
 fn codec_fallback_name(codec: AudioCodecId, extension: &str) -> &'static str {
@@ -325,6 +396,21 @@ mod tests {
     use std::{fs, io::Write};
     use tempfile::tempdir;
 
+    #[test]
+    fn soundcheck_does_not_mistake_companded_or_adpcm_wav_for_lossless() {
+        use symphonia::core::codecs::audio::well_known::*;
+        assert!(is_lossless_codec(CODEC_ID_PCM_S24LE));
+        assert!(is_lossless_codec(CODEC_ID_ALAC));
+        for codec in [
+            CODEC_ID_MP3,
+            CODEC_ID_ADPCM_MS,
+            CODEC_ID_PCM_ALAW,
+            CODEC_ID_PCM_MULAW,
+        ] {
+            assert!(!is_lossless_codec(codec));
+        }
+    }
+
     fn write_wav(path: &Path) {
         let sample_count = 8_000_u32;
         let data_size = sample_count * 2;
@@ -359,6 +445,84 @@ mod tests {
         let deep = inspect_file(&path, true, 43).unwrap();
         assert_eq!(deep.status, SoundcheckStatus::Passed);
         assert!(deep.deep);
+        assert!(quick.sonic.is_none());
+        assert_eq!(
+            deep.sonic.unwrap().verdict,
+            sonic::SonicVerdict::Inconclusive
+        );
+    }
+
+    #[test]
+    fn sonic_decodes_integer_padding_and_clipping_without_changing_file() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("01 - padded.wav");
+        let rate = 48_000_u32;
+        let samples = rate * 4;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + samples * 3).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&rate.to_le_bytes());
+        bytes.extend_from_slice(&(rate * 3).to_le_bytes());
+        bytes.extend_from_slice(&3_u16.to_le_bytes());
+        bytes.extend_from_slice(&24_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&(samples * 3).to_le_bytes());
+        for n in 0..samples {
+            let sample = if n < 4 {
+                -8388608_i32
+            } else {
+                ((n % 32000) as i32 - 16000) * 256
+            };
+            bytes.extend_from_slice(&sample.to_le_bytes()[..3]);
+        }
+        fs::write(&path, &bytes).unwrap();
+        let result = inspect_file(&path, true, 42).unwrap();
+        assert_eq!(result.status, SoundcheckStatus::Review);
+        let evidence = result.sonic.unwrap();
+        assert!(evidence.padded_bit_depth);
+        assert_eq!(evidence.clipping_runs, 1);
+        assert_eq!(evidence.clipped_samples, 4);
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn sonic_encoded_flac_fixtures() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-fixtures/soundcheck");
+        for (name, expected) in [
+            ("01-broadband.flac", sonic::SonicVerdict::LikelyGenuine),
+            (
+                "02-transcoded-128.flac",
+                sonic::SonicVerdict::SuspectTranscode,
+            ),
+            (
+                "03-transcoded-320.flac",
+                sonic::SonicVerdict::SuspectTranscode,
+            ),
+            ("04-upsampled.flac", sonic::SonicVerdict::LikelyUpsampled),
+        ] {
+            let path = root.join(name);
+            let before = fs::read(&path).unwrap();
+            let result = inspect_file(&path, true, 42).unwrap();
+            let evidence = result.sonic.as_ref().expect("decoded signal evidence");
+            assert_eq!(
+                evidence.verdict, expected,
+                "{name}: cutoff {:?}, status {:?}, issues {:?}",
+                evidence.cutoff_hz, result.status, result.issues
+            );
+            assert_eq!(fs::read(&path).unwrap(), before);
+            if let Ok(output) = std::env::var("FOREVER_SONIC_EVIDENCE_DIR") {
+                fs::create_dir_all(&output).unwrap();
+                fs::write(
+                    Path::new(&output).join(format!("{name}.json")),
+                    serde_json::to_vec_pretty(&result).unwrap(),
+                )
+                .unwrap();
+            }
+        }
     }
 
     #[test]

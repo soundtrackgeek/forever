@@ -26,6 +26,14 @@ const countResult = (results: SoundcheckResult[], status: SoundcheckResult["stat
 
 const uniqueIssues = (issues: string[]) => [...new Set(issues)];
 
+export const sonicNeedsReview = (result?: SoundcheckResult | null) => Boolean(result?.sonic && (
+  ["suspectTranscode", "likelyUpsampled"].includes(result.sonic.verdict)
+  || result.sonic.paddedBitDepth || result.sonic.clippingRuns > 0
+));
+
+export const soundcheckRepairable = (result?: SoundcheckResult | null) =>
+  result?.status === "failed" || sonicNeedsReview(result);
+
 export function summarizeSoundcheck(transfers: Transfer[]): ReleaseSoundcheck {
   const audio = transfers.filter(isAudioTransfer);
   const results = audio.flatMap((transfer) => transfer.soundcheck ? [transfer.soundcheck] : []);

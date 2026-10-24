@@ -1,3 +1,5 @@
+import { SonicEvidencePanel } from "./SonicEvidencePanel";
+import { sonicNeedsReview } from "../utils/soundcheck";
 import {
   Archive,
   ArrowSquareOut,
@@ -50,7 +52,7 @@ const stateCopy: Record<ArrivalState, { label: string; detail: string }> = {
   ready: { label: "Ready to file", detail: "Verified in Forever’s download folder" },
   filed: { label: "Filed away", detail: "Recognized by your library or confirmed manually" },
   moved: { label: "Moved outside Forever", detail: "Audio left the download folder" },
-  attention: { label: "Needs attention", detail: "A partial move or verification issue needs review" },
+  attention: { label: "Needs attention", detail: "File verification or sonic evidence needs review" },
 };
 
 const parseRelease = (title: string) => {
@@ -220,6 +222,11 @@ export function ArrivalDesk({
                 {arrival.state === "ready" && releaseId ? (
                   <button type="button" className="is-primary" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-file`, () => onSetReleaseFiled(releaseId, true))}><Archive size={15} /> {actionBusy ? "Filing…" : "Mark as filed"}</button>
                 ) : null}
+                {arrival.state === "attention" && releaseId && arrival.group.status === "completed"
+                  && arrival.verifiedCount === arrival.group.transfers.length && arrival.soundcheck.state !== "failed"
+                  && arrival.group.transfers.some((transfer) => sonicNeedsReview(transfer.soundcheck)) ? (
+                    <button type="button" disabled={Boolean(busy)} title="Confirm you have filed this release; keep its advisory sonic evidence." onClick={() => void perform(`${arrival.group.id}-file`, () => onSetReleaseFiled(releaseId, true))}><Archive size={15} /> Mark filed with review notes</button>
+                  ) : null}
                 {arrival.state === "moved" && releaseId ? (
                   <button type="button" className="is-primary" disabled={Boolean(busy)} onClick={() => void perform(`${arrival.group.id}-confirm`, () => onSetReleaseFiled(releaseId, true))}><CheckCircle size={15} /> {actionBusy ? "Confirming…" : "Confirm filed"}</button>
                 ) : null}
@@ -249,6 +256,7 @@ export function ArrivalDesk({
                         <div key={transfer.id} className={`is-${result?.status ?? "pending"}`}>
                           <span><strong>{transfer.title}</strong><small>{result ? `${result.codec ?? result.container ?? "Audio"} · ${formatDuration(result.durationSeconds)}${result.bitrateKbps ? ` · ${result.bitrateKbps} kbps` : ""}${result.sampleRate ? ` · ${(result.sampleRate / 1000).toFixed(1)} kHz` : ""}` : "Not scanned yet"}</small></span>
                           <span>{result?.issues.length ? result.issues.join(" · ") : result ? result.status === "passed" ? "Passed" : "Review" : "Pending"}</span>
+                          <SonicEvidencePanel evidence={result?.sonic} title={transfer.title} />
                         </div>
                       );
                     })}

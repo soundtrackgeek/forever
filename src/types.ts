@@ -432,6 +432,24 @@ export type SoundcheckResult = {
   trackNumber: number | null;
   trackTotal: number | null;
   issues: string[];
+  sonic?: SonicEvidence | null;
+};
+
+export type SonicEvidence = {
+  version: number;
+  verdict: "likelyGenuine" | "suspectTranscode" | "likelyUpsampled" | "inconclusive" | "lossySource";
+  analyzedSeconds: number;
+  sampleRate: number;
+  windows: number;
+  activeWindows: number;
+  cutoffHz: number | null;
+  cutoffConsistency: number;
+  energyAboveCutoffDb: number | null;
+  paddedBitDepth: boolean;
+  clippedSamples: number;
+  clippingRuns: number;
+  spectrogram: string;
+  columnSeconds: number;
 };
 
 export type ReleaseAlternativeFile = {
@@ -589,6 +607,7 @@ export type ArchiveCachedCatalog = {
 export type SourceReliability = {
   successes: number; failures: number; denials: number; starts: number;
   typicalStartDelayMs: number; typicalSpeed: number; updatedAtMs: number;
+  sonicObservations?: { key: string; concern: boolean }[];
 };
 export type TransferQueueSnapshot = {
   sourceReliability?: Record<string, SourceReliability>;

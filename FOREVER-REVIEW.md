@@ -693,7 +693,20 @@ notes). There is a single release channel.
   for eligibility notes; SignPath requires an OSI license, and the repository
   currently has **no LICENSE file**.
 
-### 20. Soundcheck: from structural to sonic verification
+### 20. Soundcheck: from structural to sonic verification - DONE
+
+**Implemented in 0.0.73 (2026-10-24):** Deep Scan reuses decoded samples for
+bounded FFT analysis, cutoff/consistency and upper-band energy, integer padding,
+clipping, and a compact spectrogram in Arrival Desk. Verdicts distinguish likely
+genuine, suspect transcode, likely upsampled, inconclusive, and declared lossy
+streams. Sonic concerns feed explicit Patch Bay repairs and bounded per-source
+advisory history without becoming transfer failures. Rescans are deduplicated;
+suspect replacements stay in attention. Decode runs outside queue locks and the
+network executor, with stale-result guards and legacy-result compatibility.
+Synthetic and encoded fixtures exercise the signal path. Spectral shelves do
+not prove lossy origin or a specific MP3 bitrate; a representative real-music
+accuracy benchmark remains outside this implementation. See
+[methodology and verification](docs/soundcheck-sonic.md). Original proposal follows.
 
 **Today:** Quick Soundcheck reads container and codec facts. Deep Scan decodes
 with symphonia's `verify(true)`, which checks embedded FLAC MD5s. Neither

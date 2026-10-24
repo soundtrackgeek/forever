@@ -36,15 +36,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.71",
-  version: "0.0.72",
-  body: `## What's new in Forever 0.0.72
+  currentVersion: "0.0.72",
+  version: "0.0.73",
+  body: `## What's new in Forever 0.0.73
 
 ### Changed
 
-- Check for updates at launch and every six hours by default.
-- Choose Stable or Beta updates in Settings.
-- Windows release signing can be enabled through Azure Artifact Signing.`,
+- Inspect sonic evidence and spectrograms with Deep Soundcheck.
+- Review suspect transcodes and replace individual tracks in Patch Bay.
+- Keep advisory sonic observations in local source history.`,
   date: "2026-10-24",
 };
 

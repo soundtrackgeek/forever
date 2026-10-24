@@ -1,5 +1,5 @@
 import type { TransferGroup } from "./transfers";
-import { isAudioTransfer, summarizeSoundcheck, type ReleaseSoundcheck } from "./soundcheck";
+import { isAudioTransfer, sonicNeedsReview, summarizeSoundcheck, type ReleaseSoundcheck } from "./soundcheck";
 
 export type ArrivalState = "ready" | "filed" | "moved" | "attention";
 
@@ -48,12 +48,13 @@ export function arrivalForGroup(
     (transfer) => transfer.verificationStatus === "missing",
   );
   const soundcheck = summarizeSoundcheck(group.transfers);
+  const sonicConcerns = audio.filter((transfer) => sonicNeedsReview(transfer.soundcheck)).length;
 
   let state: ArrivalState = "ready";
   if (repairing) state = "attention";
   else if (archiveOwned || manuallyFiled) state = "filed";
   else if (allAudioMissing && mismatchCount === 0 && failedCount === 0) state = "moved";
-  else if (missingCount || mismatchCount || failedCount || soundcheck.state === "failed") state = "attention";
+  else if (missingCount || mismatchCount || failedCount || soundcheck.state === "failed" || sonicConcerns) state = "attention";
 
   return {
     group,
@@ -64,7 +65,7 @@ export function arrivalForGroup(
     audioCount: audio.length,
     verifiedCount,
     missingCount,
-    issueCount: missingCount + mismatchCount + failedCount,
+    issueCount: missingCount + mismatchCount + failedCount + sonicConcerns,
     repairing,
     soundcheck,
   };

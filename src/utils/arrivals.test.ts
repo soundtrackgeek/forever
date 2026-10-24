@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Transfer } from "../types";
 import { arrivalForGroup } from "./arrivals";
 import { groupTransfers } from "./transfers";
+import { sonicFixture } from "../test/sonicFixture";
 
 const transfer = (
   id: string,
@@ -36,6 +37,14 @@ const arrival = (transfers: Transfer[], archiveOwned = false) =>
   arrivalForGroup(groupTransfers(transfers)[0], archiveOwned);
 
 describe("Arrival Desk lifecycle", () => {
+  it("routes sonic concerns to attention while respecting an explicit filing confirmation", () => {
+    const scanned = transfer("1", "verified");
+    scanned.soundcheck = { status: "review", checkedAtMs: 3, deep: true, codec: "FLAC", container: "FLAC", durationSeconds: 4,
+      bitrateKbps: 700, sampleRate: 48000, bitsPerSample: 16, channels: 1, trackNumber: 1, trackTotal: null, issues: [], sonic: sonicFixture };
+    expect(arrival([scanned])?.state).toBe("attention");
+    scanned.filedAtMs = 42;
+    expect(arrival([scanned])?.state).toBe("filed");
+  });
   it("keeps verified downloads ready to file", () => {
     expect(arrival([transfer("1", "verified"), transfer("2", "verified")])?.state)
       .toBe("ready");

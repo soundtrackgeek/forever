@@ -4,6 +4,7 @@ import type { SearchSessionRecord } from "../hooks/useSoulseekSearch";
 import type { SearchResult, Transfer } from "../types";
 import { groupTransfers } from "../utils/transfers";
 import { ArrivalDesk } from "./ArrivalDesk";
+import { sonicFixture } from "../test/sonicFixture";
 
 const brokenTransfer: Transfer = {
   id: "broken-track",
@@ -90,6 +91,27 @@ const relayRecord: SearchSessionRecord = {
 const resolved = vi.fn(async () => undefined);
 
 describe("Arrival Desk Patch Bay", () => {
+  it("shows sonic concerns and offers repair without treating a readable transcode as corrupt", async () => {
+    const sonicTransfer: Transfer = { ...brokenTransfer, soundcheck: {
+      ...brokenTransfer.soundcheck!, trackNumber: 1, status: "review", issues: ["Suspect transcode: 16 kHz shelf."], sonic: { ...sonicFixture, spectrogram: "" },
+    } };
+    const onSoundcheckRelease = vi.fn(async () => undefined);
+    render(<ArrivalDesk groups={groupTransfers([sonicTransfer])} archiveOwnedReleaseIds={new Set()}
+      refreshing={false} onRefreshArchive={resolved} onRevealRelease={resolved} onVerifyRelease={resolved}
+      onSoundcheckRelease={onSoundcheckRelease} onFindAlternatives={resolved} onPatchReleaseFile={resolved}
+      relayRecords={{}} online onLoadOfficialTracklist={async () => []} soundcheckEnabled
+      onSetReleaseFiled={resolved} onClearReleaseHistory={resolved} onOpenTransfer={vi.fn()} />);
+    const summary = screen.getByText("Suspect transcode · Sonic evidence");
+    fireEvent.click(summary);
+    fireEvent(summary.parentElement!, new Event("toggle"));
+    await waitFor(() => expect(screen.getByText(/16.0 kHz shelf in 100%/)).toBeInTheDocument());
+    expect(screen.getByText(/Advisory evidence, not proof/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Deep scan" }));
+    await waitFor(() => expect(onSoundcheckRelease).toHaveBeenCalledWith("release-patch-bay", true));
+    expect(screen.getByRole("button", { name: "Repair release" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Needs attention/ })).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "Mark filed with review notes" })).toBeInTheDocument();
+  });
   it("opens a ranked per-track repair and queues only the selected candidate", async () => {
     const onPatchReleaseFile = vi.fn(async () => undefined);
     render(<ArrivalDesk

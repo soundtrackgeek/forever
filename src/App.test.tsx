@@ -1071,17 +1071,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.72 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.73 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Check for updates at launch and every six hours by default.",
+        "Inspect sonic evidence and spectrograms with Deep Soundcheck.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Choose Stable or Beta updates in Settings.",
+        "Review suspect transcodes and replace individual tracks in Patch Bay.",
       ),
     ).toBeInTheDocument();
     expect(

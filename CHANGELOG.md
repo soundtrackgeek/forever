@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.0.73] - 2026-10-24
+
+### Added
+
+- Local sonic analysis in Deep Soundcheck: spectral shelves and consistency,
+  advisory transcode/upsampling verdicts, inconclusive and lossy-source states,
+  padded integer bit depth, clipping runs, and expandable Arrival Desk spectrograms.
+- Patch Bay repairs for sonic concerns, with explicit review and preserved
+  originals; suspect replacements remain in needs-attention after rescanning.
+- Bounded, deduplicated sonic observations in local source history, separate
+  from transport success/failure and used as a modest mirror-ranking penalty.
+
+### Changed
+
+- Deep scans and repair completion decode outside the transfer queue lock and
+  network executor. Stale scan results cannot overwrite a switched source or
+  newer scan. Spectrograms use compact, bounded storage; legacy results load
+  without invented sonic evidence.
+- Quick rescans retain earlier sonic evidence only for the same file stamp.
+
+### Verification
+
+- Synthetic signal regressions plus deterministic encoded FLAC fixtures cover
+  broadband, MP3 transcodes, upsampling, silence/tones, mixed bandwidth, padding,
+  clipping, unchanged source bytes, persistence, stale results, and repair UI.
+  These checks do not establish accuracy on a representative music corpus or
+  prove an audio file's mastering history.
+
 ## [0.0.72] - 2026-10-24
 
 ### Added

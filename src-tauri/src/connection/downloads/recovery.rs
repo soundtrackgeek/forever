@@ -10,6 +10,44 @@ pub struct SourceReliability {
     pub typical_start_delay_ms: u64,
     pub typical_speed: u64,
     pub updated_at_ms: u64,
+    #[serde(default)]
+    pub sonic_observations: Vec<SonicObservation>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SonicObservation {
+    pub key: String,
+    pub concern: bool,
+}
+
+pub(super) fn observe_sonic(
+    memory: &mut HashMap<String, SourceReliability>,
+    transfer: &TransferSnapshot,
+) {
+    let Some(evidence) = transfer.soundcheck.as_ref().and_then(|r| r.sonic.as_ref()) else {
+        return;
+    };
+    // Same remote file/size counts once across rescans and repeated downloads.
+    // Keep only a bounded local history, separate from transfer success/failure.
+    let key = format!(
+        "{:x}",
+        md5::compute(format!(
+            "{}\0{}",
+            transfer.remote_filename, transfer.size_bytes
+        ))
+    );
+    observe(memory, &transfer.username, |r| {
+        r.sonic_observations.retain(|item| item.key != key);
+        r.sonic_observations.push(SonicObservation {
+            key,
+            concern: evidence.needs_review(),
+        });
+        if r.sonic_observations.len() > 128 {
+            r.sonic_observations
+                .drain(..r.sonic_observations.len() - 128);
+        }
+    });
 }
 
 pub(super) fn observe(

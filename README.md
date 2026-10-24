@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.72` adds Stable/Beta update channels, six-hour
-> default update checks, and an Azure Authenticode signing integration.
+> **Status:** pre-alpha. Version `0.0.73` adds sonic evidence to Deep Soundcheck,
+> with spectrograms, advisory quality verdicts, and per-track replacement review.
 
-If `0.0.16` is installed, download and run the latest `0.0.72` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.73` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -92,6 +92,29 @@ configuration and transfers.
 - **Soundcheck** automatically performs a quick, read-only inspection of newly
   completed audio and persists codec, container, duration, bitrate, sample rate,
   bit depth, channel count, track number, and any review notes per file
+- **Deep scan** also measures the decoded signal locally: advisory **Likely
+  genuine**, **Suspect transcode**, **Likely upsampled**, **Inconclusive**, or
+  **Lossy source** verdicts, spectral cutoff/consistency, padded integer bit
+  depth, and possible clipping. Expand a track's **Sonic evidence** in Arrival
+  Desk for a spectrogram and the measurements. Older scans have no sonic
+  evidence until rerun. Quick scans preserve existing evidence only while the
+  file's size and modification stamp match.
+- Sonic concerns offer individual replacements in **Patch Bay**; every arrival
+  is deep-checked again and a suspect replacement stays in needs-attention.
+  Originals are preserved by the existing explicit repair action. Up to 128
+  distinct scanned files per source contribute advisory local quality history
+  and a small ranking penalty; rescans replace observations and do not inflate
+  transfer failure counts. No automatic replacement follows a sonic verdict.
+  Unfiled releases with sonic concerns appear under **Needs attention**; after
+  reviewing them, **Mark filed with review notes** keeps the evidence intact.
+- Spectral evidence cannot prove provenance or identify an exact MP3 bitrate.
+  Old/filtered masters can resemble transcodes; high-bitrate encoders can evade
+  detection. Silence, short or narrow-band material can be inconclusive.
+  Analysis supports 8–384 kHz and up to eight channels, samples at most four
+  4096-frame spectral windows per second, and retains at most 96×64 compact
+  spectrogram cells. All samples are checked for bit padding/clipping. Decode
+  work runs off the network executor and outside the transfer queue lock.
+  See [Soundcheck methodology and verification](docs/soundcheck-sonic.md).
 - Expandable Arrival Desk evidence summarizes **Passed**, **Review**, **Failed**,
   and pending releases, checks album audio count and numbering against the
   expected source track count, and offers a full decoder-based **Deep Scan**

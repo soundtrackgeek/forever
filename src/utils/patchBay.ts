@@ -1,5 +1,5 @@
 import type { AlbumTrack, SearchResult, Transfer } from "../types";
-import { isAudioTransfer } from "./soundcheck";
+import { isAudioTransfer, soundcheckRepairable } from "./soundcheck";
 
 export type PatchBayIssueState =
   | "ready"
@@ -65,8 +65,8 @@ export const patchTrackNumber = (transfer: Transfer) =>
   ?? trackNumberFromName(transfer.remoteFilename);
 
 const issueReason = (transfer: Transfer) => {
-  if (transfer.patchRepair && transfer.soundcheck?.status === "failed") {
-    return transfer.soundcheck.issues[0] ?? "The replacement did not pass Deep Soundcheck.";
+  if (transfer.patchRepair && soundcheckRepairable(transfer.soundcheck)) {
+    return transfer.soundcheck?.issues[0] ?? "The replacement needs Deep Soundcheck review.";
   }
   if (transfer.patchRepair && transfer.status === "failed") {
     return transfer.error ?? "The replacement transfer failed.";
@@ -75,7 +75,7 @@ const issueReason = (transfer: Transfer) => {
   if (transfer.status === "failed") return transfer.error ?? "The original transfer failed.";
   if (transfer.verificationStatus === "missing") return "The completed file is missing from the release folder.";
   if (transfer.verificationStatus === "sizeMismatch") return transfer.verificationMessage ?? "The completed file has an unexpected size.";
-  if (transfer.soundcheck?.status === "failed") return transfer.soundcheck.issues[0] ?? "Soundcheck could not read this audio file.";
+  if (soundcheckRepairable(transfer.soundcheck)) return transfer.soundcheck?.issues[0] ?? "Soundcheck flagged this audio for review.";
   return null;
 };
 
@@ -83,7 +83,9 @@ export const patchIssueState = (transfer: Transfer): PatchBayIssueState => {
   if (!transfer.patchRepair) return "ready";
   if (["queued", "retrying", "paused"].includes(transfer.status)) return "queued";
   if (["requesting", "remotelyQueued", "connecting", "downloading"].includes(transfer.status)) return "downloading";
-  if (transfer.status === "failed" || transfer.soundcheck?.status === "failed") return "attention";
+  if (transfer.status === "failed" || soundcheckRepairable(transfer.soundcheck)) return "attention";
+  if (transfer.status === "completed" && transfer.soundcheck && !transfer.soundcheck.sonic) return "attention";
+  if (transfer.status === "completed" && !transfer.patchRepair.repairedAtMs) return "rechecking";
   if (transfer.status === "completed" && transfer.patchRepair.repairedAtMs) {
     return transfer.soundcheck ? "repaired" : "rechecking";
   }

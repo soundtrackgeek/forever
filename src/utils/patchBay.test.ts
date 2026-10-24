@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SearchResult, Transfer } from "../types";
 import { buildPatchBayIssues } from "./patchBay";
+import { sonicFixture } from "../test/sonicFixture";
 
 const transfer = (overrides: Partial<Transfer> = {}): Transfer => ({
   id: "track-2",
@@ -66,6 +67,20 @@ const result = (filename: string, overrides: Partial<SearchResult> = {}): Search
 });
 
 describe("Patch Bay planning", () => {
+  it("offers sonic repairs and keeps a suspect replacement in attention", () => {
+    const scanned = transfer({ expectedTrackCount: 1 });
+    scanned.soundcheck = { ...scanned.soundcheck!, trackNumber: 1, status: "review", sonic: sonicFixture, issues: ["Suspect transcode"] };
+    expect(buildPatchBayIssues([scanned], [])[0].state).toBe("ready");
+    scanned.patchRepair = { reason: "Original rejected", originalUsername: "old", originalRemoteFilename: "old.flac", requestedAtMs: 1, repairedAtMs: 2, warnings: [] };
+    expect(buildPatchBayIssues([scanned], [])[0].state).toBe("attention");
+    scanned.soundcheck = { ...scanned.soundcheck, status: "passed", issues: [], sonic: { ...sonicFixture, verdict: "likelyGenuine", cutoffHz: null } };
+    expect(buildPatchBayIssues([scanned], [])[0].state).toBe("repaired");
+    scanned.soundcheck = { ...scanned.soundcheck, sonic: null, status: "unsupported" };
+    expect(buildPatchBayIssues([scanned], [])[0].state).toBe("attention");
+    scanned.patchRepair = null;
+    scanned.soundcheck = { ...scanned.soundcheck, status: "review", issues: ["No track number"], sonic: undefined };
+    expect(buildPatchBayIssues([scanned], [])).toHaveLength(0);
+  });
   it("ranks the matching track and adds an expected missing track", () => {
     const issues = buildPatchBayIssues(
       [transfer()],

@@ -1005,31 +1005,81 @@ impl TransferHub {
         release_id: &str,
         deep: bool,
     ) -> Result<TransferQueueSnapshot, TransferError> {
-        let mut found = false;
-        let mut completed = true;
-        self.mutate(|transfers| {
-            for transfer in transfers
-                .iter_mut()
-                .filter(|transfer| transfer.release_id.as_deref() == Some(release_id))
-            {
-                found = true;
-                if transfer.status != TransferStatus::Completed {
-                    completed = false;
-                    continue;
-                }
-                refresh_verification(transfer);
-                if transfer.verification_status == VerificationStatus::Verified {
-                    refresh_soundcheck(transfer, deep);
-                }
-            }
-        })?;
-        if !found {
+        let targets: Vec<_> = self
+            .transfers
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .filter(|t| t.release_id.as_deref() == Some(release_id))
+            .cloned()
+            .collect();
+        if targets.is_empty() {
             return Err(TransferError::ReleaseNotFound);
         }
-        if !completed {
+        if targets
+            .iter()
+            .any(|t| t.status != TransferStatus::Completed)
+        {
             return Err(TransferError::ReleaseNotCompleted);
         }
+        self.scan_targets(targets, deep)?;
         Ok(self.snapshot())
+    }
+
+    fn scan_targets(
+        &self,
+        targets: Vec<TransferSnapshot>,
+        deep: bool,
+    ) -> Result<(), TransferError> {
+        // Decoding never holds the queue lock. Publish one durable result per file;
+        // concurrent source switches, history removal, or newer scans win.
+        for before in targets {
+            let mut scanned = before.clone();
+            let fingerprint = file_fingerprint(&before.local_path);
+            refresh_verification(&mut scanned);
+            if scanned.verification_status == VerificationStatus::Verified {
+                refresh_soundcheck(&mut scanned, deep);
+            }
+            let changed = fingerprint != file_fingerprint(&before.local_path);
+            if changed {
+                refresh_verification(&mut scanned);
+                scanned.soundcheck = Some(SoundcheckResult {
+                    status: SoundcheckStatus::Review,
+                    checked_at_ms: timestamp_ms(),
+                    issues: vec!["The file changed during Soundcheck. Run the scan again.".into()],
+                    ..Default::default()
+                });
+            }
+            self.mutate(|transfers| {
+                if let Some(current) = transfers
+                    .iter_mut()
+                    .find(|t| scan_still_current(t, &before))
+                {
+                    current.verification_status = scanned.verification_status;
+                    current.verification_message = scanned.verification_message;
+                    current.verified_at_ms = scanned.verified_at_ms;
+                    current.soundcheck = scanned.soundcheck;
+                    current.updated_at_ms =
+                        timestamp_ms().max(current.updated_at_ms.saturating_add(1));
+                    if deep && !changed {
+                        recovery::observe_sonic(
+                            &mut self
+                                .source_reliability
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner()),
+                            current,
+                        );
+                        if let Some(repair) = &mut current.patch_repair {
+                            repair.repaired_at_ms = Some(timestamp_ms());
+                        }
+                    }
+                }
+            })?;
+            if changed {
+                return Err(TransferError::SoundcheckFileChanged);
+            }
+        }
+        Ok(())
     }
 
     pub fn retry_release_issues(
@@ -1941,17 +1991,26 @@ impl TransferHub {
                 transfer.updated_at_ms = timestamp_ms();
                 refresh_verification(transfer);
                 let patch_repair = transfer.patch_repair.is_some();
-                if patch_repair || self.soundcheck_enabled.load(Ordering::SeqCst) {
-                    refresh_soundcheck(transfer, patch_repair);
-                }
-                if let Some(repair) = transfer.patch_repair.as_mut() {
-                    repair.repaired_at_ms = Some(timestamp_ms());
+                if !patch_repair && self.soundcheck_enabled.load(Ordering::SeqCst) {
+                    refresh_soundcheck(transfer, false);
                 }
             }
         })?;
         finalization?;
         if !found {
             return Err(TransferError::NotFound);
+        }
+        let repair = self
+            .transfers
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .find(|t| {
+                t.id == *id && t.status == TransferStatus::Completed && t.patch_repair.is_some()
+            })
+            .cloned();
+        if let Some(repair) = repair {
+            self.scan_targets(vec![repair], true)?;
         }
         Ok(())
     }
@@ -2784,6 +2843,15 @@ fn refresh_verification(transfer: &mut TransferSnapshot) {
 }
 
 fn refresh_soundcheck(transfer: &mut TransferSnapshot, deep: bool) {
+    let previous_sonic = transfer
+        .soundcheck
+        .as_ref()
+        .filter(|r| {
+            r.source_stamp.is_some()
+                && r.source_stamp
+                    == super::soundcheck::source_stamp(Path::new(&transfer.local_path))
+        })
+        .and_then(|r| r.sonic.clone());
     transfer.soundcheck = if transfer.status == TransferStatus::Completed
         && transfer.verification_status == VerificationStatus::Verified
     {
@@ -2791,6 +2859,37 @@ fn refresh_soundcheck(transfer: &mut TransferSnapshot, deep: bool) {
     } else {
         None
     };
+    // A header-only rescan cannot retract previously measured signal evidence.
+    if !deep {
+        if let Some(result) = &mut transfer.soundcheck {
+            if result.status != SoundcheckStatus::Failed {
+                if let Some(evidence) = previous_sonic {
+                    result.issues.extend(evidence.issues());
+                    if evidence.needs_review() {
+                        result.status = SoundcheckStatus::Review;
+                    }
+                    result.sonic = Some(evidence);
+                }
+            }
+        }
+    }
+}
+
+fn file_fingerprint(path: &str) -> Option<(u64, Option<std::time::SystemTime>)> {
+    fs::metadata(path)
+        .ok()
+        .map(|m| (m.len(), m.modified().ok()))
+}
+
+fn scan_still_current(current: &TransferSnapshot, before: &TransferSnapshot) -> bool {
+    current.id == before.id
+        && current.status == TransferStatus::Completed
+        && current.updated_at_ms == before.updated_at_ms
+        && current.local_path == before.local_path
+        && current.username == before.username
+        && current.remote_filename == before.remote_filename
+        && current.size_bytes == before.size_bytes
+        && current.soundcheck == before.soundcheck
 }
 
 fn audio_extension(filename: &str) -> Option<&str> {
@@ -2844,7 +2943,7 @@ fn patch_issue_reason(transfer: &TransferSnapshot) -> Option<String> {
         VerificationStatus::Pending | VerificationStatus::Verified => {}
     }
     transfer.soundcheck.as_ref().and_then(|result| {
-        (result.status == SoundcheckStatus::Failed).then(|| {
+        result.repairable().then(|| {
             result
                 .issues
                 .first()
@@ -3163,6 +3262,8 @@ pub enum TransferError {
     ReleaseNotFound,
     #[error("Only completed releases can be filed or removed from Arrival Desk.")]
     ReleaseNotCompleted,
+    #[error("The audio file changed during Soundcheck. Run the scan again.")]
+    SoundcheckFileChanged,
     #[error("Choose between 1 and 300 completed releases to remove from Arrival Desk.")]
     InvalidReleaseSelection,
     #[error("That release has no missing or failed files that can be retried safely.")]
@@ -3617,6 +3718,134 @@ mod tests {
             patch_issue_reason(&transfer).as_deref(),
             Some("Decoder stopped before the final frame.")
         );
+    }
+
+    #[test]
+    fn sonic_review_is_repairable_durable_and_rescans_count_once() {
+        use super::super::soundcheck::sonic::Analyzer;
+        let mut transfer = release_transfer(
+            "sonic",
+            "release",
+            "PEER",
+            "music/01.flac",
+            TransferStatus::Completed,
+            1,
+        );
+        transfer.verification_status = VerificationStatus::Verified;
+        let mut evidence = Analyzer::new(48_000, 1, Some(24), true).unwrap().finish();
+        evidence.padded_bit_depth = true;
+        transfer.soundcheck = Some(SoundcheckResult {
+            status: SoundcheckStatus::Review,
+            deep: true,
+            issues: evidence.issues(),
+            sonic: Some(evidence),
+            ..Default::default()
+        });
+        assert!(patch_issue_reason(&transfer)
+            .unwrap()
+            .contains("Padded bit depth"));
+        let mut memory = HashMap::new();
+        recovery::observe_sonic(&mut memory, &transfer);
+        recovery::observe_sonic(&mut memory, &transfer);
+        assert_eq!(memory["peer"].sonic_observations.len(), 1);
+        assert!(memory["peer"].sonic_observations[0].concern);
+        assert_eq!(memory["peer"].failures, 0);
+        let restored: TransferSnapshot =
+            serde_json::from_slice(&serde_json::to_vec(&transfer).unwrap()).unwrap();
+        assert_eq!(restored.soundcheck, transfer.soundcheck);
+        transfer
+            .soundcheck
+            .as_mut()
+            .unwrap()
+            .sonic
+            .as_mut()
+            .unwrap()
+            .padded_bit_depth = false;
+        recovery::observe_sonic(&mut memory, &transfer);
+        assert_eq!(memory["peer"].sonic_observations.len(), 1);
+        assert!(!memory["peer"].sonic_observations[0].concern);
+        for n in 0..150 {
+            transfer.remote_filename = format!("music/{n}.flac");
+            recovery::observe_sonic(&mut memory, &transfer);
+        }
+        assert_eq!(memory["peer"].sonic_observations.len(), 128);
+        let mut legacy = serde_json::to_value(&restored).unwrap();
+        legacy["soundcheck"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sonic");
+        legacy["soundcheck"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sourceStamp");
+        assert!(serde_json::from_value::<TransferSnapshot>(legacy)
+            .unwrap()
+            .soundcheck
+            .unwrap()
+            .sonic
+            .is_none());
+    }
+
+    #[test]
+    fn soundcheck_stale_results_cannot_override_replacement_or_newer_scan() {
+        let before = release_transfer(
+            "sonic",
+            "release",
+            "peer",
+            "music/01.flac",
+            TransferStatus::Completed,
+            1,
+        );
+        assert!(scan_still_current(&before, &before));
+        let mut changed = before.clone();
+        changed.status = TransferStatus::Queued;
+        assert!(!scan_still_current(&changed, &before));
+        changed = before.clone();
+        changed.username = "replacement".into();
+        assert!(!scan_still_current(&changed, &before));
+        changed = before.clone();
+        changed.soundcheck = Some(SoundcheckResult::default());
+        assert!(!scan_still_current(&changed, &before));
+        changed = before.clone();
+        changed.updated_at_ms += 1;
+        assert!(!scan_still_current(&changed, &before));
+    }
+
+    #[test]
+    fn soundcheck_quick_rescan_preserves_only_evidence_for_the_same_file_stamp() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("01 - fixture.flac");
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("test-fixtures/soundcheck/02-transcoded-128.flac"),
+            &path,
+        )
+        .unwrap();
+        let mut transfer = release_transfer(
+            "sonic",
+            "release",
+            "peer",
+            "music/01.flac",
+            TransferStatus::Completed,
+            1,
+        );
+        transfer.local_path = path.to_string_lossy().into_owned();
+        transfer.verification_status = VerificationStatus::Verified;
+        refresh_soundcheck(&mut transfer, true);
+        let measured = transfer.soundcheck.as_ref().unwrap().sonic.clone();
+        assert!(measured.is_some());
+        refresh_soundcheck(&mut transfer, false);
+        assert_eq!(transfer.soundcheck.as_ref().unwrap().sonic, measured);
+        transfer
+            .soundcheck
+            .as_mut()
+            .unwrap()
+            .source_stamp
+            .as_mut()
+            .unwrap()
+            .size_bytes += 1;
+        refresh_soundcheck(&mut transfer, false);
+        assert!(transfer.soundcheck.as_ref().unwrap().sonic.is_none());
     }
 
     #[test]
