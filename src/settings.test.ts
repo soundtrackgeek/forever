@@ -63,9 +63,19 @@ it("a rejected patch leaves the previous displayed value intact and reports the 
 
 it("normalizes old preference values while leaving malformed preset JSON available for recovery", () => {
   localStorage.setItem(legacyKeys.musicBrainzFallbackTrackCount, "900"); localStorage.setItem(legacyKeys.updateCheckIntervalMinutes, "2");
-  expect(readLegacySettings().preferences).toMatchObject({ musicBrainzFallbackTrackCount: 10, updateCheckIntervalMinutes: 5 });
+  expect(readLegacySettings().preferences).toMatchObject({ musicBrainzFallbackTrackCount: 10, updateCheckIntervalMinutes: 360, updateChannel: "stable" });
   localStorage.setItem(legacyKeys.dialMemory, "broken JSON"); expect(() => readLegacySettings()).toThrow();
   expect(localStorage.getItem(legacyKeys.dialMemory)).toBe("broken JSON");
+});
+
+it("preserves legacy cadence choices and keeps the channel unchanged after a failed save", async () => {
+  for (const interval of [0, 1, 5, 15, 30, 60]) {
+    localStorage.setItem(legacyKeys.updateCheckIntervalMinutes, String(interval));
+    expect(readLegacySettings().preferences.updateCheckIntervalMinutes).toBe(interval);
+  }
+  invoke.mockRejectedValueOnce(new Error("Disk full"));
+  await expect(patchSettings({ updateChannel: "beta" })).rejects.toThrow("Disk full");
+  expect(getSettingsState().settings.preferences.updateChannel).toBe("stable");
 });
 
 it("does not enable automatic mirrors when saving the opt-in fails", async () => {

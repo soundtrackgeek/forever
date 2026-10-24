@@ -1,7 +1,7 @@
-import { useSettings, savePreference } from "../settings";
+import { useSettings, savePreference, getSettingsState, type UpdateChannel, type UpdateCheckIntervalMinutes } from "../settings";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import { Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyUpdateTaskbarBadge,
@@ -25,26 +25,26 @@ export type UpdateDetails = {
   date?: string;
 };
 
-export type UpdateCheckIntervalMinutes = 0 | 1 | 5 | 15 | 30 | 60;
+export type { UpdateChannel, UpdateCheckIntervalMinutes } from "../settings";
 
-export const DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES: UpdateCheckIntervalMinutes = 5;
+export const DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES: UpdateCheckIntervalMinutes = 360;
 export const UPDATE_CHECK_INTERVAL_STORAGE_KEY =
   "forever.updateCheckIntervalMinutes";
 
 const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
-  0, 1, 5, 15, 30, 60,
+  0, 1, 5, 15, 30, 60, 360,
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.70",
-  version: "0.0.71",
-  body: `## What's new in Forever 0.0.71
+  currentVersion: "0.0.71",
+  version: "0.0.72",
+  body: `## What's new in Forever 0.0.72
 
 ### Changed
 
-- Opt in to automatic switching to exact mirrors for stalled releases.
-- Source reliability history improves Signal Relay ranking.
-- Spaced retries and smoothed speed estimates make recovery easier to follow.`,
+- Check for updates at launch and every six hours by default.
+- Choose Stable or Beta updates in Settings.
+- Windows release signing can be enabled through Azure Artifact Signing.`,
   date: "2026-10-24",
 };
 
@@ -58,11 +58,25 @@ export function useAppUpdater() {
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isToastDismissed, setIsToastDismissed] = useState(false);
-  const { settings } = useSettings();
+  const { settings, ready } = useSettings();
   const updateCheckIntervalMinutes = settings.preferences.updateCheckIntervalMinutes;
-  const updateRef = useRef<Update | null>(null);
+  const updateChannel = settings.preferences.updateChannel;
+  const updateRef = useRef<{ update: Update; channel: UpdateChannel } | null>(null);
   const checkInFlightRef = useRef(false);
   const installInProgressRef = useRef(false);
+  const mountedRef = useRef(false);
+  const generationRef = useRef(0);
+  const lastScheduledChannelRef = useRef<UpdateChannel | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      generationRef.current += 1;
+      if (!installInProgressRef.current) void updateRef.current?.update.close().catch(() => {});
+      updateRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isTauri() || !window.navigator.userAgent.includes("Windows")) return;
@@ -100,9 +114,17 @@ export function useAppUpdater() {
     };
   }, [status]);
 
-  const checkForUpdates = useCallback(async (manual = false) => {
-    if (checkInFlightRef.current || installInProgressRef.current) return;
+  const checkForUpdates = useCallback(async function runCheck(manual = false) {
+    if (!getSettingsState().ready || checkInFlightRef.current || installInProgressRef.current) return;
+    const channel = getSettingsState().settings.preferences.updateChannel;
+    const generation = generationRef.current;
+    const isCurrent = () => mountedRef.current && generation === generationRef.current
+      && channel === getSettingsState().settings.preferences.updateChannel;
     checkInFlightRef.current = true;
+    const previous = updateRef.current;
+    updateRef.current = null;
+    void previous?.update.close().catch(() => {});
+    setDetails(null);
     setStatus("checking");
     setError(null);
     setIsToastDismissed(false);
@@ -114,6 +136,7 @@ export function useAppUpdater() {
           "available" || import.meta.env.VITE_FORCE_UPDATE_AVAILABLE === "1");
       if (previewAvailable) {
         await wait(350);
+        if (!isCurrent()) return;
         setDetails(PREVIEW_UPDATE);
         setStatus("available");
         if (manual) setIsModalOpen(true);
@@ -122,24 +145,24 @@ export function useAppUpdater() {
 
       if (!isTauri()) {
         await wait(250);
+        if (!isCurrent()) return;
         setStatus("current");
-        if (manual) {
-          window.setTimeout(() => setStatus("idle"), 2200);
-        }
         return;
       }
 
-      const update = await check({ timeout: 12_000 });
+      const metadata = await invoke<ConstructorParameters<typeof Update>[0] | null>("updater_check", { channel });
+      const update = metadata ? new Update(metadata) : null;
+      if (!isCurrent()) {
+        await update?.close().catch(() => {});
+        return;
+      }
 
       if (!update) {
         setStatus("current");
-        if (manual) {
-          window.setTimeout(() => setStatus("idle"), 2200);
-        }
         return;
       }
 
-      updateRef.current = update;
+      updateRef.current = { update, channel };
       setDetails({
         version: update.version,
         currentVersion: update.currentVersion,
@@ -149,6 +172,7 @@ export function useAppUpdater() {
       setStatus("available");
       if (manual) setIsModalOpen(true);
     } catch (cause) {
+      if (!isCurrent()) return;
       const message =
         cause instanceof Error ? cause.message : "The update check failed.";
       setError(message);
@@ -156,26 +180,43 @@ export function useAppUpdater() {
       if (manual) setIsModalOpen(true);
     } finally {
       checkInFlightRef.current = false;
+      // A channel switch during a request queues one check for the latest choice.
+      if (mountedRef.current && !isCurrent()) void runCheck(false);
     }
   }, []);
 
   useEffect(() => {
+    if (!ready) return;
+    const firstCheck = lastScheduledChannelRef.current === null;
+    lastScheduledChannelRef.current = updateChannel;
+    generationRef.current += 1;
     const timeout = window.setTimeout(() => {
+      if (installInProgressRef.current) return;
+      void updateRef.current?.update.close().catch(() => {});
+      updateRef.current = null;
+      setDetails(null);
+      setIsModalOpen(false);
+      setStatus("idle");
       void checkForUpdates(false);
-    }, isTauri() ? 2_500 : 700);
+    }, firstCheck ? (isTauri() ? 2_500 : 700) : 0);
 
     return () => window.clearTimeout(timeout);
-  }, [checkForUpdates]);
+  }, [checkForUpdates, ready, updateChannel]);
 
   useEffect(() => {
-    if (updateCheckIntervalMinutes === 0) return;
+    if (!ready || updateCheckIntervalMinutes === 0) return;
 
     const interval = window.setInterval(
       () => void checkForUpdates(false),
       updateCheckIntervalMinutes * 60_000,
     );
     return () => window.clearInterval(interval);
-  }, [checkForUpdates, updateCheckIntervalMinutes]);
+  }, [checkForUpdates, ready, updateCheckIntervalMinutes, updateChannel]);
+
+  const setUpdateChannel = useCallback((channel: UpdateChannel) => {
+    if (installInProgressRef.current || !["stable", "beta"].includes(channel)) return;
+    savePreference({ updateChannel: channel });
+  }, []);
 
   const setUpdateCheckIntervalMinutes = useCallback(
     (interval: UpdateCheckIntervalMinutes) => {
@@ -197,6 +238,11 @@ export function useAppUpdater() {
     setError(null);
 
     try {
+      const offer = updateRef.current;
+      const channel = getSettingsState().settings.preferences.updateChannel;
+      if (isTauri() && (!offer || offer.channel !== channel)) {
+        throw new Error("The update channel changed. Check again before installing.");
+      }
       if (prepare) {
         setStatus("preparing");
         await prepare();
@@ -212,10 +258,10 @@ export function useAppUpdater() {
         return;
       }
 
-      const update = updateRef.current;
-      if (!update) {
-        throw new Error("The update is no longer available. Check again and retry.");
+      if (!offer || offer.channel !== getSettingsState().settings.preferences.updateChannel) {
+        throw new Error("The update channel changed. Check again before installing.");
       }
+      const { update } = offer;
 
       let downloaded = 0;
       let total = 0;
@@ -274,6 +320,8 @@ export function useAppUpdater() {
     isModalOpen,
     shouldShowToast: status === "available" && !isToastDismissed && !isModalOpen,
     updateCheckIntervalMinutes,
+    updateChannel,
+    setUpdateChannel,
     checkForUpdates,
     setUpdateCheckIntervalMinutes,
     installUpdate,

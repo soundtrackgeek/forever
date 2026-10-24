@@ -19,7 +19,8 @@ import {
   UserPlus,
   Waveform,
 } from "@phosphor-icons/react";
-import type { UpdateCheckIntervalMinutes } from "../hooks/useAppUpdater";
+import type { UpdateChannel, UpdateCheckIntervalMinutes } from "../hooks/useAppUpdater";
+import { version } from "../../package.json";
 import { useEffect, useState, type FormEvent } from "react";
 import type {
   ConnectionProfile,
@@ -49,6 +50,9 @@ type ConnectionSettingsProps = {
   onLoadDiagnostics: () => Promise<DiagnosticEntry[]>;
   onCheckForUpdates: () => void;
   updateCheckIntervalMinutes: UpdateCheckIntervalMinutes;
+  updateChannel: UpdateChannel;
+  onUpdateChannelChange: (channel: UpdateChannel) => void;
+  updateChannelLocked: boolean;
   onUpdateCheckIntervalChange: (
     interval: UpdateCheckIntervalMinutes,
   ) => void;
@@ -131,6 +135,9 @@ export function ConnectionSettings({
   onLoadDiagnostics,
   onCheckForUpdates,
   updateCheckIntervalMinutes,
+  updateChannel,
+  onUpdateChannelChange,
+  updateChannelLocked,
   onUpdateCheckIntervalChange,
   musicBrainzFallbackTrackCount,
   onMusicBrainzFallbackTrackCountChange,
@@ -570,8 +577,20 @@ export function ConnectionSettings({
 
           <section className="settings-panel maintenance-panel">
             <div className="update-preferences">
-              <h2>Forever 0.0.69</h2>
-              <p>Updates install from signed GitHub Releases.</p>
+              <h2>Forever {version}</h2>
+              <p>Forever verifies each update’s signature before installation.</p>
+              <label className="update-interval-field">
+                <span>Update channel</span>
+                <select aria-label="Update channel" aria-describedby="update-channel-help"
+                  value={updateChannel} disabled={updateChannelLocked}
+                  onChange={(event) => onUpdateChannelChange(event.target.value as UpdateChannel)}>
+                  <option value="stable">Stable</option>
+                  <option value="beta">Beta</option>
+                </select>
+                <small id="update-channel-help">{updateChannel === "beta"
+                  ? "Beta includes experimental releases. Returning to Stable waits for a newer stable version; it does not downgrade."
+                  : "Stable receives regular releases. Beta is optional and includes experimental features."}</small>
+              </label>
               <label className="musicbrainz-fallback-field">
                 <span>MusicBrainz fallback tracks</span>
                 <span className="musicbrainz-fallback-input">
@@ -610,10 +629,11 @@ export function ConnectionSettings({
                   <option value={15}>Every 15 minutes</option>
                   <option value={30}>Every 30 minutes</option>
                   <option value={60}>Every hour</option>
+                  <option value={360}>Every 6 hours (recommended)</option>
                   <option value={0}>Only at startup</option>
                 </select>
                 <small>
-                  Default: every 5 minutes while Forever is running.
+                  Default: at launch, then every 6 hours while Forever is running.
                 </small>
               </label>
               <label className="toggle-row message-notification-preference">

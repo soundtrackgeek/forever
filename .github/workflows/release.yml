@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - beta
     paths:
       - CHANGELOG.md
       - package.json
@@ -15,7 +16,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-publication
   cancel-in-progress: false
 
 jobs:
@@ -57,6 +58,9 @@ jobs:
             throw "Version validation did not return a version."
           }
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $channel = node --input-type=module -e "import { releaseChannel } from './scripts/release-policy.mjs'; console.log(releaseChannel(process.env.APP_VERSION || '$version', process.env.GITHUB_REF_NAME));"
+          if ($LASTEXITCODE -ne 0) { throw "Release channel validation failed." }
+          "RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Validated Forever v$version"
 
       - name: Ensure this version is new
@@ -79,11 +83,34 @@ jobs:
       - name: Run frontend quality checks
         run: npm run check
 
+      - name: Configure Windows signing
+        run: node scripts/configure-signing.mjs
+        env:
+          WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Set up .NET for Azure signing
+        if: vars.WINDOWS_SIGNING == 'azure'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install Azure signing CLI
+        if: vars.WINDOWS_SIGNING == 'azure'
+        run: cargo install artifact-signing-cli --version 0.12.0 --locked
+
       - name: Run Rust quality checks
         working-directory: src-tauri
         run: |
           cargo fmt --all -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo clippy --workspace --all-targets --all-features -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --workspace --all-targets --all-features
 
       - name: Build release executable for startup smoke test
@@ -108,34 +135,65 @@ jobs:
             }
           }
 
-      - name: Build installers and create GitHub Release
+      - name: Build installers and create draft GitHub Release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         with:
           tagName: v__VERSION__
           releaseName: Forever v__VERSION__
           releaseBody: ${{ steps.release_notes.outputs.body }}
           generateReleaseNotes: false
-          releaseDraft: false
-          prerelease: false
+          releaseDraft: true
+          prerelease: ${{ env.RELEASE_CHANNEL == 'beta' }}
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           uploadUpdaterSignatures: true
           releaseAssetNamePattern: Forever_[version]_[arch][setup][ext]
-          args: --bundles nsis,msi
+          args: --bundles nsis,msi --config src-tauri/tauri.signing.generated.json
+
+      - name: Verify Windows publisher signatures
+        if: vars.WINDOWS_SIGNING == 'azure'
+        shell: pwsh
+        run: |
+          $files = @(Get-Item -LiteralPath "src-tauri/target/release/forever.exe")
+          $files += Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File |
+            Where-Object { $_.Extension -in ".exe", ".msi" }
+          if ($files.Count -lt 3) { throw "Expected an executable and both Windows installers." }
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+            if ($signature.Status -ne "Valid" -or -not $signature.TimeStamperCertificate) {
+              throw "Missing valid timestamped Authenticode signature: $($file.Name)"
+            }
+          }
 
       - name: Create release checksums
         shell: pwsh
         run: |
-          $files = Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File |
-            Where-Object { $_.Extension -in ".exe", ".msi", ".sig" }
+          # Hash the uploaded names: tauri-action removes the MSI locale suffix.
+          $assetDirectory = Join-Path $env:RUNNER_TEMP "forever-assets-$([guid]::NewGuid())"
+          New-Item -ItemType Directory -Path $assetDirectory | Out-Null
+          gh release download "v$env:APP_VERSION" --dir $assetDirectory --pattern "*.exe" --pattern "*.msi" --pattern "*.sig"
+          if ($LASTEXITCODE -ne 0) { throw "Could not download release assets for checksums." }
+          $files = Get-ChildItem -LiteralPath $assetDirectory -File
+          if ($files.Count -ne 4) { throw "Expected both installers and their updater signatures." }
           $lines = $files | ForEach-Object {
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           }
           $lines | Set-Content -LiteralPath "SHA256SUMS.txt" -Encoding utf8
           gh release upload "v$env:APP_VERSION" "SHA256SUMS.txt"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish verified release and update channel feed
+        run: node scripts/publish-update-feed.mjs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

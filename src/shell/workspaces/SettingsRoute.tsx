@@ -54,6 +54,9 @@ export default function SettingsRoute() {
       onLoadDiagnostics={connection.loadDiagnostics}
       onCheckForUpdates={() => void updater.checkForUpdates(true)}
       updateCheckIntervalMinutes={updater.updateCheckIntervalMinutes}
+      updateChannel={updater.updateChannel}
+      onUpdateChannelChange={updater.setUpdateChannel}
+      updateChannelLocked={["preparing", "downloading", "ready"].includes(updater.status)}
       onUpdateCheckIntervalChange={updater.setUpdateCheckIntervalMinutes}
       musicBrainzFallbackTrackCount={musicBrainzFallbackTrackCount}
       onMusicBrainzFallbackTrackCountChange={(count) => {

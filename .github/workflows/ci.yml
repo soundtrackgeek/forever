@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - master
+      - beta
   pull_request:
     branches:
       - master
+      - beta
 
 permissions:
   contents: read
@@ -48,6 +50,9 @@ jobs:
 
       - name: Test
         run: npm run test
+
+      - name: Test release policy
+        run: npm run test:release
 
       - name: Build frontend
         run: npm run build

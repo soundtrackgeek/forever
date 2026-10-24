@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.0.72] - 2026-10-24
+
+### Added
+
+- Persistent Stable/Beta update channels, fixed native feed selection, and
+  separate stable/prerelease publication with a version-ordered Beta feed.
+- Azure Artifact Signing integration for executable and installers, with
+  required configuration checks and valid timestamped Authenticode verification
+  before publication. Account/profile/credential provisioning remains pending;
+  this release does not claim Windows publisher signing is activated.
+
+### Changed
+
+- New preferences check for updates at launch and every six hours. Existing
+  saved intervals and startup-only mode are preserved.
+- Releases stay drafts until artifact checks and feed validation finish. Beta
+  MSI packaging uses a numeric Windows Installer version while app updates
+  compare the complete prerelease SemVer.
+
+### Fixed
+
+- Update checks wait for settings, discard results from a previous channel,
+  release native update resources, and reject an obsolete offer before or after
+  Safe Passage preparation. Stable never offers prereleases or downgrades.
+- Settings shows the current package version instead of an outdated hard-coded value.
+
+### Verification
+
+- Regression coverage for cadence, channel persistence/migration, stale checks,
+  update preparation, release ordering, feed assets and signing configuration.
+- Actual Azure signing, installed-app upgrades and SmartScreen behavior still
+  require provisioning and release/device validation.
+
 All notable changes to Forever are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

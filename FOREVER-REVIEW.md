@@ -659,7 +659,25 @@ Users who repeatedly fail or deny uploads are not remembered.
 - Smooth speed and ETA with an EMA. The current 250 ms window is noisy.
   Whole-album ETA should account for source-queue position.
 
-### 19. Update cadence, channels, and code signing
+### 19. Update cadence, channels, and code signing — IMPLEMENTED; SIGNING ACTIVATION PENDING
+
+**Implemented in 0.0.72 (2026-10-24):** new settings default to launch checks and
+six-hour intervals; existing cadence choices remain intact. Stable/Beta selection
+persists in the unified settings store. Checks wait for settings, coalesce,
+discard old-channel results, and guard Safe Passage against channel changes.
+Native code selects fixed HTTPS feeds, rejects prereleases on Stable, and never
+downgrades. Release automation separates master/stable from beta/prerelease,
+publishes only after artifact checks, and advances Beta by SemVer (including
+newer stable releases). Beta MSI configuration uses a numeric installer version.
+
+Azure Artifact Signing is wired through Tauri's `signCommand`, with pinned tooling,
+required configuration validation, timestamp/Authenticode checks, and no unsigned
+fallback when enabled. **Activation remains pending:** the repository has only
+the existing Tauri updater key; an owner-provisioned Azure Public Trust account,
+certificate profile, and credentials are still required. No license was selected
+and no Authenticode-signed build or installed-app upgrade is claimed. Setup and
+remaining verification are in [Windows signing](docs/windows-signing.md).
+The original findings follow for context.
 
 **Today:** Automatic update checks run **every 5 minutes** by default. Installers
 are not Authenticode-signed, so SmartScreen warns on download (as the README

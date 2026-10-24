@@ -7,7 +7,9 @@ import { normalizeAdvancedFilters, sortLabels, type AdvancedSearchFilters, type 
 
 export type DialPreset = { id: string; mode: "files" | "albums"; query: string; searchFilter: SearchFilter; searchSort: SearchSort; searchLayout: "list" | "grid"; albumFilter: AlbumFilter; advancedFilters: AdvancedSearchFilters };
 export type DialMemory = { pinned: DialPreset[]; recent: { mode: "files" | "albums"; query: string; closedAtMs: number }[] };
-export type Preferences = { updateCheckIntervalMinutes: 0 | 1 | 5 | 15 | 30 | 60; messageNotificationsEnabled: boolean; roomNotificationsEnabled: boolean; musicBrainzFallbackTrackCount: number };
+export type UpdateChannel = "stable" | "beta";
+export type UpdateCheckIntervalMinutes = 0 | 1 | 5 | 15 | 30 | 60 | 360;
+export type Preferences = { updateCheckIntervalMinutes: UpdateCheckIntervalMinutes; updateChannel: UpdateChannel; messageNotificationsEnabled: boolean; roomNotificationsEnabled: boolean; musicBrainzFallbackTrackCount: number };
 export type Settings = {
   version: number; revision: number; webviewMigrated: boolean; connection: ConnectionProfile | null;
   transfers: { maxConcurrentDownloads: number; relaySuggestionMinutes: number; autoMirrorMinutes: number; soundcheckEnabled: boolean };
@@ -23,7 +25,7 @@ export const defaultSettings = (): Settings => ({
   sharing: { version: 3, uploadSlots: 1, uploadPolicy: { maxFilesPerUser: 100, maxMegabytesPerUser: 10000, prioritizeFavorites: false, prioritizePrivileged: false }, roots: [] },
   wanted: { intervalMinutes: 30, defaultPreferences: { formatPreference: "preferLossless", minimumBitrateKbps: 320, minimumTrackCount: null } },
   archiveDatabasePath: null,
-  preferences: { updateCheckIntervalMinutes: 5, messageNotificationsEnabled: true, roomNotificationsEnabled: true, musicBrainzFallbackTrackCount: 10 },
+  preferences: { updateCheckIntervalMinutes: 360, updateChannel: "stable", messageNotificationsEnabled: true, roomNotificationsEnabled: true, musicBrainzFallbackTrackCount: 10 },
   dialMemory: { pinned: [], recent: [] },
 });
 

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import process from "node:process";
+import { releaseChannel } from "./release-policy.mjs";
 
 const root = new URL("../", import.meta.url);
 const packageJson = JSON.parse(
@@ -67,6 +68,7 @@ if (uniqueVersions.size !== 1) {
 }
 
 const version = versions.tauri;
+releaseChannel(version);
 const changelogPattern = new RegExp(
   `^## \\[${version.replaceAll(".", "\\.")}\\] - \\d{4}-\\d{2}-\\d{2}$`,
   "m",

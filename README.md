@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.71` adds opt-in exact-mirror recovery, local source
-> reliability history, and steadier download speed and ETA estimates.
+> **Status:** pre-alpha. Version `0.0.72` adds Stable/Beta update channels, six-hour
+> default update checks, and an Azure Authenticode signing integration.
 
-If `0.0.16` is installed, download and run the latest `0.0.71` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.72` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -821,9 +821,15 @@ username can return a wrong-password error. Forever explains this in onboarding
 and Connection settings rather than treating a successful registration as an
 authentication failure.
 
-Automatic update checks run every five minutes while Forever is open. Change
-the cadence—or limit automatic checks to startup—in **Settings → Connection →
-Automatic update checks**. Incoming private-message notifications can be
+Automatic update checks run at launch and then every six hours by default.
+Existing saved intervals, including startup-only, are preserved. Change
+the cadence in **Settings → Connection → Automatic update checks**. **Update
+channel** defaults to **Stable**; **Beta** opts into experimental releases as
+well as newer stable releases. Returning to Stable waits for a stable version
+newer than the installed app; it never silently downgrades. Changing channel
+discards the previous offer and checks the selected feed. Checks wait for
+saved settings to load, cannot overlap, and pause while an update is installing.
+Incoming private-message notifications can be
 enabled or disabled in the same settings panel. Room alerts have a separate
 toggle and notify only for direct mentions or new messages in starred rooms.
 
@@ -1066,8 +1072,14 @@ that constructs the MusicBrainz client with its explicit TLS provider.
 
 The canonical repository is
 [`soundtrackgeek/forever`](https://github.com/soundtrackgeek/forever). Tauri
-checks its signed updater feed at
-`https://github.com/soundtrackgeek/forever/releases/latest/download/latest.json`.
+uses these updater feeds, with the same compiled Tauri verification key:
+
+- Stable: `https://github.com/soundtrackgeek/forever/releases/latest/download/latest.json`
+- Beta: `https://github.com/soundtrackgeek/forever/releases/download/beta/latest.json`
+
+Stable keeps the existing endpoint for older clients. The Beta metadata release
+is always a GitHub prerelease, so it cannot become Stable's latest release.
+Its installer URLs point to immutable version tags, never to the mutable Beta tag.
 
 Every application release uses the same version in:
 
@@ -1082,9 +1094,11 @@ Validate them locally with the repository metadata and updater endpoint:
 npm run verify:version
 ```
 
-Pushing a new version to `master` automatically runs the release workflow. Once
-all frontend and Rust checks pass, GitHub Actions creates a `vX.Y.Z` tag and
-publishes a GitHub Release containing:
+Pushing a new stable version to `master`, or an `X.Y.Z-beta.N` version to the
+`beta` branch, automatically runs the release workflow. Both branches use the
+same version-alignment requirements; dispatching the workflow also validates
+the branch/channel match. After frontend and Rust checks, GitHub Actions builds
+a draft `vX.Y.Z` (or `vX.Y.Z-beta.N`) release containing:
 
 - `Forever_X.Y.Z_x64-setup.exe` — recommended current-user Windows installer
 - `Forever_X.Y.Z_x64.msi` — Windows Installer package
@@ -1092,14 +1106,26 @@ publishes a GitHub Release containing:
 - `latest.json`
 - `SHA256SUMS.txt`
 
+Publisher-signature checks (when enabled), checksums, and updater-feed validation
+complete before publishing. Stable releases alone are marked Latest. The shared
+release lock serializes publication; the Beta feed advances only to an equal or
+newer SemVer, including stable releases. Beta MSI packages use the numeric
+`X.Y.Z` Windows Installer version; Tauri allows same-version MSI replacement,
+while the app and updater keep and compare the full `X.Y.Z-beta.N` version.
+Installer upgrade paths still need installed-app validation before relying on a
+Beta release. The recommended installer remains NSIS.
+
 The release workflow requires the repository secret
 `TAURI_SIGNING_PRIVATE_KEY`. The corresponding public key is compiled into the
 application. Keep the private updater key backed up securely; losing it prevents
 installed clients from accepting future updates.
 
-Windows Authenticode signing is separate from Tauri updater signing. Until a
-code-signing certificate is configured, Windows SmartScreen may warn when the
-installer is downloaded.
+Windows Authenticode signing is separate from Tauri updater signing. The Azure
+integration is implemented but **not activated**: no signing account/profile or
+Azure credentials were configured for this change. Windows may still warn when
+the installer is downloaded. See [Windows signing setup](docs/windows-signing.md)
+for provisioning, required repository configuration, verification, and release
+recovery. Signing does not guarantee the absence of SmartScreen warnings.
 
 ## Project structure
 

@@ -1,4 +1,4 @@
-import { getSettingsState } from "./settings";
+import { getSettingsState, initializeSettings } from "./settings";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -19,6 +19,8 @@ async function waitForWorkspace() {
   await waitFor(() => expect(document.querySelector('.workspace-status[role="status"]')).toBeNull(), { timeout: 10000 });
 }
 async function renderApp() {
+  // Match main.tsx: the app starts only after settings initialization.
+  await initializeSettings();
   const view = render(<App />);
   await waitForWorkspace();
   return view;
@@ -1006,17 +1008,22 @@ describe("Forever shell", () => {
     expect(getSettingsState().settings.preferences.roomNotificationsEnabled).toBe(false);
   });
 
-  it("checks for updates every five minutes by default and saves a new cadence", async () => {
+  it("checks for updates every six hours by default and retains cadence and channel choices", async () => {
     const intervalSpy = vi.spyOn(window, "setInterval");
     const view = await renderApp();
 
-    expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 300_000);
+    expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 21_600_000);
     await click(screen.getByRole("button", { name: "Settings" }));
 
     const interval = screen.getByRole("combobox", {
       name: /Automatic update checks/,
     });
-    expect(interval).toHaveValue("5");
+    expect(interval).toHaveValue("360");
+    const channel = screen.getByRole("combobox", { name: "Update channel" });
+    expect(channel).toHaveValue("stable");
+    fireEvent.change(channel, { target: { value: "beta" } });
+    expect(getSettingsState().settings.preferences.updateChannel).toBe("beta");
+    expect(screen.getByText(/Returning to Stable waits/)).toBeInTheDocument();
     fireEvent.change(interval, { target: { value: "15" } });
     expect(getSettingsState().settings.preferences.updateCheckIntervalMinutes).toBe(
       15,
@@ -1052,6 +1059,7 @@ describe("Forever shell", () => {
     expect(
       screen.getByRole("combobox", { name: /Automatic update checks/ }),
     ).toHaveValue("15");
+    expect(screen.getByRole("combobox", { name: "Update channel" })).toHaveValue("beta");
     expect(screen.getByRole("combobox", { name: "Auto-switch to exact mirrors" })).toHaveValue("5");
   });
 
@@ -1063,17 +1071,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.71 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.72 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Opt in to automatic switching to exact mirrors for stalled releases.",
+        "Check for updates at launch and every six hours by default.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Source reliability history improves Signal Relay ranking.",
+        "Choose Stable or Beta updates in Settings.",
       ),
     ).toBeInTheDocument();
     expect(

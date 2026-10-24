@@ -159,6 +159,8 @@ impl Default for WantedSettings {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Preferences {
     pub update_check_interval_minutes: u32,
+    #[serde(default)]
+    pub update_channel: crate::updater::UpdateChannel,
     pub message_notifications_enabled: bool,
     pub room_notifications_enabled: bool,
     pub music_brainz_fallback_track_count: u16,
@@ -166,7 +168,8 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            update_check_interval_minutes: 5,
+            update_check_interval_minutes: 360,
+            update_channel: crate::updater::UpdateChannel::Stable,
             message_notifications_enabled: true,
             room_notifications_enabled: true,
             music_brainz_fallback_track_count: 10,
@@ -231,7 +234,7 @@ impl Settings {
         if let Some(path) = &self.archive_database_path {
             crate::archive::settings::validate_path(path)?;
         }
-        if ![0, 1, 5, 15, 30, 60].contains(&self.preferences.update_check_interval_minutes)
+        if ![0, 1, 5, 15, 30, 60, 360].contains(&self.preferences.update_check_interval_minutes)
             || !(1..=250).contains(&self.preferences.music_brainz_fallback_track_count)
         {
             return Err("Invalid update interval or MusicBrainz fallback count.".into());
@@ -372,6 +375,7 @@ pub struct SettingsPatch {
     pub wanted_interval_minutes: Option<u32>,
     pub wanted_default_preferences: Option<WantedPreferences>,
     pub update_check_interval_minutes: Option<u32>,
+    pub update_channel: Option<crate::updater::UpdateChannel>,
     pub message_notifications_enabled: Option<bool>,
     pub room_notifications_enabled: Option<bool>,
     pub music_brainz_fallback_track_count: Option<u16>,
@@ -380,6 +384,7 @@ pub struct SettingsPatch {
 impl SettingsPatch {
     pub fn touches_webview(&self) -> bool {
         self.update_check_interval_minutes.is_some()
+            || self.update_channel.is_some()
             || self.message_notifications_enabled.is_some()
             || self.room_notifications_enabled.is_some()
             || self.music_brainz_fallback_track_count.is_some()
@@ -408,6 +413,7 @@ impl SettingsPatch {
         assign!(upload_policy, s.sharing.upload_policy);
         assign!(wanted_interval_minutes, s.wanted.interval_minutes);
         assign!(wanted_default_preferences, s.wanted.default_preferences);
+        assign!(update_channel, s.preferences.update_channel);
         assign!(
             update_check_interval_minutes,
             s.preferences.update_check_interval_minutes
@@ -440,6 +446,46 @@ pub fn parse_import(json: &str) -> Result<Settings, String> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn update_channels_default_migrate_validate_and_persist() {
+        use crate::updater::UpdateChannel;
+        let defaults = Settings::default();
+        assert_eq!(defaults.preferences.update_check_interval_minutes, 360);
+        assert_eq!(defaults.preferences.update_channel, UpdateChannel::Stable);
+        for interval in [0, 1, 5, 15, 30, 60] {
+            let mut legacy = serde_json::to_value(&defaults).unwrap();
+            legacy["preferences"]
+                .as_object_mut()
+                .unwrap()
+                .remove("updateChannel");
+            legacy["preferences"]["updateCheckIntervalMinutes"] = interval.into();
+            let settings = parse_import(&legacy.to_string()).unwrap();
+            assert_eq!(settings.preferences.update_check_interval_minutes, interval);
+            assert_eq!(settings.preferences.update_channel, UpdateChannel::Stable);
+        }
+        let mut invalid = serde_json::to_value(&defaults).unwrap();
+        invalid["preferences"]["updateChannel"] = "arbitrary-url".into();
+        assert!(parse_import(&invalid.to_string()).is_err());
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path());
+        let patch: SettingsPatch = serde_json::from_value(
+            serde_json::json!({"updateChannel":"beta", "updateCheckIntervalMinutes":360}),
+        )
+        .unwrap();
+        store.update(|s| patch.apply(s)).unwrap();
+        assert_eq!(
+            open(dir.path()).get().preferences.update_channel,
+            UpdateChannel::Beta
+        );
+        store
+            .update(|s| s.preferences = Preferences::default())
+            .unwrap();
+        assert_eq!(
+            open(dir.path()).get().preferences.update_channel,
+            UpdateChannel::Stable
+        );
+    }
 
     fn legacy_files(dir: &std::path::Path) -> Vec<JsonFile> {
         [

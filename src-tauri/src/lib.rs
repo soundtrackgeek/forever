@@ -2,6 +2,7 @@ mod archive;
 mod connection;
 mod matching;
 mod musicbrainz;
+mod updater;
 
 use tauri::Manager;
 
@@ -31,6 +32,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            updater::updater_check,
             connection::settings_commands::settings_get,
             connection::settings_commands::settings_patch,
             connection::settings_commands::settings_migrate_webview,

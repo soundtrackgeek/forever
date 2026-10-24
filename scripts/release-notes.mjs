@@ -36,6 +36,6 @@ process.stdout.write(
     "## Install",
     "",
     "Download `Forever_*_x64-setup.exe` for the recommended Windows installer.",
-    "Every updater artifact is signed and verified by Forever before installation.",
+    "Forever verifies Tauri updater signatures before installation. Windows publisher (Authenticode) signing is configured separately.",
   ].join("\n"),
 );
