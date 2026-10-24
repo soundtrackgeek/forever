@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.0.78] - 2026-10-24
+
+### Added
+
+- System tray with live connection/transfer status, Open, Pause/Resume all
+  transfers, and Quit through Safe Passage. Closing keeps Forever running by
+  default, with an exit-on-close preference and a visible fallback if tray creation fails.
+- Opt-in operating-system sign-in startup, optional hidden startup, explicit
+  `--background` launch, and persistent window size, position, and maximized state.
+- Single-instance protection before plugin/store/network initialization; second
+  launches restore and focus the existing window. Deep-link forwarding is enabled
+  for future URL handling, without registering a URL scheme.
+
+### Changed
+
+- Desktop preferences join unified settings export/import/reset with legacy
+  defaults. Autostart remains an explicit, per-computer OS setting.
+- Manual transfer holds share the bandwidth controller, persist across restarts,
+  and respect individual pauses and metered-network policy when resumed.
+- Official desktop plugins bring the compatible Tauri 2.12 runtime dependencies.
+
+### Fixed
+
+- Quit requests during WebView startup are retained; failed exit saves leave the
+  window open for retry, and duplicate requests do not overlap queue preparation.
+- Local ignored Playwright scratch directories are also excluded from ESLint.
+
 ## [0.0.77] - 2026-10-24
 
 ### Added

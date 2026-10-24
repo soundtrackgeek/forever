@@ -185,7 +185,24 @@ impl Default for Preferences {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DesktopSettings {
+    pub close_to_tray: bool,
+    pub start_in_tray: bool,
+}
+impl Default for DesktopSettings {
+    fn default() -> Self {
+        Self {
+            close_to_tray: true,
+            start_in_tray: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
+    #[serde(default)]
+    pub desktop: DesktopSettings,
     pub version: u32,
     pub revision: u64,
     pub webview_migrated: bool,
@@ -200,6 +217,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            desktop: DesktopSettings::default(),
             version: 1,
             revision: 0,
             webview_migrated: false,
@@ -374,6 +392,8 @@ impl AppSettings {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SettingsPatch {
+    pub close_to_tray: Option<bool>,
+    pub start_in_tray: Option<bool>,
     pub bandwidth: Option<super::bandwidth::BandwidthSettings>,
     pub filing: Option<super::filing::FilingSettings>,
     pub max_concurrent_downloads: Option<u8>,
@@ -417,6 +437,8 @@ impl SettingsPatch {
             relay_suggestion_minutes,
             s.transfers.relay_suggestion_minutes
         );
+        assign!(close_to_tray, s.desktop.close_to_tray);
+        assign!(start_in_tray, s.desktop.start_in_tray);
         assign!(auto_mirror_minutes, s.transfers.auto_mirror_minutes);
         assign!(filing, s.transfers.filing);
         assign!(bandwidth, s.transfers.bandwidth);
@@ -458,6 +480,34 @@ pub fn parse_import(json: &str) -> Result<Settings, String> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn desktop_preferences_migrate_merge_and_round_trip_without_enabling_autostart() {
+        let mut legacy = serde_json::to_value(Settings::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("desktop");
+        legacy["transfers"]["bandwidth"]
+            .as_object_mut()
+            .unwrap()
+            .remove("manualPaused");
+        let defaults = parse_import(&legacy.to_string()).unwrap();
+        assert_eq!(defaults.desktop, DesktopSettings::default());
+        assert!(!defaults.transfers.bandwidth.manual_paused);
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path());
+        let patch: SettingsPatch =
+            serde_json::from_value(serde_json::json!({"closeToTray":false})).unwrap();
+        store.update(|s| patch.apply(s)).unwrap();
+        let next = open(dir.path()).get();
+        assert!(!next.desktop.close_to_tray);
+        assert!(next.desktop.start_in_tray);
+        assert_eq!(
+            parse_import(&serde_json::to_string(&next).unwrap()).unwrap(),
+            next
+        );
+        let mut invalid = serde_json::to_value(next).unwrap();
+        invalid["desktop"]["autostartEnabled"] = true.into();
+        assert!(parse_import(&invalid.to_string()).is_err());
+    }
 
     #[test]
     fn update_channels_default_migrate_validate_and_persist() {

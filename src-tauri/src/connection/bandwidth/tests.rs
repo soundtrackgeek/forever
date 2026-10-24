@@ -221,3 +221,36 @@ fn older_settings_import_defaults_to_unlimited_and_round_trips_policy() {
     settings.transfers.bandwidth.normal.total_kib = 1_000_001;
     assert!(parse_import(&serde_json::to_string(&settings).unwrap()).is_err());
 }
+
+#[tokio::test(start_paused = true)]
+async fn manual_pause_holds_both_directions_and_resume_preserves_metered_policy() {
+    let mut settings = BandwidthSettings {
+        manual_paused: true,
+        pause_on_metered: true,
+        ..Default::default()
+    };
+    let control = Bandwidth::new(settings.clone());
+    control.environment(600, NetworkCost::Unmetered);
+    let mut jobs = Vec::new();
+    for direction in [Direction::Download, Direction::Upload] {
+        let c = control.clone();
+        jobs.push(tokio::spawn(async move {
+            c.acquire(direction, 100, &AtomicBool::new(false)).await
+        }));
+    }
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(60)).await;
+    assert!(jobs.iter().all(|j| !j.is_finished()));
+    assert!(control.snapshot().manual_paused);
+    control.environment(600, NetworkCost::Metered);
+    settings.manual_paused = false;
+    control.configure(settings);
+    assert!(!control.snapshot().manual_paused);
+    assert!(control.paused());
+    tokio::time::advance(Duration::from_secs(60)).await;
+    assert!(jobs.iter().all(|j| !j.is_finished()));
+    control.environment(600, NetworkCost::Unmetered);
+    for job in jobs {
+        assert_eq!(job.await.unwrap().unwrap().count, 100);
+    }
+}

@@ -13,15 +13,17 @@ export type UpdateChannel = "stable" | "beta";
 export type UpdateCheckIntervalMinutes = 0 | 1 | 5 | 15 | 30 | 60 | 360;
 export type Preferences = { updateCheckIntervalMinutes: UpdateCheckIntervalMinutes; updateChannel: UpdateChannel; messageNotificationsEnabled: boolean; roomNotificationsEnabled: boolean; musicBrainzFallbackTrackCount: number };
 export type Settings = {
+  desktop: { closeToTray: boolean; startInTray: boolean };
   version: number; revision: number; webviewMigrated: boolean; connection: ConnectionProfile | null;
   transfers: { bandwidth?: BandwidthSettings; maxConcurrentDownloads: number; relaySuggestionMinutes: number; autoMirrorMinutes: number; soundcheckEnabled: boolean; filing?: FilingSettings };
   sharing: { version: number; uploadSlots: number; uploadPolicy: UploadPolicy; roots: { id: string; path: string; alias: string; enabled: boolean; addedAtMs: number }[] };
   wanted: { intervalMinutes: 0 | 15 | 30 | 60; defaultPreferences: WantedPreferences };
   archiveDatabasePath: string | null; preferences: Preferences; dialMemory: DialMemory;
 };
-export type SettingsPatch = Partial<Preferences & Settings["transfers"] & Pick<Settings["sharing"], "uploadSlots" | "uploadPolicy"> & { wantedIntervalMinutes: 0 | 15 | 30 | 60; wantedDefaultPreferences: WantedPreferences; dialMemory: DialMemory }>;
-export type SettingsSection = "connection" | "transfers" | "sharing" | "wanted" | "archive" | "preferences" | "searches";
+export type SettingsPatch = Partial<Preferences & Settings["desktop"] & Settings["transfers"] & Pick<Settings["sharing"], "uploadSlots" | "uploadPolicy"> & { wantedIntervalMinutes: 0 | 15 | 30 | 60; wantedDefaultPreferences: WantedPreferences; dialMemory: DialMemory }>;
+export type SettingsSection = "desktop" | "connection" | "transfers" | "sharing" | "wanted" | "archive" | "preferences" | "searches";
 export const defaultSettings = (): Settings => ({
+  desktop: { closeToTray: true, startInTray: true },
   version: 1, revision: 0, webviewMigrated: false, connection: null,
   transfers: { bandwidth: defaultBandwidth(), maxConcurrentDownloads: 3, relaySuggestionMinutes: 10, autoMirrorMinutes: 0, soundcheckEnabled: true, filing: defaultFilingSettings() },
   sharing: { version: 3, uploadSlots: 1, uploadPolicy: { maxFilesPerUser: 100, maxMegabytesPerUser: 10000, prioritizeFavorites: false, prioritizePrivileged: false }, roots: [] },
@@ -116,7 +118,7 @@ async function applyPatch(patch: SettingsPatch) {
     const next = structuredClone(state.settings);
     const { wantedIntervalMinutes, wantedDefaultPreferences, dialMemory, ...fields } = patch;
     for (const [key, value] of Object.entries(fields)) {
-      const target = key in next.preferences ? next.preferences : key in next.transfers ? next.transfers : next.sharing;
+      const target = key in next.desktop ? next.desktop : key in next.preferences ? next.preferences : key in next.transfers ? next.transfers : next.sharing;
       Object.assign(target, { [key]: value });
     }
     if (wantedIntervalMinutes !== undefined) next.wanted.intervalMinutes = wantedIntervalMinutes;
@@ -131,6 +133,8 @@ export async function validateSettingsImport(json: string): Promise<Settings> {
   if (json.length > 256 * 1024) throw new Error("Settings files must be smaller than 256 KiB.");
   if (isTauri()) return invoke<Settings>("settings_validate_import", { json });
   const value = JSON.parse(json) as Settings;
+  if (value && value.desktop === undefined) value.desktop = defaultSettings().desktop;
+  if (value?.transfers?.bandwidth && value.transfers.bandwidth.manualPaused === undefined) value.transfers.bandwidth.manualPaused = false;
   if (value?.transfers && value.transfers.bandwidth === undefined) value.transfers.bandwidth = defaultBandwidth();
   if (value?.transfers && value.transfers.autoMirrorMinutes === undefined) value.transfers.autoMirrorMinutes = 0;
   // Browser previews never write desktop settings; Rust performs full validation.

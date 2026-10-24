@@ -4,6 +4,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { getSettingsState, importSettings, resetSettingsSection, validateSettingsImport, type Settings, type SettingsSection } from "../settings";
 
 const sections: { id: SettingsSection; label: string; detail: string }[] = [
+  { id: "desktop", label: "Desktop & background", detail: "Restore close-to-tray and background sign-in preferences. Operating system autostart registration is unchanged." },
   { id: "preferences", label: "Notifications, updates & discovery", detail: "Restore notification toggles, update cadence, and the MusicBrainz fallback count." },
   { id: "transfers", label: "Downloads & Soundcheck", detail: "Restore three download lanes, a ten-minute relay delay, and Soundcheck. Transfer history is kept." },
   { id: "sharing", label: "Sharing & uploads", detail: "Remove shared folders from Forever and restore upload defaults. Files and upload history are kept." },

@@ -107,6 +107,15 @@ pub struct UploadHub {
 }
 
 impl UploadHub {
+    pub fn active_count(&self) -> usize {
+        self.uploads
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .filter(|u| u.status.occupies_slot())
+            .count()
+    }
+
     pub fn new(app: AppHandle, path: JsonFile, policy: UploadPolicy) -> Self {
         Self::load(
             Arc::new(move |snapshot| {

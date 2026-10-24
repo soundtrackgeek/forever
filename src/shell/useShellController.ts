@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useDesktopExit } from "../hooks/useDesktopExit";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SearchMode } from "../components/SearchModeSwitch";
 import { type AlbumResultView } from "../components/SearchWorkspace";
@@ -191,10 +191,17 @@ export function useShellController() {
     title: string;
     count: number;
   } | null>(null);
-  const [safeExitOpen, setSafeExitOpen] = useState(false);
-  const [safeExitPreparing, setSafeExitPreparing] = useState(false);
-  const allowNextClose = useRef(false);
-  const activeTransferCount = useRef(0);
+  const desktopExit = useDesktopExit({
+    native,
+    activeCount: safeExitPreview ? Math.max(1, transfers.snapshot.activeCount) : transfers.snapshot.activeCount,
+    prepare: transfers.prepareForRestart,
+    cancel: transfers.cancelRestartPreparation,
+  });
+  const safeExitOpen = desktopExit.open;
+  const safeExitPreparing = desktopExit.preparing;
+  const safeExitError = desktopExit.error;
+  const pauseSafelyAndExit = desktopExit.pauseAndExit;
+  const keepRunning = desktopExit.keepRunning;
   const relaysStarted = useRef(new Set<string>());
   const relaysNotified = useRef(new Set<string>());
   const transferVerificationActive = useRef(false);
@@ -205,69 +212,6 @@ export function useShellController() {
     connection.ready &&
     (needsOnboarding || onboardingInProgress) &&
     !onboardingDismissed;
-
-  useEffect(() => {
-    activeTransferCount.current = safeExitPreview
-      ? Math.max(1, transfers.snapshot.activeCount)
-      : transfers.snapshot.activeCount;
-  }, [safeExitPreview, transfers.snapshot.activeCount]);
-
-  const prepareTransfersForExit = transfers.prepareForRestart;
-  const cancelExitPreparation = useRef(transfers.cancelRestartPreparation);
-  useEffect(() => {
-    cancelExitPreparation.current = transfers.cancelRestartPreparation;
-  }, [transfers.cancelRestartPreparation]);
-  useEffect(() => {
-    if (!native) return;
-    let dispose: (() => void) | undefined;
-    let mounted = true;
-    let preparingClose = false;
-    void getCurrentWindow()
-      .onCloseRequested(async (event) => {
-        if (allowNextClose.current) return;
-        event.preventDefault();
-        if (preparingClose) return;
-        if (activeTransferCount.current > 0) {
-          setSafeExitOpen(true);
-          return;
-        }
-        // Even an idle queue can have a metadata save in flight.
-        preparingClose = true;
-        try {
-          await prepareTransfersForExit("pauseNow");
-          allowNextClose.current = true;
-          await getCurrentWindow().close();
-        } catch {
-          allowNextClose.current = false;
-          await cancelExitPreparation.current().catch(() => undefined);
-          setSafeExitOpen(true);
-        } finally {
-          preparingClose = false;
-        }
-      })
-      .then((unlisten) => {
-        if (mounted) dispose = unlisten;
-        else unlisten();
-      });
-    return () => {
-      mounted = false;
-      dispose?.();
-    };
-  }, [native, prepareTransfersForExit]);
-
-  const pauseSafelyAndExit = async () => {
-    if (safeExitPreparing) return;
-    setSafeExitPreparing(true);
-    try {
-      await transfers.prepareForRestart("pauseNow");
-      allowNextClose.current = true;
-      await getCurrentWindow().close();
-    } catch {
-      allowNextClose.current = false;
-      await transfers.cancelRestartPreparation().catch(() => undefined);
-      setSafeExitPreparing(false);
-    }
-  };
 
   const selectedResult =
     search.results.find((result) => result.id === selectedResultId) ??
@@ -1033,6 +977,7 @@ export function useShellController() {
     reviewTracklistState,
     roomFocus,
     rooms,
+    safeExitError,
     safeExitOpen,
     safeExitPreparing,
     safeExitPreview,
@@ -1050,7 +995,7 @@ export function useShellController() {
     setPreferencesAlbum,
     setQuery,
     setRelayNotice,
-    setSafeExitOpen,
+    keepRunning,
     setSearchMode,
     setSelectedMessageUsername,
     setSelectedResultId,

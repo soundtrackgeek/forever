@@ -19,6 +19,8 @@ pub struct Limits {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BandwidthSettings {
+    #[serde(default)]
+    pub manual_paused: bool,
     pub normal: Limits,
     pub alternate: Limits,
     pub schedule_enabled: bool,
@@ -29,6 +31,7 @@ pub struct BandwidthSettings {
 impl Default for BandwidthSettings {
     fn default() -> Self {
         Self {
+            manual_paused: false,
             normal: Limits::default(),
             alternate: Limits::default(),
             schedule_enabled: false,
@@ -76,6 +79,7 @@ pub enum NetworkCost {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub manual_paused: bool,
     pub revision: u64,
     pub alternate_active: bool,
     pub limits: Limits,
@@ -134,11 +138,13 @@ impl State {
         } else {
             self.settings.normal
         };
-        let paused =
-            self.settings.pause_on_metered && self.snapshot.network_cost != NetworkCost::Unmetered;
+        let paused = self.settings.manual_paused
+            || (self.settings.pause_on_metered
+                && self.snapshot.network_cost != NetworkCost::Unmetered);
         let changed = self.snapshot.alternate_active != alternate_active
             || self.snapshot.limits != limits
-            || self.snapshot.paused != paused;
+            || self.snapshot.paused != paused
+            || self.snapshot.manual_paused != self.settings.manual_paused;
         if self.snapshot.limits != limits || self.snapshot.paused != paused {
             self.buckets = [limits.total_kib, limits.download_kib, limits.upload_kib]
                 .map(|r| Bucket::new(r, now));
@@ -147,6 +153,7 @@ impl State {
         self.snapshot.alternate_active = alternate_active;
         self.snapshot.limits = limits;
         self.snapshot.paused = paused;
+        self.snapshot.manual_paused = self.settings.manual_paused;
         changed
     }
 }
@@ -169,6 +176,7 @@ impl Bandwidth {
                 limits: Limits::default(),
                 network_cost: NetworkCost::Unknown,
                 paused: false,
+                manual_paused: false,
             },
             buckets: [0, 0, 0].map(|r| Bucket::new(r, now)),
             epoch: 0,

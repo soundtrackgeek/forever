@@ -8,6 +8,8 @@ export default tseslint.config(
   {
     ignores: [
       "dist",
+      ".playwright-cli",
+      ".playwright-mcp",
       "node_modules",
       "src-tauri/target",
       "src-tauri/fuzz/target",

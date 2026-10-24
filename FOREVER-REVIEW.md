@@ -924,7 +924,19 @@ with global and per-direction limits. Add an "alternate limits" schedule (for
 example, unlimited at night) and a pause-on-metered-network toggle. The
 existing 128 KB buffer loop makes this a contained change.
 
-### 10. Tray, background mode, autostart, and single instance
+### 10. Tray, background mode, autostart, and single instance - DONE
+
+**Implemented in 0.0.78 (2026-10-24):** native tray status, Open, shared upload/download
+pause/resume, and Safe Passage Quit; close-to-tray defaults on with an exit-on-close
+setting and tray-failure fallback. Single-instance registration precedes all other
+plugins and store/network setup. Second launches show, unminimize, and focus the
+existing window. Sign-in startup is opt-in and reads the OS registration; optional
+hidden sign-in startup and `--background` preserve a visible ordinary launch.
+Window size/position/maximized state persist. Desktop settings migrate and round
+trip through the unified store; autostart is deliberately device-local. Tests cover
+lifecycle decisions, pending startup Quit, save failures, settings, and shared
+transfer holds. Actual OS sign-in and public-peer background transfers remain
+separate validation; URL actions/registration remain feature 20. Original proposal follows.
 
 Wanted Signals only works while Forever runs. Today, closing the window ends
 everything, and launching twice can start two clients that fight over the same

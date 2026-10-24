@@ -1,5 +1,6 @@
 mod archive;
 mod connection;
+mod desktop;
 mod matching;
 mod musicbrainz;
 mod updater;
@@ -20,6 +21,23 @@ pub fn run() {
     }
     let cleanup_state = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
     tauri::Builder::default()
+        .manage(desktop::DesktopState::default())
+        // Must run before every other plugin and before stores/network setup.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            desktop::show_main(app)
+        }))
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .args(["--autostart"])
+                .build(),
+        )
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(desktop::WINDOW_STATE)
+                .build(),
+        )
+        .on_window_event(desktop::window_event)
         .setup(|app| {
             app.manage(connection::initialize(app.handle())?);
             connection::bandwidth::start(app.handle().clone());
@@ -40,6 +58,7 @@ pub fn run() {
                     .ok()
                     .map(|path| path.join("discovery.sqlite3")),
             ));
+            desktop::initialize(app.handle());
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -48,6 +67,12 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            desktop::desktop_status,
+            desktop::desktop_set_autostart,
+            desktop::desktop_quit_requested,
+            desktop::desktop_ack_quit_request,
+            desktop::desktop_request_quit,
+            desktop::desktop_exit,
             connection::release_radar::release_radar_snapshot,
             connection::release_radar::release_radar_follow,
             connection::release_radar::release_radar_unfollow,
@@ -193,6 +218,23 @@ pub fn run() {
                     let app = app.clone();
                     let cleanup_state = cleanup_state.clone();
                     tauri::async_runtime::spawn(async move {
+                        if let Err(error) = app
+                            .state::<connection::ConnectionManager>()
+                            .prepare_desktop_exit()
+                            .await
+                        {
+                            use tauri::Emitter;
+                            let _ = app
+                                .state::<connection::ConnectionManager>()
+                                .cancel_restart_preparation();
+                            cleanup_state.store(0, Ordering::SeqCst);
+                            app.state::<desktop::DesktopState>()
+                                .exiting
+                                .store(false, Ordering::SeqCst);
+                            desktop::show_main(&app);
+                            let _ = app.emit("forever://desktop-error", error);
+                            return;
+                        }
                         app.state::<connection::ConnectionManager>()
                             .shutdown_network()
                             .await;

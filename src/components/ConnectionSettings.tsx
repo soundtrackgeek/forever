@@ -1,3 +1,4 @@
+import { DesktopSettings } from "./DesktopSettings";
 import { BandwidthSettings } from "./BandwidthSettings";
 import { SettingsPortability } from "./SettingsPortability";
 import { DiagnosticsExport } from "./DiagnosticsExport";
@@ -251,6 +252,7 @@ export function ConnectionSettings({
       </header>
 
       <div className="settings-scroll">
+        <DesktopSettings />
         <SettingsPortability onApplied={onSettingsApplied} />
         <form className="settings-panel" onSubmit={save}>
           <div className="settings-panel-heading">

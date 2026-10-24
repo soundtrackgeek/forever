@@ -3,13 +3,62 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.77` adds shared bandwidth caps, daily
-> alternate limits, and metered-network transfer holds.
+> **Status:** pre-alpha. Version `0.0.78` adds a system tray, background mode, optional
+> sign-in startup, window restoration, and single-instance protection.
 
-If `0.0.16` is installed, download and run the latest `0.0.77` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.78` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
+
+### Tray, background mode, and startup
+
+Closing the window now keeps Forever running in the system tray by default.
+Wanted Signals, New Release Radar, sharing, and transfers continue while the
+computer is awake and Forever is running. Click the tray icon, choose **Open
+Forever**, or launch Forever again to restore the same window. A second launch
+exits before opening stores or starting another Soulseek client. Window position,
+size, and maximized state are restored; ordinary launches always show the window.
+
+The tray shows connection status and active download/upload counts, refreshed
+every two seconds. **Pause all transfers** holds uploads and downloads and stops
+new transfers from starting; **Resume all transfers** releases that manual hold.
+Individual pauses and metered-network holds still apply. The manual hold persists
+across restart, is also available in Bandwidth settings, and leaves searches/chat
+running. Already buffered payloads can finish; peers may close a long-held connection.
+
+In **Settings → Desktop & background**:
+
+- Disable **Keep Forever running in the tray when I close the window** for
+  exit-on-close. If the tray cannot be created, close uses Safe Passage instead.
+- Enable **Start Forever when I sign in** to opt into OS startup on this computer.
+  It is off until explicitly enabled, and the checkbox reads the actual OS
+  registration. Importing settings never enables autostart. Disable this before
+  moving a portable executable to another location, then enable it at the new path.
+- **Start in the tray at sign-in** controls visibility for autostart. Manual
+  launches remain visible; `Forever.exe --background` explicitly starts hidden.
+- **Quit Forever…**, in Settings or the tray, exits through Safe Passage. Active
+  downloads require confirmation; even an idle queue is flushed before exit.
+  A failed save keeps the app open with a retry option. Network mappings are
+  cleaned up before the process exits.
+
+Enable the existing **Connect on startup** account option and remember your
+password if you want unattended connection after sign-in. Background mode does
+not keep a sleeping or powered-off computer online. No URL scheme is registered
+by this feature; deep-link forwarding is prepared for the separate review item 20.
+
+Desktop preferences use the crash-safe unified settings store and participate in
+export/import and Desktop reset; autostart is a separate OS registration. Regression
+tests cover migration, hidden-launch policy, shared transfer holds, and Safe
+Passage error/confirmation behavior. Windows smoke checks confirmed close-to-tray,
+hidden `--autostart` startup, and second-launch restoration with one surviving process. A system firewall
+prompt blocked mouse-based tray/autostart checks in the test environment; actual
+sign-in and public-network background transfers require separate validation.
+
+Tauri references: [single instance](https://v2.tauri.app/plugin/single-instance/),
+[autostart](https://v2.tauri.app/plugin/autostart/),
+[window state](https://v2.tauri.app/plugin/window-state/),
+[system tray](https://v2.tauri.app/learn/system-tray/).
 
 ### Bandwidth limits and scheduling
 

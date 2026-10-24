@@ -478,6 +478,7 @@ impl ConnectionManager {
             return Ok(self.settings.get());
         }
         if ![
+            "desktop",
             "transfers",
             "sharing",
             "wanted",
@@ -497,6 +498,7 @@ impl ConnectionManager {
         let next = self
             .settings
             .update(|s| match section {
+                "desktop" => s.desktop = Default::default(),
                 "transfers" => s.transfers = Default::default(),
                 "sharing" => s.sharing = Default::default(),
                 "wanted" => s.wanted = Default::default(),
@@ -839,6 +841,47 @@ impl ConnectionManager {
             return Err(ConnectionServiceError::WantedUnavailable);
         }
         Ok(self.wanted.snapshot())
+    }
+
+    pub async fn prepare_desktop_exit(&self) -> Result<(), String> {
+        self.prepare_transfers_for_restart(TransferPreparationMode::PauseNow)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn desktop_status_label(&self) -> String {
+        let state = match self.current_snapshot().state {
+            ConnectionState::Unconfigured => "Account setup needed",
+            ConnectionState::Offline => "Offline",
+            ConnectionState::Connecting | ConnectionState::Authenticating => "Connecting",
+            ConnectionState::Online => "Online",
+            ConnectionState::Reconnecting => "Reconnecting",
+            ConnectionState::Error => "Connection error",
+        };
+        let paused = if self.bandwidth.paused() {
+            " · Transfers paused"
+        } else {
+            ""
+        };
+        format!(
+            "Forever · {state} · {} downloads · {} uploads{paused}",
+            self.transfers.active_task_count(),
+            self.uploads.active_count()
+        )
+    }
+
+    pub fn toggle_transfer_pause(&self) -> Result<Settings, ConnectionServiceError> {
+        let _guard = self
+            .settings_operation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let previous = self.settings.get();
+        let next = self.settings.update(|s| {
+            s.transfers.bandwidth.manual_paused = !s.transfers.bandwidth.manual_paused
+        })?;
+        self.apply_settings(&previous, &next);
+        Ok(next)
     }
 
     pub fn current_transfers(&self) -> TransferQueueSnapshot {

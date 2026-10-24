@@ -19,10 +19,11 @@ export default function Overlays() {
     relayNotice,
     setRelayNotice,
     updater,
+    safeExitError,
     safeExitOpen,
     safeExitPreview,
     safeExitPreparing,
-    setSafeExitOpen,
+    keepRunning,
     pauseSafelyAndExit,
     preferencesAlbum,
     wanted,
@@ -50,10 +51,11 @@ export default function Overlays() {
     relayNotice: s.relayNotice,
     setRelayNotice: s.setRelayNotice,
     updater: s.updater,
+    safeExitError: s.safeExitError,
     safeExitOpen: s.safeExitOpen,
     safeExitPreview: s.safeExitPreview,
     safeExitPreparing: s.safeExitPreparing,
-    setSafeExitOpen: s.setSafeExitOpen,
+    keepRunning: s.keepRunning,
     pauseSafelyAndExit: s.pauseSafelyAndExit,
     preferencesAlbum: s.preferencesAlbum,
     wanted: s.wanted,
@@ -213,8 +215,8 @@ export default function Overlays() {
             : transfers.snapshot.activeCount
         }
         preparing={safeExitPreparing}
-        error={transfers.error}
-        onKeepRunning={() => setSafeExitOpen(false)}
+        error={safeExitError ?? transfers.error}
+        onKeepRunning={keepRunning}
         onPauseAndExit={() => void pauseSafelyAndExit()}
       />
 

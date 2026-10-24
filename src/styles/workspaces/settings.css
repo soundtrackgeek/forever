@@ -1012,3 +1012,11 @@ form.settings-panel {
 .bandwidth-form .primary-action { margin-top: 8px; }
 .bandwidth-form .primary-action:disabled { opacity: 0.5; cursor: default; }
 @media (max-width: 1100px) { .bandwidth-profiles { grid-template-columns: 1fr; } }
+
+.desktop-panel { padding: 20px; margin-bottom: 20px; }
+.desktop-panel p { color: #9da5ba; font-size: 12px; line-height: 1.6; }
+.desktop-panel > p { margin-top: 12px; }
+.desktop-panel > button { margin-top: 16px; }
+.desktop-controls { border: 0; padding: 0; margin: 20px 0; display: grid; gap: 14px; }
+.desktop-controls .bandwidth-toggle { display: flex; align-items: center; gap: 9px; color: #c4cad9; font-size: 13px; }
+.desktop-controls input { flex: 0 0 auto; accent-color: var(--amber); }

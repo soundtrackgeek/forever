@@ -47,6 +47,7 @@ export function BandwidthForm({ policy, onSave }: { policy: Policy; onSave: (pol
           </label>)}
         </fieldset>)}
       </div>
+      <label className="bandwidth-toggle"><input type="checkbox" checked={draft.manualPaused} onChange={(event) => setDraft({ ...draft, manualPaused: event.target.checked })} />Pause all transfers</label>
       <label className="bandwidth-toggle"><input type="checkbox" checked={draft.scheduleEnabled} onChange={(event) => setDraft({ ...draft, scheduleEnabled: event.target.checked })} />Use alternate limits on a daily schedule</label>
       <div className="bandwidth-times">
         <label>Start time<input aria-label="Alternate start time" type="time" required disabled={!draft.scheduleEnabled} value={Number.isNaN(draft.startMinute) ? "" : clock(draft.startMinute)} onChange={(event) => setDraft({ ...draft, startMinute: minute(event.target.value) })} /></label>
