@@ -35,6 +35,7 @@ describe("TransfersWorkspace signal order", () => {
   it("shows when Safe Passage has stopped the local queue for an update", () => {
     render(
       <TransfersWorkspace
+        sourceReliability={{ "source-release-a": { successes: 1, failures: 3, denials: 2, starts: 2, typicalStartDelayMs: 120_000, typicalSpeed: 100, updatedAtMs: 1 } }}
         safetyState="draining"
         maxConcurrentDownloads={3}
         relaySuggestionMinutes={10}
@@ -69,6 +70,7 @@ describe("TransfersWorkspace signal order", () => {
       />,
     );
 
+    expect(screen.getByText("Flaky source · source-release-a: 1 completed / 3 failed · 2 denied")).toHaveAttribute("title", expect.stringContaining("25% successful attempts"));
     expect(screen.getByText("Safe Passage · Update scheduled")).toBeInTheDocument();
     expect(
       screen.getByText("Current files may finish; the queue will not advance."),

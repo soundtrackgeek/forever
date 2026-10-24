@@ -21,7 +21,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import type { AlbumSource, PersonProfile, ReleaseAlternativeSource, Transfer, Upload } from "../types";
+import type { AlbumSource, PersonProfile, ReleaseAlternativeSource, SourceReliability, Transfer, Upload } from "../types";
 import type { SearchSessionRecord } from "../hooks/useSoulseekSearch";
 import {
   groupTransfers,
@@ -30,6 +30,7 @@ import {
 } from "../utils/transfers";
 import { releaseHealth } from "../utils/finishLine";
 import { groupAlbumSources } from "../utils/albumSources";
+import { flakySource, reliabilityDescription, reliabilityScore, sourceMemory } from "../utils/sourceRecovery";
 import { CountryFlag } from "./CountryFlag";
 
 type Filter = "all" | "active" | "queued" | "completed" | "attention";
@@ -41,6 +42,7 @@ type QueueDropTarget = {
 
 type TransfersWorkspaceProps = {
   transfers: Transfer[];
+  sourceReliability?: Record<string, SourceReliability>;
   safetyState: "running" | "draining" | "pausedForRestart";
   maxConcurrentDownloads: number;
   relaySuggestionMinutes: number;
@@ -136,7 +138,7 @@ const transferStatus = (transfer: Transfer) => {
     case "connecting": return "Connecting";
     case "downloading": return "Downloading";
     case "queued": return "Queued";
-    case "retrying": return `Auto retry ${transfer.retryCount ?? 1} of 3`;
+    case "retrying": return `Auto retry ${transfer.retryCount ?? 1} of 6`;
     case "paused": return "Paused";
     case "completed": return "Completed";
     case "failed": return "Failed";
@@ -156,7 +158,10 @@ const isVisibleInFilter = (
   return group.status === filter;
 };
 
+const emptyReliability: Record<string, SourceReliability> = {};
+
 export function TransfersWorkspace({
+  sourceReliability = emptyReliability,
   transfers,
   safetyState,
   maxConcurrentDownloads,
@@ -196,7 +201,7 @@ export function TransfersWorkspace({
     const timer = window.setInterval(() => setClock(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
-  const groups = useMemo(() => groupTransfers(transfers), [transfers]);
+  const groups = useMemo(() => groupTransfers(transfers, sourceReliability), [transfers, sourceReliability]);
   const healthFor = (group: TransferGroup) => releaseHealth(group, {
     archiveOwned: Boolean(group.releaseId && archiveOwnedReleaseIds.has(group.releaseId)),
   });
@@ -567,7 +572,7 @@ export function TransfersWorkspace({
           const currentUsers = new Set(group.transfers.map((transfer) => transfer.username.toLocaleLowerCase()));
           const relaySources = groupAlbumSources(relayRecord?.results ?? [])
             .filter((source) => !currentUsers.has(source.owner.toLocaleLowerCase()))
-            .sort((left, right) => relaySourceScore(right, group) - relaySourceScore(left, group));
+            .sort((left, right) => (relaySourceScore(right, group) + reliabilityScore(sourceMemory(sourceReliability, right.owner))) - (relaySourceScore(left, group) + reliabilityScore(sourceMemory(sourceReliability, left.owner))));
           const relayOpen = group.releaseId ? openRelayIds.has(group.releaseId) : false;
           const relaySearching = relayRecord?.snapshot.state === "searching";
           const relayRouteCount = relaySources.length + health.alternatives.length;
@@ -605,6 +610,8 @@ export function TransfersWorkspace({
                       </button> : <strong className="transfer-multi-source">{sourceNames.length} sources</strong>}
                     <i aria-label="Online" />
                   </small>
+                  {sourceNames.map((user) => { const memory = sourceMemory(sourceReliability, user); return memory ? <small className={flakySource(memory) ? "source-reliability-badge" : ""} key={user} title={reliabilityDescription(memory)}>{flakySource(memory) ? "Flaky source · " : ""}{user}: {memory.successes} completed / {memory.failures} failed{memory.denials ? ` · ${memory.denials} denied` : ""}</small> : null; })}
+                  {group.transfers.some((t) => t.lastAutomaticSwitchAtMs) ? <small>Auto-switched to an exact mirror · {group.transfers.find((t) => t.lastAutomaticSwitchAtMs)?.username}</small> : null}
                   <small>{group.transfers.length} {group.transfers.length === 1 ? "file" : "files"} · {formatBytes(group.sizeBytes)}</small>
                   <span className={`release-health-inline is-${health.state}`}>
                     {health.state === "verified" ? <ShieldCheck size={13} weight="fill" /> : moved ? <Archive size={13} weight="fill" /> : health.state === "attention" ? <WarningCircle size={13} weight="fill" /> : health.state === "recovering" ? <ArrowClockwise size={13} /> : <CheckCircle size={13} />}
@@ -694,7 +701,7 @@ export function TransfersWorkspace({
                   <strong>{completed ? "Completed" : `${formatBytes(group.transferredBytes)} / ${formatBytes(group.sizeBytes)} (${Math.round(progress)}%)`}</strong>
                   <i><b style={{ width: `${progress}%` }} /></i>
                   <small>
-                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 3${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? group.speedBytesPerSecond > 0 ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : remoteQueuePosition ? `Source queue #${remoteQueuePosition}${waitingFor ? ` · waiting ${waitingFor}` : ""} · using 1 of ${maxConcurrentDownloads} user lanes` : `${waitingTransfer?.status === "connecting" ? "Connecting to source" : "Contacting source"}${waitingFor ? ` · ${waitingFor}` : ""} · using 1 of ${maxConcurrentDownloads} user lanes` : group.status === "queued" ? `Local queue #${group.queuePosition} · Waiting for a user lane…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : health.filedByArchive ? "Filed away in Music Library" : moved ? "Moved out of the download folder" : "Ready in your download folder"}
+                    {health.state === "recovering" ? `Retry ${group.transfers.find((transfer) => transfer.status === "retrying")?.retryCount ?? 1} of 6${retryInSeconds !== null ? ` · in ${retryInSeconds}s` : ""}` : group.status === "active" ? group.speedBytesPerSecond > 0 ? `${formatBytes(group.speedBytesPerSecond)}/s${group.etaSeconds !== null ? ` · Album ETA ${formatEta(group.etaSeconds)}` : ""}` : remoteQueuePosition ? `Source queue #${remoteQueuePosition}${waitingFor ? ` · waiting ${waitingFor}` : ""}${group.etaIncludesQueue ? ` · Estimated album ETA ${formatEta(group.etaSeconds)} incl. queue` : " · Album ETA unknown"} · using 1 of ${maxConcurrentDownloads} user lanes` : `${waitingTransfer?.status === "connecting" ? "Connecting to source" : "Contacting source"}${waitingFor ? ` · ${waitingFor}` : ""} · using 1 of ${maxConcurrentDownloads} user lanes` : group.status === "queued" ? `Local queue #${group.queuePosition} · Waiting for a user lane…` : group.status === "paused" ? "Progress saved" : group.status === "failed" ? "Needs attention" : health.state === "attention" ? "Completed with issues" : health.filedByArchive ? "Filed away in Music Library" : moved ? "Moved out of the download folder" : "Ready in your download folder"}
                   </small>
                 </span>
                 <span className="release-transfer-actions">
@@ -767,7 +774,7 @@ export function TransfersWorkspace({
                       {health.alternatives.map((source) => {
                         const matchCount = group.transfers.filter((transfer) => source.files.some((file) => file.sizeBytes === transfer.sizeBytes && basename(file.remoteFilename).toLocaleLowerCase() === basename(transfer.remoteFilename).toLocaleLowerCase())).length;
                         return <article className="signal-relay-route is-mirror" key={`known:${source.username}:${source.remoteFolder}`}>
-                          <span><CountryFlag code={personByUsername(source.username)?.countryCode} /><strong>{source.username}</strong><small>Known mirror</small></span>
+                          <span><CountryFlag code={personByUsername(source.username)?.countryCode} /><strong>{source.username}</strong><small title={sourceMemory(sourceReliability, source.username) ? reliabilityDescription(sourceMemory(sourceReliability, source.username)!) : undefined}>{flakySource(sourceMemory(sourceReliability, source.username)) ? "Flaky source" : "Known mirror"}</small></span>
                           <span><strong>{matchCount}/{group.transfers.length}</strong><small>exact files</small></span>
                           <span className="signal-relay-path" title={source.remoteFolder}>{source.remoteFolder.replace(/[\\/]/g, " / ")}</span>
                           <button type="button" disabled={matchCount === 0} onClick={() => onSwitchReleaseSource(group.releaseId!, source)}>Use mirror</button>
@@ -779,7 +786,7 @@ export function TransfersWorkspace({
                         const sourceKey = `${group.releaseId}:${source.id}`;
                         const switching = switchingRelaySource === sourceKey;
                         return <article className={`signal-relay-route${compatible ? "" : " is-incompatible"}`} key={`fresh:${source.id}`}>
-                          <span><CountryFlag code={personByUsername(source.owner)?.countryCode} /><strong>{source.owner}</strong><small>{source.slotFree ? "Slot ready" : source.queueLength ? `${source.queueLength} queued` : "Slot status quiet"}</small></span>
+                          <span><CountryFlag code={personByUsername(source.owner)?.countryCode} /><strong>{source.owner}</strong>{flakySource(sourceMemory(sourceReliability, source.owner)) ? <small className="source-reliability-badge" title={reliabilityDescription(sourceMemory(sourceReliability, source.owner)!)}>Flaky source</small> : null}<small>{source.slotFree ? "Slot ready" : source.queueLength ? `${source.queueLength} queued` : "Slot status quiet"}</small></span>
                           <span><strong>{source.tracks.length} tracks</strong><small>{source.formats.join(" / ") || "Other files"} · {formatBytes(source.totalSizeBytes)}</small></span>
                           <span className="signal-relay-path" title={source.folder}>{source.folder.replace(/[\\/]/g, " / ")}</span>
                           <span className="signal-relay-speed"><strong>{source.averageSpeed ? `${formatBytes(source.averageSpeed)}/s` : "Unknown"}</strong><small>reported speed</small></span>

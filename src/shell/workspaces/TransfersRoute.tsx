@@ -29,6 +29,7 @@ export default function TransfersRoute() {
     <TransfersWorkspace
       key={transferFocus?.requestId ?? "transfers"}
       transfers={transfers.snapshot.transfers}
+      sourceReliability={transfers.snapshot.sourceReliability}
       safetyState={transfers.snapshot.safetyState}
       maxConcurrentDownloads={transfers.snapshot.maxConcurrentDownloads}
       relaySuggestionMinutes={transfers.snapshot.relaySuggestionMinutes}

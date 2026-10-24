@@ -380,7 +380,7 @@ describe("Forever shell", () => {
     expect(
       screen.getAllByText("Def Leppard - Hysteria (1987)").length,
     ).toBeGreaterThan(0);
-  }, 10_000);
+  });
 
   it("uses Music Library as a read-only Archive without adopting downloads", async () => {
     await renderApp();
@@ -808,7 +808,8 @@ describe("Forever shell", () => {
     expect(
       screen.getByRole("button", { name: "Pause 04 - Night Geometry.flac" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText(/Album ETA 1m 24s/).length).toBeGreaterThan(0);
+    // The preview advances every 500 ms; duration math is tested in transfers.test.
+    expect(screen.getAllByText(/Album ETA \d+m \d+s/).length).toBeGreaterThan(0);
 
     await click(screen.getByRole("tab", { name: "Completed 2" }));
     expect(within(workspace).getByText("Apex Horizon (Deluxe)")).toBeInTheDocument();
@@ -1033,6 +1034,11 @@ describe("Forever shell", () => {
     expect(relayDelay).toHaveValue("10");
     fireEvent.change(relayDelay, { target: { value: "20" } });
     expect(relayDelay).toHaveValue("20");
+    const autoMirror = screen.getByRole("combobox", { name: "Auto-switch to exact mirrors" });
+    expect(autoMirror).toHaveValue("0");
+    fireEvent.change(autoMirror, { target: { value: "5" } });
+    expect(autoMirror).toHaveValue("5");
+    expect(getSettingsState().settings.transfers.autoMirrorMinutes).toBe(5);
     const soundcheck = screen.getByRole("checkbox", {
       name: /Automatic Soundcheck/,
     });
@@ -1046,6 +1052,7 @@ describe("Forever shell", () => {
     expect(
       screen.getByRole("combobox", { name: /Automatic update checks/ }),
     ).toHaveValue("15");
+    expect(screen.getByRole("combobox", { name: "Auto-switch to exact mirrors" })).toHaveValue("5");
   });
 
   it("shows the release changelog in the update prompt", async () => {
@@ -1056,17 +1063,17 @@ describe("Forever shell", () => {
       await screen.findByRole("button", { name: "Update" }, { timeout: 2_000 }),
     );
     expect(
-      screen.getByRole("heading", { name: "Forever 0.0.70 is ready." }),
+      screen.getByRole("heading", { name: "Forever 0.0.71 is ready." }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update available" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Workspaces load on demand while searches and transfers keep running.",
+        "Opt in to automatic switching to exact mirrors for stalled releases.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Shared state uses selectors to avoid unrelated workspace updates.",
+        "Source reliability history improves Signal Relay ranking.",
       ),
     ).toBeInTheDocument();
     expect(

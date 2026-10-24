@@ -67,3 +67,10 @@ it("normalizes old preference values while leaving malformed preset JSON availab
   localStorage.setItem(legacyKeys.dialMemory, "broken JSON"); expect(() => readLegacySettings()).toThrow();
   expect(localStorage.getItem(legacyKeys.dialMemory)).toBe("broken JSON");
 });
+
+it("does not enable automatic mirrors when saving the opt-in fails", async () => {
+  expect(defaultSettings().transfers.autoMirrorMinutes).toBe(0);
+  invoke.mockRejectedValueOnce(new Error("Disk full"));
+  await expect(patchSettings({ autoMirrorMinutes: 5 })).rejects.toThrow("Disk full");
+  expect(getSettingsState().settings.transfers.autoMirrorMinutes).toBe(0);
+});

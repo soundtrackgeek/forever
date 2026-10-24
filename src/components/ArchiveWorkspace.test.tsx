@@ -96,6 +96,7 @@ const group: TransferGroup = {
   transferredBytes: 10_000_000,
   speedBytesPerSecond: 0,
   etaSeconds: 0,
+  etaIncludesQueue: false,
   status: "completed",
   queueIndex: 0,
   queuePosition: null,

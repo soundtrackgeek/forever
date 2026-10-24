@@ -1,4 +1,4 @@
-import type { Transfer } from "../types";
+import type { SourceReliability, Transfer } from "../types";
 
 export type TransferGroupStatus =
   | "active"
@@ -18,6 +18,7 @@ export type TransferGroup = {
   transferredBytes: number;
   speedBytesPerSecond: number;
   etaSeconds: number | null;
+  etaIncludesQueue: boolean;
   status: TransferGroupStatus;
   queueIndex: number;
   queuePosition: number | null;
@@ -60,7 +61,7 @@ const statusFor = (transfers: Transfer[]): TransferGroupStatus => {
   return "queued";
 };
 
-export const groupTransfers = (transfers: Transfer[]): TransferGroup[] => {
+export const groupTransfers = (transfers: Transfer[], memory: Record<string, SourceReliability> = {}, now = Date.now()): TransferGroup[] => {
   const grouped = new Map<
     string,
     { transfers: Transfer[]; queueIndex: number }
@@ -92,6 +93,15 @@ export const groupTransfers = (transfers: Transfer[]): TransferGroup[] => {
           total + Math.max(0, transfer.sizeBytes - transfer.transferredBytes),
         0,
       );
+      const queued = ordered.find((t) => t.status === "remotelyQueued");
+      const history = queued ? memory[queued.username.toLowerCase()] : undefined;
+      // Queue positions are counts, not durations. A source's observed start
+      // delay gives an explicit estimate; with no history the ETA stays unknown.
+      const queueEstimate = queued && history && history.starts >= 2 && history.typicalSpeed > 0
+        ? Math.ceil(Math.max(0, history.typicalStartDelayMs * Math.max(1, queued.queuePosition ?? 1)
+            - Math.max(0, now - (queued.waitingSinceMs ?? now))) / 1000)
+          + Math.ceil(remainingBytes / history.typicalSpeed)
+        : null;
       return {
         id,
         releaseId: ordered[0].releaseId ?? null,
@@ -108,7 +118,8 @@ export const groupTransfers = (transfers: Transfer[]): TransferGroup[] => {
         etaSeconds:
           active && speedBytesPerSecond > 0
             ? Math.ceil(remainingBytes / speedBytesPerSecond)
-            : null,
+            : queueEstimate,
+        etaIncludesQueue: queueEstimate !== null,
         status: statusFor(ordered),
         queueIndex: group.queueIndex,
         queuePosition: null,

@@ -127,6 +127,8 @@ impl DialMemory {
 pub struct TransferSettings {
     pub max_concurrent_downloads: u8,
     pub relay_suggestion_minutes: u32,
+    #[serde(default)]
+    pub auto_mirror_minutes: u32,
     pub soundcheck_enabled: bool,
 }
 impl Default for TransferSettings {
@@ -134,6 +136,7 @@ impl Default for TransferSettings {
         Self {
             max_concurrent_downloads: 3,
             relay_suggestion_minutes: 10,
+            auto_mirror_minutes: 0,
             soundcheck_enabled: true,
         }
     }
@@ -214,6 +217,7 @@ impl Settings {
         }
         if !(1..=6).contains(&self.transfers.max_concurrent_downloads)
             || ![0, 5, 10, 20, 30, 60].contains(&self.transfers.relay_suggestion_minutes)
+            || ![0, 5, 10, 20, 30, 60].contains(&self.transfers.auto_mirror_minutes)
         {
             return Err("Invalid download lanes or relay delay.".into());
         }
@@ -361,6 +365,7 @@ impl AppSettings {
 pub struct SettingsPatch {
     pub max_concurrent_downloads: Option<u8>,
     pub relay_suggestion_minutes: Option<u32>,
+    pub auto_mirror_minutes: Option<u32>,
     pub soundcheck_enabled: Option<bool>,
     pub upload_slots: Option<u8>,
     pub upload_policy: Option<super::upload_policy::UploadPolicy>,
@@ -397,6 +402,7 @@ impl SettingsPatch {
             relay_suggestion_minutes,
             s.transfers.relay_suggestion_minutes
         );
+        assign!(auto_mirror_minutes, s.transfers.auto_mirror_minutes);
         assign!(soundcheck_enabled, s.transfers.soundcheck_enabled);
         assign!(upload_slots, s.sharing.upload_slots);
         assign!(upload_policy, s.sharing.upload_policy);
@@ -500,6 +506,7 @@ mod tests {
             TransferSettings {
                 max_concurrent_downloads: 5,
                 relay_suggestion_minutes: 30,
+                auto_mirror_minutes: 0,
                 soundcheck_enabled: false
             }
         );
@@ -693,5 +700,29 @@ mod tests {
         let restored = open(dir.path()).get();
         assert!(restored.connection.is_none());
         assert_eq!(restored.preferences.music_brainz_fallback_track_count, 23);
+    }
+    #[test]
+    fn automatic_mirror_setting_defaults_off_validates_and_round_trips() {
+        let mut settings = Settings::default();
+        let mut legacy = serde_json::to_value(&settings).unwrap();
+        legacy["transfers"]
+            .as_object_mut()
+            .unwrap()
+            .remove("autoMirrorMinutes");
+        let restored: Settings = serde_json::from_value(legacy).unwrap();
+        assert_eq!(restored.transfers.auto_mirror_minutes, 0);
+        SettingsPatch {
+            auto_mirror_minutes: Some(5),
+            ..Default::default()
+        }
+        .apply(&mut settings);
+        assert!(settings.validate().is_ok());
+        let restored: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+        assert_eq!(restored.transfers.auto_mirror_minutes, 5);
+        settings.transfers.auto_mirror_minutes = 1;
+        assert!(settings.validate().is_err());
+        settings.transfers = TransferSettings::default();
+        assert_eq!(settings.transfers.auto_mirror_minutes, 0);
     }
 }

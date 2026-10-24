@@ -1302,6 +1302,7 @@ export function useSoulseekTransfers() {
   const clearActivityNotice = useCallback(() => setActivityNotice(null), []);
   const clearError = useCallback(() => setError(null), []);
   const setMaxConcurrentDownloads = useCallback(async (maxConcurrentDownloads: number) => { await patchSettings({ maxConcurrentDownloads }); }, []);
+  const setAutoMirrorMinutes = useCallback(async (minutes: number) => { await patchSettings({ autoMirrorMinutes: minutes }); }, []);
   const setRelaySuggestionMinutes = useCallback(async (minutes: number) => { await patchSettings({ relaySuggestionMinutes: minutes }); }, []);
   const setSoundcheckEnabled = useCallback(async (enabled: boolean) => { await patchSettings({ soundcheckEnabled: enabled }); }, []);
 
@@ -1397,6 +1398,7 @@ export function useSoulseekTransfers() {
       patchReleaseFile,
       setMaxConcurrentDownloads,
       setRelaySuggestionMinutes,
+      setAutoMirrorMinutes,
       setSoundcheckEnabled,
       prepareForRestart,
       cancelRestartPreparation,
@@ -1436,6 +1438,7 @@ export function useSoulseekTransfers() {
       patchReleaseFile,
       setMaxConcurrentDownloads,
       setRelaySuggestionMinutes,
+      setAutoMirrorMinutes,
       setSoundcheckEnabled,
       prepareForRestart,
       cancelRestartPreparation,

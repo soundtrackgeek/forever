@@ -177,8 +177,9 @@ pub(super) async fn handle_direct_peer(
                 if let Err(error) =
                     queue_download_on_peer(&mut stream, ticket.clone(), services.clone()).await
                 {
-                    if services.transfers.retry_id(
+                    if services.transfers.retry_peer(
                         &ticket.id,
+                        ticket.connection_token,
                         format!("The source connection ended before the file was queued: {error}"),
                     ) {
                         let _ = services
@@ -573,8 +574,9 @@ pub(super) fn spawn_outbound_download_peer(
         )
         .await
         {
-            if transfers.retry_id(
+            if transfers.retry_peer(
                 &claimed.id,
+                claimed.connection_token,
                 format!("The source connection ended before the file was queued: {error}"),
             ) {
                 let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
@@ -1050,7 +1052,7 @@ pub(super) async fn handle_peer_messages(
             }
             UPLOAD_DENIED_CODE => {
                 let (filename, reason) = parse_upload_denied(&frame)?;
-                if services.transfers.fail_for_filename(
+                if services.transfers.deny_for_filename(
                     username,
                     &filename,
                     format!("The source declined the download: {reason}"),
@@ -1114,19 +1116,21 @@ pub(super) fn spawn_file_download(
     };
     let id = plan.id.clone();
     let cancellation = Arc::new(AtomicBool::new(false));
-    transfers.register_task(id.clone(), cancellation.clone());
+    if !transfers.register_task(id.clone(), transfer_token, cancellation.clone()) {
+        return;
+    }
     let task_transfers = transfers.clone();
     let task_id = id.clone();
     tauri::async_runtime::spawn(async move {
         let outcome = receive_file(stream, &plan, task_transfers.clone(), cancellation).await;
         if let Err(message) = outcome {
             if retryable_download_error(&message) {
-                task_transfers.retry_id(&task_id, message);
+                task_transfers.retry_attempt(&task_id, transfer_token, message);
             } else {
-                task_transfers.fail_id(&task_id, message);
+                task_transfers.fail_attempt(&task_id, transfer_token, message);
             }
         }
-        task_transfers.unregister_task(&task_id);
+        task_transfers.unregister_task(&task_id, transfer_token);
         let _ = command_sender.send(ConnectionCommand::ScheduleDownloads);
     });
 }
@@ -1316,6 +1320,7 @@ pub(super) async fn receive_file(
     let mut transferred = plan.offset;
     let mut last_bytes = transferred;
     let mut last_update = Instant::now();
+    let mut last_data = Instant::now();
     let mut buffer = vec![0_u8; FILE_BUFFER_SIZE];
     while transferred < plan.size_bytes {
         if cancellation.load(Ordering::SeqCst) {
@@ -1333,10 +1338,25 @@ pub(super) async fn receive_file(
         let count = tokio::select! {
             result = stream.read(&mut buffer[..capacity]) => result
                 .map_err(|error| format!("The source connection was interrupted: {error}"))?,
-            _ = tokio::time::sleep(Duration::from_millis(100)) => continue,
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                if last_data.elapsed() >= Duration::from_secs(60) {
+                    return Err("The source connection timed out without sending data.".into());
+                }
+                if last_update.elapsed() >= Duration::from_millis(250) {
+                    let speed = transferred.saturating_sub(last_bytes).saturating_mul(1_000) / last_update.elapsed().as_millis().max(1) as u64;
+                    transfers.update_progress(&plan.id, plan.transfer_token, transferred, speed);
+                    last_bytes = transferred;
+                    last_update = Instant::now();
+                }
+                continue;
+            },
         };
         if count == 0 {
             return Err("The source closed the connection before the file completed.".to_owned());
+        }
+        last_data = Instant::now();
+        if cancellation.load(Ordering::SeqCst) {
+            continue;
         }
         file.write_all(&buffer[..count])
             .await
@@ -1362,14 +1382,8 @@ pub(super) async fn receive_file(
         .map_err(|error| format!("Forever could not secure the completed file: {error}"))?;
     drop(file);
 
-    if plan.final_path.exists() {
-        return Err("A file appeared at the final download path before completion.".to_owned());
-    }
-    tokio::fs::rename(&plan.partial_path, &plan.final_path)
-        .await
-        .map_err(|error| format!("Forever could not finalize the downloaded file: {error}"))?;
     transfers
-        .complete(&plan.id)
+        .complete(plan)
         .map_err(|error| error.to_string())?;
     Ok(())
 }

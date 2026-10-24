@@ -215,3 +215,5 @@
   .signal-relay-route,
   .signal-relay-route.is-mirror { grid-template-columns: minmax(105px, .7fr) minmax(90px, .45fr) minmax(130px, 1fr) auto; }
 }
+
+.source-reliability-badge { color: #f5be70; }

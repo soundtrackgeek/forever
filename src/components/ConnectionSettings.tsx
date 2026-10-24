@@ -65,6 +65,8 @@ type ConnectionSettingsProps = {
   maxConcurrentDownloads: number;
   onSetMaxConcurrentDownloads: (maximum: number) => Promise<unknown>;
   relaySuggestionMinutes: number;
+  autoMirrorMinutes: number;
+  onSetAutoMirrorMinutes: (minutes: number) => Promise<void>;
   onSetRelaySuggestionMinutes: (minutes: number) => Promise<unknown>;
   soundcheckEnabled: boolean;
   onSetSoundcheckEnabled: (enabled: boolean) => Promise<unknown>;
@@ -143,6 +145,8 @@ export function ConnectionSettings({
   maxConcurrentDownloads,
   onSetMaxConcurrentDownloads,
   relaySuggestionMinutes,
+  autoMirrorMinutes,
+  onSetAutoMirrorMinutes,
   onSetRelaySuggestionMinutes,
   soundcheckEnabled,
   onSetSoundcheckEnabled,
@@ -433,8 +437,14 @@ export function ConnectionSettings({
               </select>
             </label>
             <label className="download-lanes-field signal-relay-setting">
-              <span><strong>Suggest another source after</strong><small>Forever searches quietly; switching always remains your choice.</small></span>
+              <span><strong>Suggest another source after</strong><small>Forever searches quietly and suggests other sources for review.</small></span>
               <select aria-label="Signal Relay suggestion delay" value={relaySuggestionMinutes} onChange={(event) => void onSetRelaySuggestionMinutes(Number(event.target.value))}>
+                {[0, 5, 10, 20, 30, 60].map((minutes) => <option value={minutes} key={minutes}>{minutes === 0 ? "Off" : `${minutes} min`}</option>)}
+              </select>
+            </label>
+            <label className="download-lanes-field signal-relay-setting">
+              <span><strong>Auto-switch to exact mirrors</strong><small>Off by default. Switch after this long without a start, only when every unfinished filename and size matches. Other replacements need your approval.</small></span>
+              <select aria-label="Auto-switch to exact mirrors" value={autoMirrorMinutes} onChange={(event) => void onSetAutoMirrorMinutes(Number(event.target.value)).catch(() => undefined)}>
                 {[0, 5, 10, 20, 30, 60].map((minutes) => <option value={minutes} key={minutes}>{minutes === 0 ? "Off" : `${minutes} min`}</option>)}
               </select>
             </label>

@@ -10,7 +10,7 @@ export type DialMemory = { pinned: DialPreset[]; recent: { mode: "files" | "albu
 export type Preferences = { updateCheckIntervalMinutes: 0 | 1 | 5 | 15 | 30 | 60; messageNotificationsEnabled: boolean; roomNotificationsEnabled: boolean; musicBrainzFallbackTrackCount: number };
 export type Settings = {
   version: number; revision: number; webviewMigrated: boolean; connection: ConnectionProfile | null;
-  transfers: { maxConcurrentDownloads: number; relaySuggestionMinutes: number; soundcheckEnabled: boolean };
+  transfers: { maxConcurrentDownloads: number; relaySuggestionMinutes: number; autoMirrorMinutes: number; soundcheckEnabled: boolean };
   sharing: { version: number; uploadSlots: number; uploadPolicy: UploadPolicy; roots: { id: string; path: string; alias: string; enabled: boolean; addedAtMs: number }[] };
   wanted: { intervalMinutes: 0 | 15 | 30 | 60; defaultPreferences: WantedPreferences };
   archiveDatabasePath: string | null; preferences: Preferences; dialMemory: DialMemory;
@@ -19,7 +19,7 @@ export type SettingsPatch = Partial<Preferences & Settings["transfers"] & Pick<S
 export type SettingsSection = "connection" | "transfers" | "sharing" | "wanted" | "archive" | "preferences" | "searches";
 export const defaultSettings = (): Settings => ({
   version: 1, revision: 0, webviewMigrated: false, connection: null,
-  transfers: { maxConcurrentDownloads: 3, relaySuggestionMinutes: 10, soundcheckEnabled: true },
+  transfers: { maxConcurrentDownloads: 3, relaySuggestionMinutes: 10, autoMirrorMinutes: 0, soundcheckEnabled: true },
   sharing: { version: 3, uploadSlots: 1, uploadPolicy: { maxFilesPerUser: 100, maxMegabytesPerUser: 10000, prioritizeFavorites: false, prioritizePrivileged: false }, roots: [] },
   wanted: { intervalMinutes: 30, defaultPreferences: { formatPreference: "preferLossless", minimumBitrateKbps: 320, minimumTrackCount: null } },
   archiveDatabasePath: null,
@@ -127,6 +127,7 @@ export async function validateSettingsImport(json: string): Promise<Settings> {
   if (json.length > 256 * 1024) throw new Error("Settings files must be smaller than 256 KiB.");
   if (isTauri()) return invoke<Settings>("settings_validate_import", { json });
   const value = JSON.parse(json) as Settings;
+  if (value?.transfers && value.transfers.autoMirrorMinutes === undefined) value.transfers.autoMirrorMinutes = 0;
   // Browser previews never write desktop settings; Rust performs full validation.
   const shape = (input: unknown, example: unknown): boolean => {
     if (example === null) return input === null || typeof input === "string" || typeof input === "number";

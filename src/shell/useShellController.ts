@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SearchMode } from "../components/SearchModeSwitch";
 import { type AlbumResultView } from "../components/SearchWorkspace";
+import { useAutomaticRelay } from "../hooks/useAutomaticRelay";
 import { useAlbumDiscovery } from "../hooks/useAlbumDiscovery";
 import { useAppUpdater } from "../hooks/useAppUpdater";
 import { useArchiveInventory } from "../hooks/useArchiveInventory";
@@ -143,6 +144,16 @@ export function useShellController() {
   const folders = useSoulseekFolders();
   const shares = useSoulseekShares();
   const people = useSoulseekPeople();
+  useAutomaticRelay({
+    enabled: native && transfers.ready && connection.snapshot.state === "online" && transfers.snapshot.safetyState === "running",
+    minutes: transfers.snapshot.autoMirrorMinutes ?? 0,
+    groups: transferGroups, memory: transfers.snapshot.sourceReliability ?? {}, records: search.records,
+    excluded: (user) => { const person = people.personByUsername(user); return !!person?.blocked || !!person?.ignored; },
+    startSearch: search.startSearch,
+    inspect: (source) => folders.inspect(source.representative, source.folders),
+    switchSource: (releaseId, source) => invoke<boolean>("transfer_auto_relay_release_source", { releaseId, source }),
+    closeSearch: search.closeSearch,
+  });
   const messages = usePrivateMessages();
   const rooms = useSoulseekRooms();
   const [sharesUsername, setSharesUsername] = useState<string | null>(null);
@@ -276,7 +287,8 @@ export function useShellController() {
 
   useEffect(() => {
     const minutes = transfers.snapshot.relaySuggestionMinutes;
-    if (!native || minutes === 0 || connection.snapshot.state !== "online")
+    const automaticMinutes = transfers.snapshot.autoMirrorMinutes ?? 0;
+    if (!native || minutes === 0 || (automaticMinutes > 0 && automaticMinutes <= minutes) || connection.snapshot.state !== "online")
       return;
     const threshold = minutes * 60_000;
     for (const group of transferGroups) {
@@ -315,6 +327,7 @@ export function useShellController() {
     search,
     transferGroups,
     transfers.snapshot.relaySuggestionMinutes,
+    transfers.snapshot.autoMirrorMinutes,
   ]);
 
   useEffect(() => {

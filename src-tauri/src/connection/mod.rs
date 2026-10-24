@@ -771,6 +771,17 @@ pub async fn transfer_switch_release_source(
 }
 
 #[tauri::command]
+pub async fn transfer_auto_relay_release_source(
+    manager: State<'_, ConnectionManager>,
+    release_id: String,
+    source: downloads::ReleaseAlternativeSource,
+) -> Result<bool, String> {
+    manager
+        .auto_relay_release_source(&release_id, source)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn transfer_relay_release_source(
     manager: State<'_, ConnectionManager>,
     release_id: String,

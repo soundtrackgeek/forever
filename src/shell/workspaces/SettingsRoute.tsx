@@ -72,6 +72,8 @@ export default function SettingsRoute() {
       onSetUploadPolicy={sharing.setUploadPolicy}
       maxConcurrentDownloads={transfers.snapshot.maxConcurrentDownloads}
       onSetMaxConcurrentDownloads={transfers.setMaxConcurrentDownloads}
+      autoMirrorMinutes={transfers.snapshot.autoMirrorMinutes ?? 0}
+      onSetAutoMirrorMinutes={transfers.setAutoMirrorMinutes}
       relaySuggestionMinutes={transfers.snapshot.relaySuggestionMinutes}
       onSetRelaySuggestionMinutes={transfers.setRelaySuggestionMinutes}
       soundcheckEnabled={transfers.snapshot.soundcheckEnabled}

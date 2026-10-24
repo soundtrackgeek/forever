@@ -620,7 +620,33 @@ reads "Home discovery will arrive after the first search-and-download release."
 
 ### 18. Smarter retries and opt-in automatic failover
 
-**Today:** Automatic retries stop after three attempts
+**Implemented in 0.0.71 (2026-10-24):** Download lanes offers a separate
+**Auto-switch to exact mirrors** delay (Off by default, 5–60 minutes). Recovery
+runs across workspaces, checks every unfinished file for a unique exact basename
+and size match, and rechecks backend state after discovery. Paused releases,
+active writers, local disk failures, blocked/ignored users and Safe Passage are
+excluded. Partial bytes and completed files remain intact. Each release permits
+three automatic switches without returning to previously tried users; mismatched
+replacements remain manual. Fresh search candidates require full folder inspection.
+
+Six transient retries use 5/15/45/120/300/600-second delays; 60-second silent file
+connections recover, and stall age survives retries. Attempt guards reject late
+callbacks, finalization checks the current attempt before rename, and cancellation
+keeps writers registered until their file handles close. Explicit denials and
+local file failures do not repeatedly retry the same user.
+
+Bounded per-user history persists successes, failures, denials, start delays and
+speed in the existing crash-safe transfer store (schema 4). It influences Signal
+Relay ranking and explains the **Flaky source** badge. Transfer speed uses a 20%
+EMA with idle decay. Album queue ETA uses observed delay scaled by queue position
+plus transfer time, is explicitly approximate, and stays unknown without history.
+
+Verification covers policy/state guards, unique and incomplete mirror sets, partial
+and completed-file preservation, persistence/migration, source-loop limits,
+late file attempts, EMA behavior, queue ETA, opt-in settings and background relay.
+Browser validation is separate from unverified live public peer interoperability.
+
+**Original review:** Automatic retries stopped after three attempts
 (`MAX_AUTOMATIC_RETRIES = 3`). Signal Relay always requires manual approval,
 even for exact basename-and-size mirrors, which the code already treats as safe.
 Users who repeatedly fail or deny uploads are not remembered.

@@ -5,6 +5,38 @@ All notable changes to Forever are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.71] - 2026-10-24
+
+### Added
+
+- Opt-in **Auto-switch to exact mirrors** after 5–60 minutes stalled, with
+  backend checks for complete unique filename/size coverage, current state,
+  blocked users, Safe Passage, and a three-switch limit without source loops.
+  Completed files and partial bytes are preserved; mismatches remain manual.
+- Durable local source reliability history, Signal Relay ranking adjustments,
+  and evidence-backed **Flaky source** badges. Queue-aware album ETA estimates
+  use observed start delays and speed, and remain unknown without enough history.
+
+### Changed
+
+- Six bounded transient retries (5, 15, 45, 120, 300, 600 seconds), keeping stall
+  age across retries. Silent file connections retry after 60 seconds without data.
+- Download speed and ETA use an EMA with idle samples and per-attempt reset.
+  Transfer history migrates to schema 4; existing settings keep automatic mirrors off.
+
+### Fixed
+
+- Late file/peer callbacks cannot fail, complete, count, or unregister a newer
+  attempt. Cancelled writers close before partial files resume, and finalization
+  checks the attempt under the transfer lock before moving the file.
+
+### Verification
+
+- Regression coverage for exact mirror coverage, stale replies, source limits,
+  partial preservation, persisted reliability, settings compatibility, queue ETA,
+  speed smoothing, and background recovery across navigation.
+- Local browser/IPC tests do not establish live public Soulseek interoperability.
+
 ## [0.0.70] - 2026-10-24
 
 ### Changed

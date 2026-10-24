@@ -1,3 +1,6 @@
+mod recovery;
+pub use recovery::SourceReliability;
+
 use super::album_query::{AlbumIdentity, AlbumQueryPlan};
 use super::soundcheck::{inspect_file, SoundcheckResult, SoundcheckStatus};
 use super::store::{self, DecodeError, JsonFile};
@@ -21,8 +24,8 @@ const PROGRESS_EVENT: &str = "forever://transfer-progress";
 const STORE_ERROR_EVENT: &str = "forever://transfer-store-error";
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
-const STORE_VERSION: u32 = 3;
-const MAX_AUTOMATIC_RETRIES: u32 = 3;
+const STORE_VERSION: u32 = 4;
+const MAX_AUTOMATIC_RETRIES: u32 = 6;
 const DEFAULT_MAX_CONCURRENT_DOWNLOADS: u8 = 3;
 const MAX_CONCURRENT_DOWNLOADS: u8 = 6;
 const DEFAULT_RELAY_SUGGESTION_MINUTES: u32 = 10;
@@ -205,6 +208,10 @@ pub struct TransferSnapshot {
     pub patch_repair: Option<PatchRepairSnapshot>,
     #[serde(default)]
     pub alternative_sources: Vec<ReleaseAlternativeSource>,
+    #[serde(default)]
+    pub automatic_sources: Vec<String>,
+    #[serde(default)]
+    pub last_automatic_switch_at_ms: Option<u64>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
     #[serde(skip)]
@@ -217,6 +224,8 @@ pub struct TransferSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct TransferQueueSnapshot {
     pub revision: u64,
+    pub source_reliability: HashMap<String, SourceReliability>,
+    pub auto_mirror_minutes: u32,
     pub persistence_error: Option<String>,
     pub transfers: Vec<TransferSnapshot>,
     pub active_count: usize,
@@ -298,6 +307,7 @@ struct TransferProgressBatch {
 struct LiveProgress {
     transfer_token: u32,
     size_bytes: u64,
+    speed_initialized: bool,
     progress: TransferProgress,
     dirty: bool,
 }
@@ -333,6 +343,7 @@ impl TransferTelemetry {
             LiveProgress {
                 transfer_token: plan.transfer_token,
                 size_bytes: plan.size_bytes,
+                speed_initialized: false,
                 progress: TransferProgress {
                     id: plan.id.clone(),
                     transferred_bytes: plan.offset,
@@ -357,6 +368,12 @@ impl TransferTelemetry {
             return;
         }
         live.progress.transferred_bytes = bytes;
+        let speed = if live.speed_initialized {
+            recovery::smooth(live.progress.speed_bytes_per_second, speed)
+        } else {
+            live.speed_initialized = true;
+            speed
+        };
         live.progress.speed_bytes_per_second = speed;
         live.progress.eta_seconds =
             (speed > 0).then(|| live.size_bytes.saturating_sub(bytes).div_ceil(speed));
@@ -411,10 +428,16 @@ struct TransferStore {
     #[serde(default = "default_soundcheck_enabled")]
     soundcheck_enabled: bool,
     transfers: Vec<TransferSnapshot>,
+    #[serde(default)]
+    source_reliability: HashMap<String, SourceReliability>,
 }
+
+type DownloadTasks = HashMap<String, (u32, Arc<AtomicBool>)>;
 
 #[derive(Clone)]
 pub struct TransferHub {
+    source_reliability: Arc<Mutex<HashMap<String, SourceReliability>>>,
+    auto_mirror_minutes: Arc<AtomicU32>,
     scheduler: super::download_scheduler::DownloadScheduler,
     app: AppHandle,
     writer: Arc<TransferWriter<TransferStore>>,
@@ -425,7 +448,7 @@ pub struct TransferHub {
     relay_suggestion_minutes: Arc<AtomicU32>,
     soundcheck_enabled: Arc<AtomicBool>,
     safety_state: Arc<AtomicU8>,
-    tasks: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    tasks: Arc<Mutex<DownloadTasks>>,
     next_id: Arc<AtomicU64>,
 }
 
@@ -467,6 +490,8 @@ impl TransferHub {
             },
         )?;
         let hub = Self {
+            source_reliability: Arc::new(Mutex::new(store.source_reliability)),
+            auto_mirror_minutes: Arc::new(AtomicU32::new(settings.auto_mirror_minutes)),
             scheduler: super::download_scheduler::DownloadScheduler::default(),
             app,
             writer: Arc::new(writer),
@@ -501,6 +526,11 @@ impl TransferHub {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .overlay(&mut current);
+        let source_reliability = self
+            .source_reliability
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
         drop(transfers);
         let transfers = current;
         let active_count = transfers
@@ -510,6 +540,8 @@ impl TransferHub {
         *revision += 1;
         TransferQueueSnapshot {
             revision: *revision,
+            source_reliability,
+            auto_mirror_minutes: self.auto_mirror_minutes.load(Ordering::SeqCst),
             persistence_error: self.writer.error(),
             transfers,
             active_count,
@@ -600,6 +632,8 @@ impl TransferHub {
     pub fn apply_settings(&self, settings: &super::app_settings::TransferSettings) {
         self.max_concurrent_downloads
             .store(settings.max_concurrent_downloads, Ordering::SeqCst);
+        self.auto_mirror_minutes
+            .store(settings.auto_mirror_minutes, Ordering::SeqCst);
         self.relay_suggestion_minutes
             .store(settings.relay_suggestion_minutes, Ordering::SeqCst);
         let enabled_now = settings.soundcheck_enabled
@@ -673,6 +707,8 @@ impl TransferHub {
             soundcheck: None,
             patch_repair: None,
             alternative_sources: Vec::new(),
+            automatic_sources: Vec::new(),
+            last_automatic_switch_at_ms: None,
             created_at_ms: now,
             updated_at_ms: now,
             connection_token: None,
@@ -757,6 +793,8 @@ impl TransferHub {
                 soundcheck: None,
                 patch_repair: None,
                 alternative_sources: alternatives.clone(),
+                automatic_sources: Vec::new(),
+                last_automatic_switch_at_ms: None,
                 created_at_ms: now.saturating_add(index as u64),
                 updated_at_ms: now,
                 connection_token: None,
@@ -1183,6 +1221,41 @@ impl TransferHub {
         Ok(self.snapshot())
     }
 
+    pub fn auto_relay_release_source(
+        &self,
+        release_id: &str,
+        source: ReleaseAlternativeSource,
+    ) -> Result<bool, TransferError> {
+        validate_alternative_source(&source)?;
+        let mut transfers = self.transfers.write().unwrap_or_else(|p| p.into_inner());
+        if self.safety_state() != TransferSafetyState::Running {
+            return Ok(false);
+        }
+        let now = timestamp_ms();
+        let Some(indices) = recovery::exact_recovery_indices(
+            &transfers,
+            release_id,
+            &source,
+            self.auto_mirror_minutes.load(Ordering::SeqCst),
+            now,
+        ) else {
+            return Ok(false);
+        };
+        // A cancelled file writer must finish before its .part can be resumed.
+        let tasks = self.tasks.lock().unwrap_or_else(|p| p.into_inner());
+        if indices
+            .iter()
+            .any(|(i, _)| tasks.contains_key(&transfers[*i].id))
+        {
+            return Ok(false);
+        }
+        recovery::apply_exact_recovery(&mut transfers, &indices, &source, now);
+        drop(tasks);
+        drop(transfers);
+        self.persist_and_publish()?;
+        Ok(true)
+    }
+
     pub fn relay_release_source(
         &self,
         release_id: &str,
@@ -1437,6 +1510,8 @@ impl TransferHub {
                     warnings,
                 }),
                 alternative_sources: first.alternative_sources,
+                automatic_sources: Vec::new(),
+                last_automatic_switch_at_ms: None,
                 created_at_ms: now,
                 updated_at_ms: now,
                 connection_token: None,
@@ -1542,9 +1617,10 @@ impl TransferHub {
     pub(super) async fn scheduling_changed(&self) {
         let deadline = if self.safety_state() == TransferSafetyState::Running {
             let transfers = self.transfers.read().unwrap_or_else(|p| p.into_inner());
-            next_retry_deadline(
+            available_retry_deadline(
                 &transfers,
                 self.max_concurrent_downloads.load(Ordering::SeqCst),
+                &self.tasks.lock().unwrap_or_else(|p| p.into_inner()),
             )
         } else {
             None
@@ -1564,11 +1640,14 @@ impl TransferHub {
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let now = timestamp_ms();
-            let index = next_download_index(
+            let tasks = self.tasks.lock().unwrap_or_else(|p| p.into_inner());
+            let index = available_download_index(
                 &transfers,
                 self.max_concurrent_downloads.load(Ordering::SeqCst),
                 now,
+                &tasks,
             )?;
+            drop(tasks);
             let transfer = &mut transfers[index];
             transfer.status = TransferStatus::Requesting;
             transfer.connection_token = Some(connection_token);
@@ -1576,7 +1655,7 @@ impl TransferHub {
             transfer.queue_position = None;
             transfer.error = None;
             transfer.retry_at_ms = None;
-            transfer.waiting_since_ms = Some(now);
+            transfer.waiting_since_ms.get_or_insert(now);
             transfer.updated_at_ms = now;
             TransferTicket {
                 id: transfer.id.clone(),
@@ -1676,7 +1755,7 @@ impl TransferHub {
 
     pub fn fail_for_filename(&self, username: &str, filename: &str, message: String) -> bool {
         let normalized = normalize_remote_filename(filename);
-        self.fail_matching(message, |transfer| {
+        self.fail_matching(message, Some(false), |transfer| {
             transfer.username.eq_ignore_ascii_case(username)
                 && transfer.remote_filename.eq_ignore_ascii_case(&normalized)
                 && transfer.status.occupies_slot()
@@ -1699,16 +1778,36 @@ impl TransferHub {
         })
     }
 
-    pub fn fail_id(&self, id: &str, message: String) -> bool {
-        self.fail_matching(message, |transfer| transfer.id == id)
+    pub fn fail_attempt(&self, id: &str, token: u32, message: String) -> bool {
+        self.fail_matching(message, None, |t| recovery::file_attempt(t, id, token))
     }
 
-    pub fn retry_id(&self, id: &str, message: String) -> bool {
-        self.retry_matching(message, |transfer| transfer.id == id)
+    pub fn deny_for_filename(&self, username: &str, filename: &str, message: String) -> bool {
+        let filename = normalize_remote_filename(filename);
+        self.fail_matching(message, Some(true), |t| {
+            t.username.eq_ignore_ascii_case(username)
+                && t.remote_filename.eq_ignore_ascii_case(&filename)
+                && t.status.occupies_slot()
+        })
+    }
+
+    pub fn retry_peer(&self, id: &str, token: u32, message: String) -> bool {
+        self.retry_matching(message, |t| {
+            t.id == id
+                && t.connection_token == Some(token)
+                && matches!(
+                    t.status,
+                    TransferStatus::Requesting | TransferStatus::RemotelyQueued
+                )
+        })
+    }
+
+    pub fn retry_attempt(&self, id: &str, token: u32, message: String) -> bool {
+        self.retry_matching(message, |t| recovery::file_attempt(t, id, token))
     }
 
     pub fn fail_transfer_token(&self, transfer_token: u32, message: String) -> bool {
-        self.fail_matching(message, |transfer| {
+        self.fail_matching(message, None, |transfer| {
             transfer.transfer_token == Some(transfer_token)
                 && matches!(
                     transfer.status,
@@ -1740,6 +1839,23 @@ impl TransferHub {
             if offset > transfer.size_bytes {
                 return Err(TransferError::PartialTooLarge);
             }
+            recovery::observe(
+                &mut self
+                    .source_reliability
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner()),
+                &transfer.username,
+                |r| {
+                    let delay = timestamp_ms()
+                        .saturating_sub(transfer.waiting_since_ms.unwrap_or(timestamp_ms()));
+                    r.typical_start_delay_ms = if r.starts == 0 {
+                        delay
+                    } else {
+                        recovery::smooth(r.typical_start_delay_ms, delay)
+                    };
+                    r.starts = r.starts.saturating_add(1);
+                },
+            );
             transfer.status = TransferStatus::Downloading;
             transfer.transferred_bytes = offset;
             transfer.speed_bytes_per_second = 0;
@@ -1771,11 +1887,46 @@ impl TransferHub {
             .update(id, token, transferred, speed);
     }
 
-    pub fn complete(&self, id: &str) -> Result<(), TransferError> {
+    pub fn complete(&self, plan: &DownloadPlan) -> Result<(), TransferError> {
+        let id = &plan.id;
+        let token = plan.transfer_token;
         let mut found = false;
+        let mut finalization = Ok(());
         self.mutate(|transfers| {
-            if let Some(transfer) = transfers.iter_mut().find(|transfer| transfer.id == id) {
+            if let Some(transfer) = transfers
+                .iter_mut()
+                .find(|transfer| recovery::file_attempt(transfer, id, token))
+            {
                 found = true;
+                finalization = if plan.final_path.exists() {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        "A file appeared at the final download path before completion.",
+                    ))
+                } else {
+                    fs::rename(&plan.partial_path, &plan.final_path)
+                };
+                if finalization.is_err() {
+                    return;
+                }
+                recovery::observe(
+                    &mut self
+                        .source_reliability
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner()),
+                    &transfer.username,
+                    |r| {
+                        let speed = transfer.speed_bytes_per_second;
+                        if speed > 0 {
+                            r.typical_speed = if r.typical_speed == 0 {
+                                speed
+                            } else {
+                                recovery::smooth(r.typical_speed, speed)
+                            };
+                        }
+                        r.successes = r.successes.saturating_add(1);
+                    },
+                );
                 transfer.status = TransferStatus::Completed;
                 transfer.transferred_bytes = transfer.size_bytes;
                 transfer.speed_bytes_per_second = 0;
@@ -1798,6 +1949,7 @@ impl TransferHub {
                 }
             }
         })?;
+        finalization?;
         if !found {
             return Err(TransferError::NotFound);
         }
@@ -1835,26 +1987,35 @@ impl TransferHub {
         });
     }
 
-    pub fn register_task(&self, id: String, cancellation: Arc<AtomicBool>) {
+    pub fn register_task(&self, id: String, token: u32, cancellation: Arc<AtomicBool>) -> bool {
+        let transfers = self.transfers.read().unwrap_or_else(|p| p.into_inner());
+        if !transfers
+            .iter()
+            .any(|t| recovery::file_attempt(t, &id, token))
+        {
+            return false;
+        }
         self.tasks
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(id, cancellation);
+            .insert(id, (token, cancellation));
+        true
     }
 
-    pub fn unregister_task(&self, id: &str) {
-        self.tasks
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(id);
+    pub fn unregister_task(&self, id: &str, token: u32) {
+        let mut tasks = self.tasks.lock().unwrap_or_else(|p| p.into_inner());
+        if tasks.get(id).is_some_and(|(current, _)| *current == token) {
+            tasks.remove(id);
+            self.scheduler.changed();
+        }
     }
 
     fn abort(&self, id: &str) {
-        if let Some(cancellation) = self
+        if let Some((_, cancellation)) = self
             .tasks
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(id)
+            .get(id)
         {
             cancellation.store(true, Ordering::SeqCst);
         }
@@ -1891,10 +2052,32 @@ impl TransferHub {
         Ok(self.snapshot())
     }
 
-    fn fail_matching(&self, message: String, matches: impl Fn(&TransferSnapshot) -> bool) -> bool {
+    fn fail_matching(
+        &self,
+        message: String,
+        peer_denial: Option<bool>,
+        matches: impl Fn(&TransferSnapshot) -> bool,
+    ) -> bool {
         let mut changed = false;
         let _ = self.mutate(|transfers| {
-            if let Some(transfer) = transfers.iter_mut().find(|transfer| matches(transfer)) {
+            if let Some(transfer) = transfers
+                .iter_mut()
+                .find(|transfer| transfer.status.occupies_slot() && matches(transfer))
+            {
+                if let Some(denied) = peer_denial {
+                    recovery::observe(
+                        &mut self
+                            .source_reliability
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner()),
+                        &transfer.username,
+                        |r| {
+                            r.failures = r.failures.saturating_add(1);
+                            r.denials = r.denials.saturating_add(u32::from(denied));
+                        },
+                    );
+                }
+                self.abort(&transfer.id);
                 refresh_partial_size(transfer);
                 transfer.status = TransferStatus::Failed;
                 transfer.speed_bytes_per_second = 0;
@@ -1902,7 +2085,9 @@ impl TransferHub {
                 transfer.queue_position = None;
                 transfer.error = Some(message);
                 transfer.retry_at_ms = None;
-                transfer.waiting_since_ms = None;
+                if peer_denial.is_none() {
+                    transfer.waiting_since_ms = None;
+                }
                 transfer.connection_token = None;
                 transfer.transfer_token = None;
                 transfer.updated_at_ms = timestamp_ms();
@@ -1915,15 +2100,27 @@ impl TransferHub {
     fn retry_matching(&self, message: String, matches: impl Fn(&TransferSnapshot) -> bool) -> bool {
         let mut changed = false;
         let _ = self.mutate(|transfers| {
-            if let Some(transfer) = transfers.iter_mut().find(|transfer| matches(transfer)) {
+            if let Some(transfer) = transfers
+                .iter_mut()
+                .find(|transfer| transfer.status.occupies_slot() && matches(transfer))
+            {
+                self.abort(&transfer.id);
                 refresh_partial_size(transfer);
+                recovery::observe(
+                    &mut self
+                        .source_reliability
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner()),
+                    &transfer.username,
+                    |r| r.failures = r.failures.saturating_add(1),
+                );
                 transfer.retry_count = transfer.retry_count.saturating_add(1);
                 transfer.speed_bytes_per_second = 0;
                 transfer.eta_seconds = None;
                 transfer.queue_position = None;
                 transfer.connection_token = None;
                 transfer.transfer_token = None;
-                transfer.waiting_since_ms = None;
+                transfer.waiting_since_ms.get_or_insert(timestamp_ms());
                 transfer.updated_at_ms = timestamp_ms();
                 if transfer.retry_count <= MAX_AUTOMATIC_RETRIES {
                     transfer.status = TransferStatus::Retrying;
@@ -1993,6 +2190,7 @@ impl TransferHub {
             relay_suggestion_minutes: snapshot.relay_suggestion_minutes,
             soundcheck_enabled: snapshot.soundcheck_enabled,
             transfers: snapshot.transfers.clone(),
+            source_reliability: snapshot.source_reliability.clone(),
         });
     }
 
@@ -2012,6 +2210,7 @@ impl TransferHub {
         let publication = self.publication.clone();
         let max_concurrent_downloads = self.max_concurrent_downloads.clone();
         let relay_suggestion_minutes = self.relay_suggestion_minutes.clone();
+        let source_reliability = self.source_reliability.clone();
         let soundcheck_enabled = self.soundcheck_enabled.clone();
         tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(PROGRESS_INTERVAL);
@@ -2055,6 +2254,10 @@ impl TransferHub {
                         relay_suggestion_minutes: relay_suggestion_minutes.load(Ordering::SeqCst),
                         soundcheck_enabled: soundcheck_enabled.load(Ordering::SeqCst),
                         transfers: current,
+                        source_reliability: source_reliability
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .clone(),
                     });
                 }
             }
@@ -2375,7 +2578,16 @@ fn reset_runtime_state(transfer: &mut TransferSnapshot) {
 
 // Deadlines blocked by a lane or the same source sleep until that lifecycle
 // changes. In particular, an overdue retry must never create a busy loop.
+#[cfg(test)]
 fn next_retry_deadline(transfers: &[TransferSnapshot], limit: u8) -> Option<u64> {
+    available_retry_deadline(transfers, limit, &HashMap::new())
+}
+
+fn available_retry_deadline(
+    transfers: &[TransferSnapshot],
+    limit: u8,
+    tasks: &DownloadTasks,
+) -> Option<u64> {
     let active: Vec<_> = transfers
         .iter()
         .filter(|t| t.status.occupies_slot())
@@ -2387,6 +2599,7 @@ fn next_retry_deadline(transfers: &[TransferSnapshot], limit: u8) -> Option<u64>
         .iter()
         .filter(|t| {
             t.status == TransferStatus::Retrying
+                && !tasks.contains_key(&t.id)
                 && !active
                     .iter()
                     .any(|a| a.username.eq_ignore_ascii_case(&t.username))
@@ -2395,10 +2608,20 @@ fn next_retry_deadline(transfers: &[TransferSnapshot], limit: u8) -> Option<u64>
         .min()
 }
 
+#[cfg(test)]
 fn next_download_index(
     transfers: &[TransferSnapshot],
     max_concurrent_downloads: u8,
     now: u64,
+) -> Option<usize> {
+    available_download_index(transfers, max_concurrent_downloads, now, &HashMap::new())
+}
+
+fn available_download_index(
+    transfers: &[TransferSnapshot],
+    max_concurrent_downloads: u8,
+    now: u64,
+    tasks: &DownloadTasks,
 ) -> Option<usize> {
     let active_count = transfers
         .iter()
@@ -2413,7 +2636,8 @@ fn next_download_index(
         .map(|transfer| transfer.username.to_ascii_lowercase())
         .collect::<HashSet<_>>();
     transfers.iter().position(|transfer| {
-        !active_usernames.contains(&transfer.username.to_ascii_lowercase())
+        !tasks.contains_key(&transfer.id)
+            && !active_usernames.contains(&transfer.username.to_ascii_lowercase())
             && (transfer.status == TransferStatus::Queued
                 || (transfer.status == TransferStatus::Retrying
                     && transfer.retry_at_ms.is_none_or(|retry_at| retry_at <= now)))
@@ -2439,6 +2663,7 @@ fn load_store(path: &JsonFile) -> Result<TransferStore, TransferError> {
             relay_suggestion_minutes: DEFAULT_RELAY_SUGGESTION_MINUTES,
             soundcheck_enabled: true,
             transfers: Vec::new(),
+            source_reliability: HashMap::new(),
         },
         decode_store,
     ))
@@ -2466,7 +2691,11 @@ fn decode_store(bytes: &[u8]) -> Result<TransferStore, DecodeError> {
         bytes,
         STORE_VERSION,
         None,
-        &[(1, migrate_v1_to_v2), (2, migrate_v2_to_v3)],
+        &[
+            (1, migrate_v1_to_v2),
+            (2, migrate_v2_to_v3),
+            (3, migrate_v3_to_v4),
+        ],
     )?;
     if !(1..=MAX_CONCURRENT_DOWNLOADS).contains(&store.max_concurrent_downloads) {
         return Err(DecodeError::Invalid(
@@ -2492,6 +2721,12 @@ fn migrate_v2_to_v3(value: serde_json::Value) -> Result<serde_json::Value, Decod
     let mut store: TransferStore = serde_json::from_value(value)?;
     store.version = 3;
     // Old folder/display labels are not a reliable artist/title identity.
+    Ok(serde_json::to_value(store)?)
+}
+
+fn migrate_v3_to_v4(value: serde_json::Value) -> Result<serde_json::Value, DecodeError> {
+    let mut store: TransferStore = serde_json::from_value(value)?;
+    store.version = 4;
     Ok(serde_json::to_value(store)?)
 }
 
@@ -2655,7 +2890,10 @@ fn automatic_retry_delay_ms(attempt: u32) -> u64 {
     match attempt {
         0 | 1 => 5_000,
         2 => 15_000,
-        _ => 45_000,
+        3 => 45_000,
+        4 => 120_000,
+        5 => 300_000,
+        _ => 600_000,
     }
 }
 
@@ -2996,7 +3234,7 @@ mod tests {
             .unwrap()
             .remove("searchAlbum");
         let migrated = decode_store(&serde_json::to_vec(&legacy).unwrap()).unwrap();
-        assert_eq!(migrated.version, 3);
+        assert_eq!(migrated.version, 4);
         assert!(migrated.transfers[0].search_album.is_none());
         assert_eq!(migrated.transfers[0].id, "resume-1");
         assert_eq!(migrated.transfers[0].transferred_bytes, 37);
@@ -3098,6 +3336,8 @@ mod tests {
             soundcheck: None,
             patch_repair: None,
             alternative_sources: Vec::new(),
+            automatic_sources: Vec::new(),
+            last_automatic_switch_at_ms: None,
             created_at_ms: u64::from(file_index),
             updated_at_ms: u64::from(file_index),
             connection_token: None,
@@ -3294,6 +3534,8 @@ mod tests {
             soundcheck: None,
             patch_repair: None,
             alternative_sources: Vec::new(),
+            automatic_sources: Vec::new(),
+            last_automatic_switch_at_ms: None,
             created_at_ms: 0,
             updated_at_ms: 0,
             connection_token: None,
@@ -3413,6 +3655,8 @@ mod tests {
             soundcheck: None,
             patch_repair: None,
             alternative_sources: Vec::new(),
+            automatic_sources: Vec::new(),
+            last_automatic_switch_at_ms: None,
             created_at_ms: 1,
             updated_at_ms: 2,
             connection_token: Some(77),
@@ -3428,6 +3672,7 @@ mod tests {
             relay_suggestion_minutes: DEFAULT_RELAY_SUGGESTION_MINUTES,
             soundcheck_enabled: true,
             transfers: vec![transfer],
+            source_reliability: HashMap::new(),
         })
         .unwrap();
         fs::write(&store_path, &serialized).unwrap();
@@ -3971,10 +4216,248 @@ mod tests {
     }
 
     #[test]
-    fn automatic_recovery_uses_three_bounded_delays() {
+    fn automatic_recovery_uses_six_bounded_delays() {
         assert_eq!(automatic_retry_delay_ms(1), 5_000);
         assert_eq!(automatic_retry_delay_ms(2), 15_000);
         assert_eq!(automatic_retry_delay_ms(3), 45_000);
-        assert_eq!(MAX_AUTOMATIC_RETRIES, 3);
+        assert_eq!(automatic_retry_delay_ms(4), 120_000);
+        assert_eq!(automatic_retry_delay_ms(5), 300_000);
+        assert_eq!(automatic_retry_delay_ms(6), 600_000);
+        assert_eq!(automatic_retry_delay_ms(u32::MAX), 600_000);
+        assert_eq!(MAX_AUTOMATIC_RETRIES, 6);
+    }
+    fn recovery_fixture() -> (Vec<TransferSnapshot>, ReleaseAlternativeSource) {
+        let mut transfer = release_transfer(
+            "one",
+            "release",
+            "original",
+            "album/01.flac",
+            TransferStatus::RemotelyQueued,
+            1,
+        );
+        transfer.waiting_since_ms = Some(1);
+        transfer.connection_token = Some(10);
+        let source = ReleaseAlternativeSource {
+            username: "mirror".into(),
+            remote_folder: "other".into(),
+            files: vec![ReleaseAlternativeFile {
+                title: "01.flac".into(),
+                remote_filename: "other/01.flac".into(),
+                size_bytes: 100,
+            }],
+        };
+        (vec![transfer], source)
+    }
+
+    #[test]
+    fn automatic_mirrors_require_opt_in_elapsed_wait_and_every_unique_exact_file() {
+        let (mut transfers, mut source) = recovery_fixture();
+        assert!(
+            recovery::exact_recovery_indices(&transfers, "release", &source, 0, 600_001).is_none()
+        );
+        assert!(
+            recovery::exact_recovery_indices(&transfers, "release", &source, 10, 600_000).is_none()
+        );
+        assert!(
+            recovery::exact_recovery_indices(&transfers, "release", &source, 10, 600_001).is_some()
+        );
+        source.files[0].size_bytes = 101;
+        assert!(
+            recovery::exact_recovery_indices(&transfers, "release", &source, 10, 600_001).is_none()
+        );
+        source.files[0].size_bytes = 100;
+        source.files.push(source.files[0].clone());
+        assert!(
+            recovery::exact_recovery_indices(&transfers, "release", &source, 10, 600_001).is_none()
+        );
+        source.files.pop();
+        transfers.push(release_transfer(
+            "two",
+            "release",
+            "original",
+            "album/02.flac",
+            TransferStatus::Queued,
+            2,
+        ));
+        assert!(
+            recovery::exact_recovery_indices(&transfers, "release", &source, 10, 600_001).is_none()
+        );
+        transfers[1].remote_filename = "album/01.flac".into();
+        assert!(
+            recovery::exact_recovery_indices(&transfers, "release", &source, 10, 600_001).is_none()
+        );
+    }
+
+    #[test]
+    fn late_mirror_reply_cannot_override_pause_download_local_failure_or_new_source() {
+        let (transfers, source) = recovery_fixture();
+        for status in [TransferStatus::Paused, TransferStatus::Downloading] {
+            let mut changed = transfers.clone();
+            changed[0].status = status;
+            assert!(
+                recovery::exact_recovery_indices(&changed, "release", &source, 5, 600_001)
+                    .is_none()
+            );
+        }
+        let mut changed = transfers.clone();
+        changed[0].status = TransferStatus::Failed;
+        changed[0].waiting_since_ms = None;
+        assert!(
+            recovery::exact_recovery_indices(&changed, "release", &source, 5, 600_001).is_none()
+        );
+        changed = transfers.clone();
+        changed[0].username = "MIRROR".into();
+        assert!(
+            recovery::exact_recovery_indices(&changed, "release", &source, 5, 600_001).is_none()
+        );
+        changed = transfers;
+        changed[0].automatic_sources = vec!["MIRROR".into()];
+        assert!(
+            recovery::exact_recovery_indices(&changed, "release", &source, 5, 600_001).is_none()
+        );
+        changed[0].automatic_sources = vec!["a".into(), "b".into(), "c".into(), "d".into()];
+        assert!(
+            recovery::exact_recovery_indices(&changed, "release", &source, 5, 600_001).is_none()
+        );
+    }
+
+    #[test]
+    fn automatic_mirror_preserves_partial_completed_files_and_survives_round_trip() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut transfers, source) = recovery_fixture();
+        transfers[0].local_path = directory
+            .path()
+            .join("01.flac")
+            .to_string_lossy()
+            .into_owned();
+        let part = partial_path(Path::new(&transfers[0].local_path));
+        fs::write(&part, [1, 2, 3, 4]).unwrap();
+        let mut done = release_transfer(
+            "done",
+            "release",
+            "original",
+            "album/02.flac",
+            TransferStatus::Completed,
+            2,
+        );
+        done.local_path = directory
+            .path()
+            .join("02.flac")
+            .to_string_lossy()
+            .into_owned();
+        fs::write(&done.local_path, [8, 9]).unwrap();
+        transfers.push(done);
+        let indices =
+            recovery::exact_recovery_indices(&transfers, "release", &source, 5, 600_001).unwrap();
+        recovery::apply_exact_recovery(&mut transfers, &indices, &source, 600_001);
+        assert_eq!(fs::read(part).unwrap(), [1, 2, 3, 4]);
+        assert_eq!(fs::read(&transfers[1].local_path).unwrap(), [8, 9]);
+        assert_eq!(transfers[1].username, "original");
+        assert_eq!(transfers[0].automatic_sources, ["original", "mirror"]);
+        assert_eq!(transfers[0].connection_token, None);
+        assert_eq!(transfers[0].waiting_since_ms, None);
+        let restored: TransferSnapshot =
+            serde_json::from_slice(&serde_json::to_vec(&transfers[0]).unwrap()).unwrap();
+        assert_eq!(restored.automatic_sources, transfers[0].automatic_sources);
+        assert_eq!(restored.last_automatic_switch_at_ms, Some(600_001));
+    }
+
+    #[test]
+    fn late_file_outcomes_cannot_count_again_or_change_a_new_attempt() {
+        let (mut transfers, _) = recovery_fixture();
+        let transfer = &mut transfers[0];
+        transfer.transfer_token = Some(50);
+        transfer.status = TransferStatus::Downloading;
+        assert!(recovery::file_attempt(transfer, "one", 50));
+        assert!(!recovery::file_attempt(transfer, "one", 49));
+        assert!(!recovery::file_attempt(transfer, "other", 50));
+        for status in [
+            TransferStatus::Paused,
+            TransferStatus::Retrying,
+            TransferStatus::Completed,
+            TransferStatus::Queued,
+        ] {
+            transfer.status = status;
+            assert!(!recovery::file_attempt(transfer, "one", 50));
+        }
+    }
+
+    #[test]
+    fn speed_ema_absorbs_spikes_decays_on_idle_and_resets_on_new_attempt() {
+        let mut telemetry = TransferTelemetry::default();
+        telemetry.begin(&progress_plan("one", 1));
+        telemetry.update("one", 1, 100, 1000);
+        telemetry.update("one", 1, 200, 6000);
+        assert_eq!(
+            telemetry.active["one"].progress.speed_bytes_per_second,
+            2000
+        );
+        telemetry.update("one", 1, 200, 0);
+        assert_eq!(
+            telemetry.active["one"].progress.speed_bytes_per_second,
+            1600
+        );
+        telemetry.begin(&progress_plan("one", 2));
+        telemetry.update("one", 1, 400, 9000);
+        telemetry.update("one", 2, 100, 500);
+        assert_eq!(telemetry.active["one"].progress.speed_bytes_per_second, 500);
+    }
+
+    #[test]
+    fn reliability_is_bounded_case_insensitive_and_durable_without_transfer_history() {
+        let mut memory = HashMap::new();
+        recovery::observe(&mut memory, "Peer", |r| {
+            r.successes = 1;
+            r.starts = 1;
+            r.typical_start_delay_ms = 4000;
+        });
+        recovery::observe(&mut memory, "PEER", |r| {
+            r.failures = 2;
+            r.denials = 1;
+        });
+        assert_eq!(memory.len(), 1);
+        let store = TransferStore {
+            version: STORE_VERSION,
+            max_concurrent_downloads: 3,
+            relay_suggestion_minutes: 10,
+            soundcheck_enabled: true,
+            transfers: vec![],
+            source_reliability: memory.clone(),
+        };
+        let restored = decode_store(&serde_json::to_vec(&store).unwrap()).unwrap();
+        assert_eq!(restored.source_reliability["peer"].successes, 1);
+        assert_eq!(restored.source_reliability["peer"].denials, 1);
+        for i in 0..1100 {
+            recovery::observe(&mut memory, &i.to_string(), |r| r.failures += 1);
+        }
+        assert_eq!(memory.len(), 1000);
+        let mut old = serde_json::to_value(store).unwrap();
+        old["version"] = 3.into();
+        old.as_object_mut().unwrap().remove("source_reliability");
+        assert!(decode_store(&serde_json::to_vec(&old).unwrap())
+            .unwrap()
+            .source_reliability
+            .is_empty());
+    }
+    #[test]
+    fn cancelled_file_writer_blocks_only_its_file_until_handle_closes() {
+        let (mut transfers, _) = recovery_fixture();
+        transfers[0].status = TransferStatus::Retrying;
+        transfers[0].retry_at_ms = Some(5);
+        transfers.push(release_transfer(
+            "two",
+            "other",
+            "other-user",
+            "other/02.flac",
+            TransferStatus::Queued,
+            1,
+        ));
+        let tasks = HashMap::from([("one".into(), (1, Arc::new(AtomicBool::new(true))))]);
+        assert_eq!(available_download_index(&transfers, 3, 10, &tasks), Some(1));
+        assert_eq!(available_retry_deadline(&transfers, 3, &tasks), None);
+        assert_eq!(
+            available_download_index(&transfers, 3, 10, &HashMap::new()),
+            Some(0)
+        );
     }
 }

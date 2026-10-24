@@ -3,10 +3,10 @@
 Forever is a fast, polished desktop client for the Soulseek network, built with
 Rust, Tauri 2, React, and TypeScript.
 
-> **Status:** pre-alpha. Version `0.0.69` separates the connection service into
-> focused modules, makes download scheduling event-driven, and adds parser fuzzing.
+> **Status:** pre-alpha. Version `0.0.71` adds opt-in exact-mirror recovery, local source
+> reliability history, and steadier download speed and ETA estimates.
 
-If `0.0.16` is installed, download and run the latest `0.0.69` Windows installer
+If `0.0.16` is installed, download and run the latest `0.0.71` Windows installer
 manually; the startup regression prevents `0.0.16` from opening its in-app
 updater. Installing the hotfix over the existing copy preserves Forever's
 configuration and transfers.
@@ -218,7 +218,7 @@ configuration and transfers.
   Forever's folder, avoiding a false partial-loss warning
 - **Signal Relay** source rescue for stalled album queues, with a configurable
   suggestion delay, fresh background Soulseek scans, ranked same-format routes,
-  and an in-place approval drawer instead of an automatic source change
+  manual replacement review, and opt-in automatic switching to exact mirrors
 - Safe source handoff preserves completed files and partial progress only for
   exact basename-and-size mirrors; compatible replacement files restart from
   zero rather than risking corrupt output
@@ -774,8 +774,44 @@ from one to six; the default is three. Transfers labels Forever's reorderable
 Set **Suggest another source after** to Off, 5, 10, 20, 30, or 60 minutes; the
 default is 10 minutes. Once a release has waited that long, Signal Relay quietly
 checks Soulseek for compatible album folders, shows a notification when routes
-are ready, and leaves the final switch to you. The active transfer card can also
-open Signal Relay or start a scan immediately.
+are ready, and leaves the final switch to you unless automatic mirrors are enabled.
+The active transfer card can also open Signal Relay or start a scan immediately.
+
+**Auto-switch to exact mirrors** is a separate opt-in setting in Download lanes:
+Off (default), or after 5, 10, 20, 30, or 60 minutes stalled. It works while
+Forever is open and connected, across all workspaces. A release must have
+actually contacted a source; time in Forever's local queue does not qualify.
+The wait survives transient retries. Existing exact alternatives are considered
+first, then background searches at most every five minutes and up to three
+full-folder inspections per 30-second check. Every unfinished file must have a
+unique basename-and-byte-size match. Blocked/ignored users, paused releases,
+active file writers, local disk failures, and Safe Passage are excluded.
+Completed files and `.part` bytes stay in place, and the switch appears on the
+release card. Each release gets at most three automatic switches and never
+returns automatically to a previously tried user; other replacements retain the
+manual review flow. Filename and size matching is not a content hash guarantee.
+
+Transient peer errors retry after 5, 15, 45, 120, 300, and 600 seconds before
+stopping for attention. Explicit denials and local file errors are not retried.
+A file connection that sends no bytes for 60 seconds enters transient recovery.
+Per-attempt guards prevent late callbacks from changing a newer attempt, and a
+cancelled writer must close before the same partial file resumes.
+
+Forever remembers completed attempts, peer failures, denials, observed start
+delays, and speed for up to 1,000 source users in `transfers.json`. This local
+history survives clearing completed transfers and influences Signal Relay's
+source ranking. A **Flaky source** badge requires at least three failures and
+more failures than successes; its tooltip explains the counts and success rate.
+Pauses, server disconnections and local disk errors do not count against a user.
+Older stores start with no invented observations.
+
+Download speed uses an EMA (20% of each new sample), including zero-speed idle
+samples; it resets on each attempt. Album ETAs use that speed while downloading.
+For source-queued releases with at least two observed starts and a known speed,
+the estimated wait scales the source's typical delay by queue position and adds
+remaining transfer time. It is labelled **Estimated album ETA … incl. queue**;
+without enough history, the ETA stays unknown. Source queues can change, so
+these estimates are approximate.
 Uploads default to one slot and can be raised to three. Edition/pressing lookup,
 playback, and private-room administration remain outside this release.
 

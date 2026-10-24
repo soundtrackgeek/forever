@@ -401,6 +401,8 @@ export type Transfer = {
   soundcheck?: SoundcheckResult | null;
   patchRepair?: PatchRepairSnapshot | null;
   alternativeSources?: ReleaseAlternativeSource[];
+  automaticSources?: string[];
+  lastAutomaticSwitchAtMs?: number | null;
   createdAtMs: number;
   updatedAtMs: number;
 };
@@ -584,7 +586,13 @@ export type ArchiveCachedCatalog = {
   fetchedAt: string | null;
 };
 
+export type SourceReliability = {
+  successes: number; failures: number; denials: number; starts: number;
+  typicalStartDelayMs: number; typicalSpeed: number; updatedAtMs: number;
+};
 export type TransferQueueSnapshot = {
+  sourceReliability?: Record<string, SourceReliability>;
+  autoMirrorMinutes?: number;
   revision?: number;
   persistenceError?: string | null;
   transfers: Transfer[];

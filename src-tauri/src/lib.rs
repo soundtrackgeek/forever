@@ -109,6 +109,7 @@ pub fn run() {
             connection::transfer_retry_release_issues,
             connection::transfer_switch_release_source,
             connection::transfer_relay_release_source,
+            connection::transfer_auto_relay_release_source,
             connection::transfer_patch_release_file,
             connection::transfer_reveal_release_path,
             connection::folder_inspect,

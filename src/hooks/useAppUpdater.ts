@@ -36,15 +36,15 @@ const SUPPORTED_UPDATE_CHECK_INTERVALS: UpdateCheckIntervalMinutes[] = [
 ];
 
 const PREVIEW_UPDATE: UpdateDetails = {
-  currentVersion: "0.0.69",
-  version: "0.0.70",
-  body: `## What's new in Forever 0.0.70
+  currentVersion: "0.0.70",
+  version: "0.0.71",
+  body: `## What's new in Forever 0.0.71
 
 ### Changed
 
-- Workspaces load on demand while searches and transfers keep running.
-- Shared state uses selectors to avoid unrelated workspace updates.
-- Workspace styles share the Midnight Radio palette, spacing, and radii.`,
+- Opt in to automatic switching to exact mirrors for stalled releases.
+- Source reliability history improves Signal Relay ranking.
+- Spaced retries and smoothed speed estimates make recovery easier to follow.`,
   date: "2026-10-24",
 };
 

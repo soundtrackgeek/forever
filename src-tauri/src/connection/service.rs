@@ -1400,6 +1400,26 @@ impl ConnectionManager {
         Ok(snapshot)
     }
 
+    pub fn auto_relay_release_source(
+        &self,
+        release_id: &str,
+        source: ReleaseAlternativeSource,
+    ) -> Result<bool, ConnectionServiceError> {
+        if self.current_snapshot().state != ConnectionState::Online
+            || self.people.is_blocked(&source.username)
+            || self.people.is_ignored(&source.username)
+        {
+            return Ok(false);
+        }
+        let switched = self
+            .transfers
+            .auto_relay_release_source(release_id, source)?;
+        if switched {
+            self.schedule_downloads();
+        }
+        Ok(switched)
+    }
+
     pub fn relay_release_source(
         &self,
         release_id: &str,
