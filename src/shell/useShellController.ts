@@ -10,7 +10,7 @@ import { useArchiveInventory } from "../hooks/useArchiveInventory";
 import { useDialMemory } from "../hooks/useDialMemory";
 import { useLocalSharing } from "../hooks/useLocalSharing";
 import { useMissingShelf } from "../hooks/useMissingShelf";
-import { useDiscoveryShelf } from "../hooks/useDiscoveryShelf";
+import { discoverySourceKey, useDiscoveryShelf } from "../hooks/useDiscoveryShelf";
 import { useReleaseRadar } from "../hooks/useReleaseRadar";
 import { usePrivateMessages } from "../hooks/usePrivateMessages";
 import { useShelfRadar } from "../hooks/useShelfRadar";
@@ -134,7 +134,7 @@ export function useShellController() {
     wanted.snapshot.albums,
     transferGroups,
   );
-  const discovery = useDiscoveryShelf(`${archive.status?.path ?? ""}:${archive.status?.lastModifiedAtMs ?? ""}:${archive.status?.connected ?? false}`);
+  const discovery = useDiscoveryShelf(discoverySourceKey(archive.status));
   const archiveOwnedReleaseIds = useMemo(
     () =>
       new Set(

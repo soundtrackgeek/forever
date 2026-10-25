@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.0.83] - 2026-10-25
+
+### Fixed
+
+- The Discovery shelf no longer clears itself while you browse it. Archive
+  matching (a finished download, Add to Wanted, or the five-minute re-match)
+  refreshes the Music Library file's modified time, and the shelf treated that
+  as a different Archive and discarded its artists and album picks. The shelf is
+  now keyed on the database path and connection only; **Discover** and
+  **Refresh shelf** still re-read ownership.
+
 ## [0.0.82] - 2026-10-25
 
 ### Fixed

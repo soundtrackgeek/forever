@@ -15,6 +15,16 @@ export type SourcesStatus = Record<SourceKey, SourceStatus>;
 export type DiscoverySteer = { artistId: string | null; name: string; ownedAlbumCount: number };
 
 export const MAX_STEER = 5;
+
+/**
+ * Identifies the Archive a shelf was built from. Deliberately excludes the database's
+ * modified time: Archive match responses (finished downloads, Add to Wanted, the
+ * five-minute re-match) refresh that time whenever Music Library touches the file,
+ * and a changed time must not wipe a shelf the user is browsing. Discover and
+ * Refresh already re-read ownership from the database.
+ */
+export const discoverySourceKey = (status: { path?: string; connected?: boolean; lastModifiedAtMs?: number | null } | null | undefined) =>
+  `${status?.path ?? ""}:${status?.connected ?? false}`;
 const steerKey = (steer: DiscoverySteer) => steer.artistId ?? steer.name.toLocaleLowerCase();
 
 const seed = { artistId: "0383dadf-2a4e-4d10-a46a-e9e041da8eb3", name: "Queen", ownedAlbumCount: 19 };

@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useDiscoveryShelf, MAX_STEER, type DiscoveryArtist, type DiscoveryShelf } from "./useDiscoveryShelf";
+import { discoverySourceKey, useDiscoveryShelf, MAX_STEER, type DiscoveryArtist, type DiscoveryShelf } from "./useDiscoveryShelf";
 import type { ArchiveArtistSummary } from "../types";
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true, invoke }));
@@ -84,5 +84,18 @@ describe("discovery shelf", () => {
     expect(JSON.stringify(result.current.sources)).not.toContain("abcdef");
     await act(() => result.current.clearSource("lastFm"));
     expect(invoke).toHaveBeenLastCalledWith("discovery_clear_source", { source: "lastFm" });
+  });
+  it("keeps the shelf when Archive matching only refreshes the database modified time", async () => {
+    invoke.mockResolvedValue(shelf);
+    const status = { path: "C:/music-library.sqlite3", connected: true, lastModifiedAtMs: 1 };
+    const { result, rerender } = renderHook(({ key }) => useDiscoveryShelf(key), { initialProps: { key: discoverySourceKey(status) } });
+    await act(() => result.current.load());
+    await act(() => result.current.select(artist("a")));
+    rerender({ key: discoverySourceKey({ ...status, lastModifiedAtMs: 2 }) });
+    expect(result.current.shelf?.artists).toHaveLength(2);
+    expect(result.current.selected?.artistId).toBe("a");
+    rerender({ key: discoverySourceKey({ ...status, path: "D:/other.sqlite3" }) });
+    expect(result.current.shelf).toBeNull();
+    expect(discoverySourceKey(null)).toBe(":false");
   });
 });
