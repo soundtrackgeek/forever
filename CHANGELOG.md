@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.0.81] - 2026-10-25
+
+### Added
+
+- Steer the Archive Discovery shelf: search your Archive for up to five artists
+  and choose **Discover new artists** to find similar artists you do not own.
+  Artists without a verified MusicBrainz identity can be followed by name.
+- Last.fm similar artists join ListenBrainz, merged by artist name; artists
+  suggested by more than one source rank higher and show their sources.
+- Selecting a suggested artist checks MusicBrainz and Discogs for studio albums,
+  reports what each found, and marks albums listed by both.
+- Tick several albums and **Search Soulseek** to open one search tab per album,
+  stopping at the tab limit and keeping the rest selected.
+- Optional Fanart.tv artist photo on the album panel.
+- **Sources** panel for Last.fm, Discogs and Fanart.tv keys, stored in the
+  operating-system credential store. Development builds also read `.env.local`.
+
+### Changed
+
+- Discovery providers each have their own request spacing and cooldown, and the
+  cache holds 256 responses (was 64). The shelf lists up to 24 artists (was 12)
+  and shows studio albums instead of three picks.
+
 ## [0.0.80] - 2026-10-24
 
 ### Fixed

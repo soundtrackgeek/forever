@@ -1,4 +1,6 @@
+mod credentials;
 mod provider;
+mod sources;
 pub use provider::DiscoveryProvider;
 
 use super::{normalize_title, open_read_only, query_artist_links, settings};
@@ -11,7 +13,9 @@ use std::{
 use tauri::{AppHandle, State};
 
 const MAX_SEEDS: usize = 5;
-const MAX_ARTISTS: usize = 12;
+const MAX_ARTISTS: usize = 24;
+const MAX_ALBUMS: usize = 30;
+const VARIOUS_ARTISTS: &str = "89ad4ac3-39f7-470e-963a-56509c546377";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,10 +23,15 @@ pub struct Seed {
     artist_id: String,
     name: String,
     owned_album_count: u64,
+    /// Whether `artist_id` is a verified MusicBrainz id. Unverified Archive artists can
+    /// still seed name-based sources; their id is `name:<normalized name>`.
+    #[serde(skip)]
+    resolved: bool,
 }
 
 struct Inventory {
-    seeds: Vec<Seed>,
+    /// Every owned artist, most albums first. Includes artists without a verified id.
+    all: Vec<Seed>,
     owned_ids: HashSet<String>,
     owned_names: HashSet<String>,
     unresolved_artists: usize,
@@ -48,45 +57,100 @@ fn inventory(path: &Path) -> Result<Inventory, String> {
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?)))
         .map_err(|e| e.to_string())?;
     let mut result = Inventory {
-        seeds: vec![],
+        all: vec![],
         owned_ids: HashSet::new(),
         owned_names: HashSet::new(),
         unresolved_artists: 0,
     };
-    let mut seeds: HashMap<String, Seed> = HashMap::new();
+    let mut artists: HashMap<String, Seed> = HashMap::new();
     // No UI pagination limit: even artists with one owned album exclude recommendations.
     for row in rows {
         let (name, count) = row.map_err(|e| e.to_string())?;
         let normalized = normalize_title(&name);
         result.owned_names.insert(normalized.clone());
-        let Some(link) = links.get(&normalized).filter(|l| mbid(&l.artist_id)) else {
-            result.unresolved_artists += 1;
-            continue;
+        let link = links.get(&normalized).filter(|l| mbid(&l.artist_id));
+        let (id, display, resolved) = match link {
+            Some(link) => {
+                let id = link.artist_id.to_ascii_lowercase();
+                result.owned_ids.insert(id.clone());
+                if let Some(canonical) = &link.canonical_name {
+                    result.owned_names.insert(normalize_title(canonical));
+                }
+                (id, link.canonical_name.clone().unwrap_or(name), true)
+            }
+            None => {
+                result.unresolved_artists += 1;
+                (format!("name:{normalized}"), name, false)
+            }
         };
-        let id = link.artist_id.to_ascii_lowercase();
-        result.owned_ids.insert(id.clone());
-        if let Some(canonical) = &link.canonical_name {
-            result.owned_names.insert(normalize_title(canonical));
-        }
-        if id == "89ad4ac3-39f7-470e-963a-56509c546377" || normalized == "various artists" {
+        if id == VARIOUS_ARTISTS || normalized.is_empty() || normalized == "various artists" {
             continue;
         }
-        let seed = seeds.entry(id.clone()).or_insert(Seed {
-            artist_id: id,
-            name: link.canonical_name.clone().unwrap_or(name),
-            owned_album_count: 0,
-        });
-        seed.owned_album_count += count;
+        artists
+            .entry(id.clone())
+            .or_insert(Seed {
+                artist_id: id,
+                name: display,
+                owned_album_count: 0,
+                resolved,
+            })
+            .owned_album_count += count;
     }
-    result.seeds = seeds.into_values().collect();
-    result.seeds.sort_by(|a, b| {
+    result.all = artists.into_values().collect();
+    result.all.sort_by(|a, b| {
         b.owned_album_count
             .cmp(&a.owned_album_count)
             .then(a.name.cmp(&b.name))
             .then(a.artist_id.cmp(&b.artist_id))
     });
-    result.seeds.truncate(MAX_SEEDS);
     Ok(result)
+}
+
+/// An artist the user picked from their Archive to steer discovery.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeedRequest {
+    artist_id: Option<String>,
+    name: String,
+}
+
+/// The requested artists that really are in the Archive, or, with no request, the
+/// most-owned verified artists.
+fn choose_seeds(owned: &Inventory, requested: Option<Vec<SeedRequest>>) -> Vec<Seed> {
+    let Some(requested) = requested else {
+        return owned
+            .all
+            .iter()
+            .filter(|seed| seed.resolved)
+            .take(MAX_SEEDS)
+            .cloned()
+            .collect();
+    };
+    let mut chosen: Vec<Seed> = vec![];
+    for request in requested.iter().take(MAX_SEEDS) {
+        let found = request
+            .artist_id
+            .as_deref()
+            .and_then(|id| {
+                owned
+                    .all
+                    .iter()
+                    .find(|seed| seed.artist_id.eq_ignore_ascii_case(id))
+            })
+            .or_else(|| {
+                let wanted = normalize_title(&request.name);
+                owned
+                    .all
+                    .iter()
+                    .find(|seed| normalize_title(&seed.name) == wanted)
+            });
+        if let Some(seed) = found {
+            if !chosen.iter().any(|c| c.artist_id == seed.artist_id) {
+                chosen.push(seed.clone());
+            }
+        }
+    }
+    chosen
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -98,6 +162,21 @@ struct Similar {
     reference_mbid: Option<String>,
 }
 
+/// One artist suggested by one source, before owned artists are removed.
+#[derive(Clone, Debug)]
+struct Candidate {
+    mbid: Option<String>,
+    name: String,
+    comment: Option<String>,
+    score: f64,
+}
+
+struct Block {
+    seed: Seed,
+    source: &'static str,
+    rows: Vec<Candidate>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Recommendation {
@@ -106,6 +185,7 @@ pub struct Recommendation {
     disambiguation: Option<String>,
     score: f64,
     because: Vec<Seed>,
+    sources: Vec<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -117,57 +197,104 @@ pub struct DiscoveryShelf {
     notices: Vec<String>,
 }
 
-fn rank(inventory: &Inventory, responses: Vec<(Seed, Vec<Similar>)>) -> Vec<Recommendation> {
-    let mut combined: HashMap<String, Recommendation> = HashMap::new();
-    for (seed, rows) in responses {
-        let mut unique: HashMap<String, Similar> = HashMap::new();
-        for row in rows.into_iter().take(500) {
-            let Some(id) = row
+fn listenbrainz_candidates(seed: &Seed, rows: Vec<Similar>) -> Vec<Candidate> {
+    rows.into_iter()
+        .take(500)
+        .filter_map(|row| {
+            let id = row
                 .artist_mbid
                 .as_deref()
                 .filter(|id| mbid(id))
-                .map(str::to_ascii_lowercase)
-            else {
-                continue;
-            };
+                .map(str::to_ascii_lowercase)?;
             if row
                 .reference_mbid
                 .as_deref()
                 .is_none_or(|reference| !reference.eq_ignore_ascii_case(&seed.artist_id))
                 || row.score.unwrap_or(0) == 0
             {
-                continue;
+                return None;
             }
-            if row
+            let name = row
                 .name
-                .as_ref()
-                .is_none_or(|n| n.trim().is_empty() || n.len() > 300)
-            {
+                .filter(|n| !n.trim().is_empty() && n.len() <= 300)?;
+            Some(Candidate {
+                mbid: Some(id),
+                name,
+                comment: row.comment,
+                score: row.score.unwrap_or(0) as f64,
+            })
+        })
+        .collect()
+}
+
+/// Merges sources by artist name (Last.fm often has no MusicBrainz id), removes owned
+/// artists, and weights each seed by how much of it you own.
+fn rank(inventory: &Inventory, blocks: Vec<Block>) -> Vec<Recommendation> {
+    let mut combined: HashMap<String, Recommendation> = HashMap::new();
+    for Block { seed, source, rows } in blocks {
+        let mut unique: HashMap<String, Candidate> = HashMap::new();
+        for row in rows {
+            let key = normalize_title(&row.name);
+            if key.is_empty() {
                 continue;
             }
-            if unique.get(&id).is_none_or(|old| row.score > old.score) {
-                unique.insert(id, row);
+            match unique.get_mut(&key) {
+                Some(old) => {
+                    if old.mbid.is_none() {
+                        old.mbid = row.mbid.clone();
+                    }
+                    if row.score > old.score {
+                        old.score = row.score;
+                        old.comment = row.comment;
+                    }
+                }
+                None => {
+                    unique.insert(key, row);
+                }
             }
         }
-        let maximum = unique.values().filter_map(|r| r.score).max().unwrap_or(1) as f64;
-        for (id, row) in unique {
-            let name = row.name.unwrap();
-            if inventory.owned_ids.contains(&id)
-                || inventory.owned_names.contains(&normalize_title(&name))
+        let maximum = unique
+            .values()
+            .map(|r| r.score)
+            .fold(0.0_f64, f64::max)
+            .max(f64::MIN_POSITIVE);
+        for (key, row) in unique {
+            if row
+                .mbid
+                .as_ref()
+                .is_some_and(|id| inventory.owned_ids.contains(id))
+                || inventory.owned_names.contains(&key)
             {
                 continue;
             }
-            let score =
-                row.score.unwrap() as f64 / maximum * (1.0 + seed.owned_album_count as f64).ln();
-            let candidate = combined.entry(id.clone()).or_insert(Recommendation {
-                artist_id: id,
-                name,
-                disambiguation: row.comment,
-                score: 0.0,
-                because: vec![],
-            });
+            let score = row.score / maximum * (1.0 + seed.owned_album_count as f64).ln();
+            let candidate = combined
+                .entry(key.clone())
+                .or_insert_with(|| Recommendation {
+                    artist_id: row.mbid.clone().unwrap_or_else(|| format!("name:{key}")),
+                    name: row.name.clone(),
+                    disambiguation: row.comment.clone(),
+                    score: 0.0,
+                    because: vec![],
+                    sources: vec![],
+                });
+            if let (true, Some(id)) = (candidate.artist_id.starts_with("name:"), &row.mbid) {
+                candidate.artist_id = id.clone();
+            }
+            if candidate.disambiguation.is_none() {
+                candidate.disambiguation = row.comment;
+            }
             candidate.score += score;
-            candidate.because.push(seed.clone());
+            if !candidate
+                .because
+                .iter()
+                .any(|s| s.artist_id == seed.artist_id)
+            {
+                candidate.because.push(seed.clone());
+            }
+            if !candidate.sources.contains(&source) {
+                candidate.sources.push(source);
+            }
         }
     }
     let mut ranked: Vec<_> = combined.into_values().collect();
@@ -185,34 +312,65 @@ fn rank(inventory: &Inventory, responses: Vec<(Seed, Vec<Similar>)>) -> Vec<Reco
 pub async fn discovery_shelf(
     app: AppHandle,
     provider: State<'_, DiscoveryProvider>,
+    seeds: Option<Vec<SeedRequest>>,
 ) -> Result<DiscoveryShelf, String> {
+    let steered = seeds.is_some();
     let path = settings::source(&app).path;
     let source_path = path.clone();
     let owned = tokio::task::spawn_blocking(move || inventory(&path))
         .await
         .map_err(|e| e.to_string())??;
-    let mut responses = vec![];
+    let chosen = choose_seeds(&owned, seeds);
+    let mut blocks = vec![];
     let mut notices = vec![];
-    for seed in &owned.seeds {
-        let key = format!("similar:{}:{}", provider::ALGORITHM, seed.artist_id);
-        match provider
-            .get::<Vec<Similar>>(
-                key,
-                "https://labs.api.listenbrainz.org/similar-artists/json",
-                &[
-                    ("artist_mbids", &seed.artist_id),
-                    ("algorithm", provider::ALGORITHM),
-                ],
-            )
-            .await
-        {
-            Ok(data) => {
-                if let Some(notice) = data.notice {
-                    notices.push(notice);
+    let mut lastfm_missing = false;
+    if steered && chosen.is_empty() {
+        notices.push("Choose an artist from your Archive to start from.".into());
+    }
+    for seed in &chosen {
+        if seed.resolved {
+            let key = format!("similar:{}:{}", provider::ALGORITHM, seed.artist_id);
+            match provider
+                .get::<Vec<Similar>>(
+                    key,
+                    "https://labs.api.listenbrainz.org/similar-artists/json",
+                    &[
+                        ("artist_mbids", &seed.artist_id),
+                        ("algorithm", provider::ALGORITHM),
+                    ],
+                )
+                .await
+            {
+                Ok(data) => {
+                    notices.extend(data.notice);
+                    blocks.push(Block {
+                        seed: seed.clone(),
+                        source: "ListenBrainz",
+                        rows: listenbrainz_candidates(seed, data.value),
+                    });
                 }
-                responses.push((seed.clone(), data.value));
+                Err(error) => notices.push(format!("{}: {error}", seed.name)),
             }
-            Err(error) => notices.push(format!("{}: {error}", seed.name)),
+        }
+        let id = seed.resolved.then_some(seed.artist_id.as_str());
+        match sources::lastfm_similar(&provider, id, &seed.name).await {
+            Ok(Some(data)) => {
+                notices.extend(data.notice);
+                blocks.push(Block {
+                    seed: seed.clone(),
+                    source: "Last.fm",
+                    rows: data.value,
+                });
+            }
+            Ok(None) => lastfm_missing = true,
+            Err(error) => notices.push(error),
+        }
+    }
+    if lastfm_missing {
+        notices
+            .push("Add a Last.fm API key under Sources to include Last.fm similar artists.".into());
+        if chosen.iter().any(|seed| !seed.resolved) {
+            notices.push("Some chosen artists have no verified MusicBrainz identity, so only Last.fm can follow them.".into());
         }
     }
     if settings::source(&app).path != source_path {
@@ -221,11 +379,36 @@ pub async fn discovery_shelf(
     notices.sort();
     notices.dedup();
     Ok(DiscoveryShelf {
-        artists: rank(&owned, responses),
-        seeds: owned.seeds,
+        artists: rank(&owned, blocks),
+        seeds: chosen,
         unresolved_artists: owned.unresolved_artists,
         notices,
     })
+}
+
+#[tauri::command]
+pub fn discovery_sources_status() -> credentials::SourcesStatus {
+    credentials::all_status()
+}
+
+#[tauri::command]
+pub fn discovery_save_source(
+    source: String,
+    key: String,
+    secret: Option<String>,
+) -> Result<credentials::SourcesStatus, String> {
+    credentials::save(
+        credentials::Source::parse(&source)?,
+        &key,
+        secret.as_deref(),
+    )?;
+    Ok(credentials::all_status())
+}
+
+#[tauri::command]
+pub fn discovery_clear_source(source: String) -> Result<credentials::SourcesStatus, String> {
+    credentials::clear(credentials::Source::parse(&source)?)?;
+    Ok(credentials::all_status())
 }
 
 #[derive(Deserialize, Serialize)]
@@ -234,14 +417,66 @@ struct PopularAlbum {
     total_listen_count: Option<u64>,
 }
 
+/// What one catalog said about the artist's studio albums.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceReport {
+    /// `found`, `empty`, `unavailable`, or `notConfigured`.
+    status: &'static str,
+    count: usize,
+    message: Option<String>,
+}
+
+impl SourceReport {
+    fn found(count: usize) -> Self {
+        Self {
+            status: if count == 0 { "empty" } else { "found" },
+            count,
+            message: None,
+        }
+    }
+    fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            status: "unavailable",
+            count: 0,
+            message: Some(message.into()),
+        }
+    }
+    fn not_configured() -> Self {
+        Self {
+            status: "notConfigured",
+            count: 0,
+            message: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryAlbum {
+    /// A MusicBrainz release-group id, or `discogs:<master id>` when only Discogs has it.
+    id: String,
+    title: String,
+    first_release_date: String,
+    cover_art_url: String,
+    musicbrainz: bool,
+    discogs: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveryAlbums {
-    albums: Vec<AlbumReleaseGroup>,
+    albums: Vec<DiscoveryAlbum>,
+    musicbrainz: SourceReport,
+    discogs: SourceReport,
+    /// Set once the artist is identified on MusicBrainz, even if it came from a name.
+    musicbrainz_artist_id: Option<String>,
+    image_url: Option<String>,
     basis: &'static str,
     notices: Vec<String>,
 }
 
+/// Studio albums only, best-listened first, then by release date.
 fn key_albums(
     catalog: Vec<AlbumReleaseGroup>,
     popularity: &[PopularAlbum],
@@ -268,51 +503,175 @@ fn key_albums(
             .then(a.first_release_date.cmp(&b.first_release_date))
             .then(a.id.cmp(&b.id))
     });
-    albums.truncate(3);
     albums
+}
+
+/// MusicBrainz albums first (they carry ids and cover art), each flagged when Discogs
+/// agrees; then albums only Discogs lists.
+fn merge_albums(
+    musicbrainz: Vec<AlbumReleaseGroup>,
+    discogs: Vec<sources::DiscogsAlbum>,
+) -> Vec<DiscoveryAlbum> {
+    let discogs_keys: HashSet<_> = discogs.iter().map(|a| normalize_title(&a.title)).collect();
+    let musicbrainz_keys: HashSet<_> = musicbrainz
+        .iter()
+        .map(|a| normalize_title(&a.title))
+        .collect();
+    let mut merged: Vec<_> = musicbrainz
+        .into_iter()
+        .map(|album| DiscoveryAlbum {
+            discogs: discogs_keys.contains(&normalize_title(&album.title)),
+            id: album.id,
+            title: album.title,
+            first_release_date: album.first_release_date,
+            cover_art_url: album.cover_art_url,
+            musicbrainz: true,
+        })
+        .collect();
+    merged.extend(
+        discogs
+            .into_iter()
+            .filter(|a| !musicbrainz_keys.contains(&normalize_title(&a.title)))
+            .map(|a| DiscoveryAlbum {
+                id: format!("discogs:{}", a.id),
+                title: a.title,
+                first_release_date: a.year.map(|y| y.to_string()).unwrap_or_default(),
+                cover_art_url: String::new(),
+                musicbrainz: false,
+                discogs: true,
+            }),
+    );
+    merged.truncate(MAX_ALBUMS);
+    merged
+}
+
+struct MusicBrainzSide {
+    artist_id: Option<String>,
+    albums: Vec<AlbumReleaseGroup>,
+    report: SourceReport,
+    notices: Vec<String>,
+}
+
+/// Finds the artist on MusicBrainz (by id, or by an exact name match) and lists
+/// their studio albums.
+async fn musicbrainz_side(
+    musicbrainz: &MusicBrainzClient,
+    artist_id: &str,
+    name: &str,
+) -> MusicBrainzSide {
+    let mut notices = vec![];
+    let id = if mbid(artist_id) {
+        Some(artist_id.to_ascii_lowercase())
+    } else {
+        match musicbrainz.search_artists(name).await {
+            Ok(found) => {
+                let wanted = normalize_title(name);
+                found
+                    .into_iter()
+                    .find(|a| a.score >= 90 && normalize_title(&a.name) == wanted)
+                    .map(|a| a.id.to_ascii_lowercase())
+            }
+            Err(error) => {
+                return MusicBrainzSide {
+                    artist_id: None,
+                    albums: vec![],
+                    report: SourceReport::unavailable(error),
+                    notices,
+                };
+            }
+        }
+    };
+    let Some(id) = id else {
+        return MusicBrainzSide {
+            artist_id: None,
+            albums: vec![],
+            report: SourceReport::found(0),
+            notices: vec!["MusicBrainz has no artist with exactly this name.".into()],
+        };
+    };
+    match musicbrainz.catalog(&id).await {
+        Ok(catalog) => {
+            if catalog.truncated {
+                notices.push(
+                    "MusicBrainz returned a partial catalog; some albums may be missing.".into(),
+                );
+            }
+            let albums = key_albums(catalog.albums, &[]);
+            MusicBrainzSide {
+                artist_id: Some(id),
+                report: SourceReport::found(albums.len()),
+                albums,
+                notices,
+            }
+        }
+        Err(error) => MusicBrainzSide {
+            artist_id: Some(id),
+            albums: vec![],
+            report: SourceReport::unavailable(error),
+            notices,
+        },
+    }
 }
 
 #[tauri::command]
 pub async fn discovery_albums(
     artist_id: String,
+    name: String,
     provider: State<'_, DiscoveryProvider>,
     musicbrainz: State<'_, MusicBrainzClient>,
 ) -> Result<DiscoveryAlbums, String> {
-    if !mbid(&artist_id) {
-        return Err("Choose a valid MusicBrainz artist.".into());
+    let name = name.trim().to_owned();
+    let valid_id = mbid(&artist_id) || artist_id.starts_with("name:");
+    if !valid_id || name.is_empty() || name.len() > 300 || name.chars().any(char::is_control) {
+        return Err("Choose a valid artist.".into());
     }
-    let artist_id = artist_id.to_ascii_lowercase();
-    let catalog = musicbrainz.catalog(&artist_id).await?;
-    let mut notices = vec![];
-    if catalog.truncated {
-        notices.push(
-            "MusicBrainz returned a partial catalog; these picks use the available albums.".into(),
-        );
-    }
-    let popular = provider.get::<Vec<PopularAlbum>>(format!("albums:{artist_id}"), &format!("https://api.listenbrainz.org/1/popularity/top-release-groups-for-artist/{artist_id}"), &[]).await;
-    let popularity = match popular {
-        Ok(data) => {
-            if let Some(notice) = data.notice {
-                notices.push(notice);
-            }
-            data.value
+    let (side, discogs) = tokio::join!(
+        musicbrainz_side(&musicbrainz, &artist_id, &name),
+        sources::discogs_albums(&provider, &name)
+    );
+    let mut notices = side.notices;
+    let (discogs_albums, discogs_report) = match discogs {
+        Ok(Some(data)) => {
+            notices.extend(data.notice);
+            let report = SourceReport::found(data.value.len());
+            (data.value, report)
         }
-        Err(error) => {
-            notices.push(format!(
-                "{error} Showing MusicBrainz studio albums by release date."
-            ));
-            vec![]
-        }
+        Ok(None) => (vec![], SourceReport::not_configured()),
+        Err(error) => (vec![], SourceReport::unavailable(error)),
     };
-    let has_scores = catalog.albums.iter().any(|album| {
-        album.primary_type.as_deref() == Some("Album")
-            && album.secondary_types.is_empty()
-            && popularity
-                .iter()
-                .any(|p| p.release_group_mbid == album.id && p.total_listen_count.unwrap_or(0) > 0)
-    });
+    let mut albums = side.albums;
+    let mut has_scores = false;
+    if let Some(id) = side.artist_id.as_deref().filter(|_| !albums.is_empty()) {
+        let url =
+            format!("https://api.listenbrainz.org/1/popularity/top-release-groups-for-artist/{id}");
+        match provider
+            .get::<Vec<PopularAlbum>>(format!("albums:{id}"), &url, &[])
+            .await
+        {
+            Ok(data) => {
+                notices.extend(data.notice);
+                has_scores = albums.iter().any(|album| {
+                    data.value.iter().any(|p| {
+                        p.release_group_mbid == album.id && p.total_listen_count.unwrap_or(0) > 0
+                    })
+                });
+                albums = key_albums(albums, &data.value);
+            }
+            Err(error) => notices.push(format!("{error} Showing albums by release date.")),
+        }
+    }
+    let image_url = match side.artist_id.as_deref() {
+        Some(id) => sources::fanart_image(&provider, id).await.unwrap_or(None),
+        None => None,
+    };
+    notices.sort();
+    notices.dedup();
     Ok(DiscoveryAlbums {
-        albums: key_albums(catalog.albums, &popularity),
+        albums: merge_albums(albums, discogs_albums),
+        musicbrainz: side.report,
+        discogs: discogs_report,
+        musicbrainz_artist_id: side.artist_id,
+        image_url,
         basis: if has_scores {
             "listenbrainz"
         } else {
@@ -334,6 +693,14 @@ mod tests {
             artist_id: id.into(),
             name: name.into(),
             owned_album_count: count,
+            resolved: true,
+        }
+    }
+    fn block(seed: &Seed, rows: Vec<Similar>) -> Block {
+        Block {
+            seed: seed.clone(),
+            source: "ListenBrainz",
+            rows: listenbrainz_candidates(seed, rows),
         }
     }
     fn similar(id: &str, name: &str, reference: &str, score: u64) -> Similar {
@@ -371,9 +738,15 @@ mod tests {
         drop(db);
         let before = std::fs::read(&path).unwrap();
         let owned = inventory(&path).unwrap();
-        assert_eq!(owned.seeds.len(), 1);
-        assert_eq!(owned.seeds[0].owned_album_count, 3);
-        assert_eq!(owned.seeds[0].artist_id, A);
+        let verified: Vec<_> = owned.all.iter().filter(|s| s.resolved).collect();
+        assert_eq!(verified.len(), 1);
+        assert_eq!(verified[0].owned_album_count, 3);
+        assert_eq!(verified[0].artist_id, A);
+        // Unverified artists can still be chosen as name-only seeds.
+        assert!(owned
+            .all
+            .iter()
+            .any(|s| !s.resolved && s.artist_id == "name:unverified"));
         assert!(owned.owned_names.contains("owned 149"));
         assert!(owned.owned_names.contains("bjork"));
         assert!(!owned.owned_ids.contains(B));
@@ -385,7 +758,7 @@ mod tests {
         let first = seed(A, "Queen", 10);
         let second = seed(B, "Bowie", 5);
         let owned = Inventory {
-            seeds: vec![first.clone(), second.clone()],
+            all: vec![first.clone(), second.clone()],
             owned_ids: HashSet::from([A.into(), B.into()]),
             owned_names: HashSet::from(["bjork".into(), "owned 149".into()]),
             unresolved_artists: 0,
@@ -407,8 +780,8 @@ mod tests {
         let ranked = rank(
             &owned,
             vec![
-                (first, rows),
-                (second, vec![similar(C, "Pink Floyd", B, 100)]),
+                block(&first, rows),
+                block(&second, vec![similar(C, "Pink Floyd", B, 100)]),
             ],
         );
         assert_eq!(ranked.len(), 1);
@@ -421,7 +794,7 @@ mod tests {
     fn ranking_is_bounded_and_deterministic_for_ties() {
         let first = seed(A, "Queen", 10);
         let owned = Inventory {
-            seeds: vec![first.clone()],
+            all: vec![first.clone()],
             owned_ids: HashSet::new(),
             owned_names: HashSet::new(),
             unresolved_artists: 0,
@@ -437,7 +810,7 @@ mod tests {
                 )
             })
             .collect();
-        let ranked = rank(&owned, vec![(first, rows)]);
+        let ranked = rank(&owned, vec![block(&first, rows)]);
         assert_eq!(ranked.len(), MAX_ARTISTS);
         assert_eq!(ranked[0].name, "Artist 00");
     }
@@ -479,5 +852,127 @@ mod tests {
         );
         assert!(!mbid("../../bad"));
         assert!(!mbid("000000000000000000000000000000000000"));
+    }
+
+    fn candidate(mbid: Option<&str>, name: &str, score: f64) -> Candidate {
+        Candidate {
+            mbid: mbid.map(Into::into),
+            name: name.into(),
+            comment: None,
+            score,
+        }
+    }
+
+    #[test]
+    fn merges_sources_by_name_and_keeps_the_musicbrainz_id() {
+        let seed = seed(A, "Queen", 10);
+        let owned = Inventory {
+            all: vec![seed.clone()],
+            owned_ids: HashSet::new(),
+            owned_names: HashSet::from(["bjork".into()]),
+            unresolved_artists: 0,
+        };
+        let ranked = rank(
+            &owned,
+            vec![
+                Block {
+                    seed: seed.clone(),
+                    source: "Last.fm",
+                    rows: vec![
+                        candidate(None, "Pink Floyd", 1.0),
+                        candidate(None, "Björk", 0.9),
+                        candidate(None, "Solo Source", 0.2),
+                    ],
+                },
+                Block {
+                    seed: seed.clone(),
+                    source: "ListenBrainz",
+                    rows: vec![candidate(Some(C), "pink floyd", 40.0)],
+                },
+            ],
+        );
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(ranked[0].name, "Pink Floyd");
+        assert_eq!(ranked[0].artist_id, C);
+        assert_eq!(ranked[0].sources, vec!["Last.fm", "ListenBrainz"]);
+        // One seed counted once even though two sources agree on it.
+        assert_eq!(ranked[0].because.len(), 1);
+        assert!((ranked[0].score - 2.0 * 11.0_f64.ln()).abs() < 1e-9);
+        assert_eq!(ranked[1].artist_id, "name:solo source");
+        assert_eq!(ranked[1].sources, vec!["Last.fm"]);
+    }
+
+    #[test]
+    fn steered_seeds_must_be_in_the_archive_and_are_not_repeated() {
+        let owned = Inventory {
+            all: vec![
+                seed(A, "Queen", 10),
+                Seed {
+                    artist_id: "name:richard marx".into(),
+                    name: "Richard Marx".into(),
+                    owned_album_count: 4,
+                    resolved: false,
+                },
+            ],
+            owned_ids: HashSet::new(),
+            owned_names: HashSet::new(),
+            unresolved_artists: 1,
+        };
+        let request = |id: Option<&str>, name: &str| SeedRequest {
+            artist_id: id.map(Into::into),
+            name: name.into(),
+        };
+        let chosen = choose_seeds(
+            &owned,
+            Some(vec![
+                request(Some(&A.to_uppercase()), "Queen"),
+                request(None, "QUEEN"),
+                request(None, "richard marx"),
+                request(Some(C), "Pink Floyd"),
+            ]),
+        );
+        assert_eq!(
+            chosen.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            vec!["Queen", "Richard Marx"]
+        );
+        assert!(choose_seeds(&owned, Some(vec![])).is_empty());
+        // Without a request only verified artists seed the shelf.
+        let automatic = choose_seeds(&owned, None);
+        assert_eq!(automatic.len(), 1);
+        assert_eq!(automatic[0].artist_id, A);
+    }
+
+    #[test]
+    fn merged_albums_flag_agreement_and_append_discogs_only_titles() {
+        let mb = |id: &str, title: &str, date: &str| AlbumReleaseGroup {
+            id: id.into(),
+            title: title.into(),
+            first_release_date: date.into(),
+            primary_type: Some("Album".into()),
+            secondary_types: vec![],
+            cover_art_url: "cover".into(),
+        };
+        let discogs = |id: i64, title: &str, year: i32| sources::DiscogsAlbum {
+            id,
+            title: title.into(),
+            year: Some(year),
+        };
+        let merged = merge_albums(
+            vec![
+                mb(A, "Repeat Offender", "1989-05-16"),
+                mb(B, "Rush Street", "1991"),
+            ],
+            vec![
+                discogs(1, "Repeat  Offender", 1989),
+                discogs(2, "Paid Vacation", 1994),
+            ],
+        );
+        assert_eq!(merged.len(), 3);
+        assert!(merged[0].musicbrainz && merged[0].discogs);
+        assert!(merged[1].musicbrainz && !merged[1].discogs);
+        assert_eq!(merged[2].id, "discogs:2");
+        assert!(!merged[2].musicbrainz && merged[2].discogs);
+        assert_eq!(merged[2].first_release_date, "1994");
+        assert_eq!(merged[2].cover_art_url, "");
     }
 }

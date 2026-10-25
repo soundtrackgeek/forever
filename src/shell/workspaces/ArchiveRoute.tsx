@@ -16,6 +16,7 @@ export default function ArchiveRoute() {
     inspectSmartMatch,
     setPreferencesAlbum,
     openAlbumSources,
+    openAlbumSourcesBatch,
     transferGroups,
     archiveOwnedReleaseIds,
     transfers,
@@ -38,6 +39,7 @@ export default function ArchiveRoute() {
     inspectSmartMatch: s.inspectSmartMatch,
     setPreferencesAlbum: s.setPreferencesAlbum,
     openAlbumSources: s.openAlbumSources,
+    openAlbumSourcesBatch: s.openAlbumSourcesBatch,
     transferGroups: s.transferGroups,
     archiveOwnedReleaseIds: s.archiveOwnedReleaseIds,
     transfers: s.transfers,
@@ -117,7 +119,7 @@ export default function ArchiveRoute() {
           wantedReady={wanted.ready}
           wantedAlbums={wanted.snapshot.albums}
           onAddWanted={wanted.add}
-          onSmartMatch={(artist, album) => openAlbumSources({ albumId: album.id, artist, title: album.title, coverArtUrl: album.coverArtUrl, firstReleaseDate: album.firstReleaseDate })}
+          onSearchAlbums={(artist, albums) => openAlbumSourcesBatch(albums.map((album) => ({ albumId: album.id, artist, title: album.title, coverArtUrl: album.coverArtUrl, firstReleaseDate: album.firstReleaseDate })))}
         />
       }
       missingShelf={

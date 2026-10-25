@@ -111,7 +111,8 @@ While the desktop app is open, the radar checks MusicBrainz daily, independently
 of Soulseek login and the active workspace. **Check releases** permits an earlier
 check with a 15-minute cooldown per artist. Failed or interrupted checks retry
 after an hour, including after restart. Checks use the shared MusicBrainz pacing,
-retry, timeout, and response-size controls; no account or API key is needed.
+retry, timeout, and response-size controls; no account or API key is needed
+for ListenBrainz and MusicBrainz (Last.fm, Discogs, and Fanart.tv keys are optional).
 
 The inbox shows official release groups for albums, EPs, and singles with first
 release dates overlapping the past 90 days or next 90 days. Editions are deduplicated
@@ -154,23 +155,36 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
 
 ## Current foundation
 
-- **Discovery shelf** in Archive recommends up to 12 artists outside your
-  collection using ListenBrainz listening affinity. Choose **Discover artists**
-  to send up to five of your most-owned, verified MusicBrainz artist IDs to
-  ListenBrainz; no account or API key is required. The Archive stays read-only.
-  Each recommendation explains which owned artists contributed. Unverified
-  artists are counted and skipped as seeds; verify identities in Music Library.
-- Select a recommended artist for up to three MusicBrainz studio albums, ranked
-  by ListenBrainz listen counts where available, then by release date. Live
-  albums, compilations, and EPs are excluded. **Smart Match** opens the existing
-  source search/review flow; **Add to Wanted** also works while Soulseek is
-  offline. Discovery itself needs internet access or saved provider data.
+- **Discovery shelf** in Archive recommends up to 24 artists outside your
+  collection. **Search your Archive** for one to five artists you own (for
+  example Richard Marx), then choose **Discover new artists** to follow only
+  those. With no artist chosen, **Discover from my top artists** uses up to five
+  of your most-owned artists with verified MusicBrainz identities. The Archive
+  stays read-only. Each suggestion shows which owned artists and which sources
+  (ListenBrainz, Last.fm) contributed; sources that agree rank higher. Artists
+  without a verified identity can still be chosen by name and are followed
+  through Last.fm.
+- **Sources** (collapsed panel on the shelf) holds optional API keys:
+  **Last.fm** (similar artists), **Discogs** consumer key and secret (studio
+  album check) and **Fanart.tv** (artist photo). Keys are stored in the
+  operating-system credential store, never in settings files or exports, and are
+  sent only to their own service. ListenBrainz and MusicBrainz need no key.
+  Development builds also read `LAST_FM`, `DISCOGS`, `DISCOGS_SECRET` and
+  `FANART_TV` from the environment or a gitignored `.env.local`.
+- Select a suggested artist to check both catalogs: MusicBrainz studio albums
+  and Discogs studio-album masters (exact artist match; live, compilation, EP,
+  single, and unofficial releases are excluded). A line shows what each source
+  found, and every album shows where it was listed. Tick one or several albums
+  and choose **Search Soulseek** to open one search tab per album, as with any
+  parallel searches (up to the tab limit; the rest stay selected). **Add to
+  Wanted** needs a MusicBrainz match and works while Soulseek is offline.
+  Discovery itself needs internet access or saved provider data.
 - Discovery checks ownership across all Archive album artists using verified
   MBIDs and normalized display/canonical names. It is listening affinity, not
   audio similarity. Provider responses use a separate bounded SQLite cache in
   Forever's cache directory, fresh for seven days; failures may use explicitly
-  labeled saved data up to 30 days old. **Refresh shelf** rereads Archive
-  ownership and reuses fresh provider data. Missing identities, partial catalogs,
+  labeled saved data up to 30 days old. Each provider has its own request
+  spacing and cooldown. Missing identities, partial catalogs, missing keys,
   provider failures, and cache problems remain visible. No background discovery,
   automatic Wanted additions, or downloads run from recommendations.
 

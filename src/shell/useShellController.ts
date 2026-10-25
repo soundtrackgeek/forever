@@ -809,11 +809,23 @@ export function useShellController() {
       albumContext: context,
       albumResultView: "sources",
     });
-    if (!sessionId) return;
+    if (!sessionId) return false;
     setActiveView("search");
     void search
       .startSearch(sessionId, nextQuery, context)
       .catch(() => undefined);
+    return true;
+  };
+
+  // One search tab per album, as for any other parallel searches. Stops at the
+  // tab limit and reports how many opened so the caller can say so.
+  const openAlbumSourcesBatch = (contexts: AlbumSearchContext[]) => {
+    let opened = 0;
+    for (const context of contexts) {
+      if (!openAlbumSources(context)) break;
+      opened += 1;
+    }
+    return opened;
   };
 
   const navigate = (view: ViewId) => {
@@ -953,6 +965,7 @@ export function useShellController() {
     officialTrackCountFor,
     onboardingOpen,
     openAlbumSources,
+    openAlbumSourcesBatch,
     openArchive,
     openMessages,
     openPerson,

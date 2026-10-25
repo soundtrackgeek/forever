@@ -1,7 +1,9 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
+    collections::HashMap,
     path::PathBuf,
+    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
@@ -12,13 +14,39 @@ use tokio::{
 pub(super) const ALGORITHM: &str =
     "session_based_days_9000_session_300_contribution_5_threshold_15_limit_50_skip_30";
 const MAX_BYTES: usize = 2 * 1024 * 1024;
+const CACHE_ENTRIES: usize = 256;
 const FRESH: u64 = 7 * 86_400;
 const STALE: u64 = 30 * 86_400;
+
+/// A remote service with its own request spacing and cooldown, so one provider's
+/// rate limit never stalls another.
+#[derive(Clone, Copy)]
+pub(super) struct Service {
+    pub label: &'static str,
+    interval: Duration,
+}
+
+pub(super) const LISTENBRAINZ: Service = Service {
+    label: "ListenBrainz",
+    interval: Duration::from_millis(1100),
+};
+pub(super) const LASTFM: Service = Service {
+    label: "Last.fm",
+    interval: Duration::from_millis(300),
+};
+pub(super) const DISCOGS: Service = Service {
+    label: "Discogs",
+    interval: Duration::from_millis(1100),
+};
+pub(super) const FANART: Service = Service {
+    label: "Fanart.tv",
+    interval: Duration::from_millis(300),
+};
 
 pub struct DiscoveryProvider {
     client: Result<reqwest::Client, String>,
     cache: Option<PathBuf>,
-    gate: Mutex<Instant>,
+    gates: std::sync::Mutex<HashMap<&'static str, Arc<Mutex<Instant>>>>,
 }
 
 #[derive(Debug)]
@@ -66,8 +94,8 @@ async fn write_cache(path: Option<PathBuf>, key: String, body: String) -> Result
         let mut db = database(&path)?;
         let tx = db.transaction()?;
         tx.execute("INSERT OR REPLACE INTO discovery_cache VALUES (?1,?2,?3)", params![key, now(), body])?;
-        // At most 64 compact parsed responses, each bounded by the wire limit.
-        tx.execute("DELETE FROM discovery_cache WHERE key NOT IN (SELECT key FROM discovery_cache ORDER BY saved DESC, key LIMIT 64)", [])?;
+        // A fixed number of compact parsed responses, each bounded by the wire limit.
+        tx.execute("DELETE FROM discovery_cache WHERE key NOT IN (SELECT key FROM discovery_cache ORDER BY saved DESC, key LIMIT ?1)", [CACHE_ENTRIES])?;
         tx.commit()
     }).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
 }
@@ -89,8 +117,17 @@ impl DiscoveryProvider {
                 .build()
                 .map_err(|e| e.to_string()),
             cache,
-            gate: Mutex::new(Instant::now()),
+            gates: Default::default(),
         }
+    }
+
+    fn gate(&self, service: Service) -> Arc<Mutex<Instant>> {
+        self.gates
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(service.label)
+            .or_insert_with(|| Arc::new(Mutex::new(Instant::now())))
+            .clone()
     }
 
     pub(super) async fn get<T: DeserializeOwned + Serialize>(
@@ -99,8 +136,26 @@ impl DiscoveryProvider {
         url: &str,
         query: &[(&str, &str)],
     ) -> Result<Data<T>, String> {
+        self.get_with(LISTENBRAINZ, key, url, query, &[], |_| Ok(()))
+            .await
+    }
+
+    /// `headers` carry credentials, which never enter the cache key or any error text.
+    /// `check` rejects well-formed responses that are really provider errors
+    /// (Last.fm answers a bad key with HTTP 200) before they can be cached.
+    pub(super) async fn get_with<T: DeserializeOwned + Serialize>(
+        &self,
+        service: Service,
+        key: String,
+        url: &str,
+        query: &[(&str, &str)],
+        headers: &[(&str, &str)],
+        check: impl Fn(&T) -> Result<(), String>,
+    ) -> Result<Data<T>, String> {
+        let label = service.label;
         // Serialize requests and recheck the cache after waiting: duplicate callers coalesce.
-        let mut next = self.gate.lock().await;
+        let gate = self.gate(service);
+        let mut next = gate.lock().await;
         let cached = read_cache(self.cache.clone(), key.clone()).await;
         let cache_failed = cached.is_err() || self.cache.is_none();
         let cached = cached.ok().flatten().and_then(|(saved, body)| {
@@ -120,12 +175,21 @@ impl DiscoveryProvider {
             });
         }
         if next.saturating_duration_since(Instant::now()) > Duration::from_secs(15) {
-            return cached.map(|(_, value)| Data { value, notice: Some("ListenBrainz is cooling down; showing saved recommendations (up to 30 days old).".into()) })
-                .ok_or_else(|| "ListenBrainz is rate-limiting. Try again later.".into());
+            return cached
+                .map(|(_, value)| Data {
+                    value,
+                    notice: Some(format!(
+                        "{label} is cooling down; showing saved results (up to 30 days old)."
+                    )),
+                })
+                .ok_or_else(|| format!("{label} is rate-limiting. Try again later."));
         }
         sleep_until(*next).await;
-        *next = Instant::now() + Duration::from_millis(1100);
-        let result = self.fetch::<T>(url, query, &mut next).await;
+        *next = Instant::now() + service.interval;
+        let result = self
+            .fetch::<T>(label, url, query, headers, &mut next)
+            .await
+            .and_then(|value| check(&value).map(|()| value));
         match result {
             Ok(value) => {
                 let body = serde_json::to_string(&value).map_err(|e| e.to_string())?;
@@ -149,20 +213,24 @@ impl DiscoveryProvider {
 
     async fn fetch<T: DeserializeOwned>(
         &self,
+        label: &str,
         url: &str,
         query: &[(&str, &str)],
+        headers: &[(&str, &str)],
         next: &mut Instant,
     ) -> Result<T, String> {
         let client = self
             .client
             .as_ref()
-            .map_err(|_| "ListenBrainz networking is unavailable.".to_string())?;
-        let mut response = client
-            .get(url)
-            .query(query)
+            .map_err(|_| format!("{label} networking is unavailable."))?;
+        let mut request = client.get(url).query(query);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let mut response = request
             .send()
             .await
-            .map_err(|_| "Could not reach ListenBrainz. Try again later.".to_string())?;
+            .map_err(|_| format!("Could not reach {label}. Try again later."))?;
         if response.status().as_u16() == 429 || response.status().as_u16() == 503 {
             let wait = response
                 .headers()
@@ -183,7 +251,7 @@ impl DiscoveryProvider {
         }
         if !response.status().is_success() {
             return Err(format!(
-                "ListenBrainz returned HTTP {}. Try again later.",
+                "{label} returned HTTP {}. Try again later.",
                 response.status().as_u16()
             ));
         }
@@ -191,21 +259,21 @@ impl DiscoveryProvider {
             .content_length()
             .is_some_and(|size| size > MAX_BYTES as u64)
         {
-            return Err("ListenBrainz response was too large.".into());
+            return Err(format!("{label} response was too large."));
         }
         let mut bytes = Vec::new();
         while let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|_| "ListenBrainz response was interrupted.".to_string())?
+            .map_err(|_| format!("{label} response was interrupted."))?
         {
             if bytes.len() + chunk.len() > MAX_BYTES {
-                return Err("ListenBrainz response was too large.".into());
+                return Err(format!("{label} response was too large."));
             }
             bytes.extend_from_slice(&chunk);
         }
         serde_json::from_slice(&bytes)
-            .map_err(|_| "ListenBrainz returned an unsupported response.".into())
+            .map_err(|_| format!("{label} returned an unsupported response."))
     }
 }
 
@@ -248,7 +316,7 @@ mod tests {
         assert!(result.notice.unwrap().contains("HTTP 429"));
         assert!(
             provider
-                .gate
+                .gate(LISTENBRAINZ)
                 .lock()
                 .await
                 .saturating_duration_since(Instant::now())
@@ -284,7 +352,7 @@ mod tests {
     async fn cache_has_a_fixed_entry_bound() {
         let dir = tempfile::tempdir().unwrap();
         let path = Some(dir.path().join("cache.sqlite3"));
-        for i in 0..70 {
+        for i in 0..CACHE_ENTRIES + 6 {
             write_cache(path.clone(), format!("key-{i}"), "[]".into())
                 .await
                 .unwrap();
@@ -295,7 +363,7 @@ mod tests {
                 .query_row("SELECT COUNT(*) FROM discovery_cache", [], |row| row
                     .get::<_, u32>(0))
                 .unwrap(),
-            64
+            CACHE_ENTRIES as u32
         );
     }
 
