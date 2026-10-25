@@ -173,6 +173,13 @@ fn library_quality(
     })
 }
 
+/// One audio file Music Library already knows about, relative to its share root.
+pub(super) struct LibraryFile {
+    pub relative_path: String,
+    pub size_bytes: u64,
+    pub quality: AudioQuality,
+}
+
 pub(super) struct IndexCache {
     db: Option<Connection>,
     library: Option<Connection>,
@@ -213,6 +220,44 @@ impl IndexCache {
                 inspected: 0,
             },
         }
+    }
+
+    /// Every audio file Music Library lists under this share root, or `None`
+    /// when it does not cover the root and the folder must be walked instead.
+    pub fn library_files(&self, root_path: &str) -> Option<Vec<LibraryFile>> {
+        let db = self.library.as_ref()?;
+        let plain = root_path.strip_prefix(r"\\?\").unwrap_or(root_path);
+        let mut statement = db
+            .prepare_cached(
+                "SELECT relative_path, size_bytes, bitrate_kbps, duration_ms
+                 FROM music_doctor_track_quality
+                 WHERE source_path IN (?1, ?2) COLLATE NOCASE AND missing=0 AND size_bytes>0",
+            )
+            .ok()?;
+        let verbatim = format!(r"\\?\{plain}");
+        let files = statement
+            .query_map(params![plain, verbatim], |row| {
+                let bitrate = row.get::<_, Option<u32>>(2)?.filter(|v| *v > 0);
+                let duration_seconds = row
+                    .get::<_, Option<u64>>(3)?
+                    .filter(|v| *v > 0)
+                    .and_then(|ms| u32::try_from((ms + 500) / 1000).ok())
+                    .map(|v| v.max(1));
+                Ok(LibraryFile {
+                    relative_path: row.get(0)?,
+                    size_bytes: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+                    quality: AudioQuality {
+                        bitrate,
+                        duration_seconds,
+                        sample_rate: None,
+                        bit_depth: None,
+                    },
+                })
+            })
+            .ok()?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .ok()?;
+        (!files.is_empty()).then_some(files)
     }
 
     pub fn with_library(mut self, path: &Path) -> Self {

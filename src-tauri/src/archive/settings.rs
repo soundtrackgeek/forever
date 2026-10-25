@@ -156,11 +156,6 @@ pub(super) fn source(app: &AppHandle) -> Source {
     app.state::<ArchiveSettings>().source()
 }
 
-/// The Music Library database currently in use, for read-only lookups.
-pub(crate) fn database_path(app: &AppHandle) -> PathBuf {
-    source(app).path
-}
-
 #[tauri::command]
 pub async fn archive_set_database_path(
     app: AppHandle,

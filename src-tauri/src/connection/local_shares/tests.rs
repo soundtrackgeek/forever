@@ -362,3 +362,42 @@ fn music_library_measurements_skip_header_reads_only_for_unchanged_files() {
     cache.quality(&mp3, &metadata);
     assert_eq!((cache.reused, cache.inspected), (0, 1));
 }
+
+#[test]
+fn roots_covered_by_music_library_are_indexed_from_the_database_without_walking() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("shared");
+    fs::create_dir(&root).unwrap();
+    let library = temp.path().join("music-library.sqlite3");
+    let db = rusqlite::Connection::open(&library).unwrap();
+    db.execute_batch("CREATE TABLE music_doctor_track_quality (file_path TEXT, filename TEXT, source_path TEXT, relative_path TEXT, size_bytes INTEGER, modified_ns INTEGER, bitrate_kbps INTEGER, duration_ms INTEGER, missing INTEGER);").unwrap();
+    for (relative, missing) in [
+        (r"Artist - Album (2020)\01 Song.mp3", 0),
+        (r"Artist - Album (2020)\02 Gone.mp3", 1),
+        (r"..\escape.mp3", 0),
+    ] {
+        db.execute(
+            "INSERT INTO music_doctor_track_quality VALUES ('', '', ?1, ?2, 1000, 0, 320, 262034, ?3)",
+            rusqlite::params![root.to_string_lossy(), relative, missing],
+        )
+        .unwrap();
+    }
+    let config = SharedRootConfig {
+        id: "root".into(),
+        path: root.to_string_lossy().into_owned(),
+        alias: "Shared".into(),
+        enabled: true,
+        added_at_ms: 0,
+    };
+    let mut cache = IndexCache::open(Path::new(":memory:")).with_library(&library);
+    let index = reconcile(&[config], &ShareIndex::default(), None, &mut cache);
+    assert_eq!(index.indexed_files.len(), 1);
+    let file = &index.indexed_files[0];
+    assert_eq!(
+        file.remote_filename,
+        r"Shared\Artist - Album (2020)\01 Song.mp3"
+    );
+    assert_eq!(file.quality.bitrate, Some(320));
+    assert_eq!(file.quality.duration_seconds, Some(262));
+    assert_eq!(index.roots[0].file_count, 1);
+}

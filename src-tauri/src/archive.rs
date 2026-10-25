@@ -150,6 +150,15 @@ fn default_database_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join(MUSIC_LIBRARY_DATABASE))
 }
 
+/// The Music Library database to read, without needing the managed archive
+/// state: share scanning starts before that state is registered.
+pub(crate) fn library_database_path(
+    app: &AppHandle,
+    configured: Option<PathBuf>,
+) -> Option<PathBuf> {
+    configured.or_else(|| default_database_path(app).ok())
+}
+
 fn modified_at_ms(path: &Path) -> Option<u64> {
     path.metadata()
         .ok()?

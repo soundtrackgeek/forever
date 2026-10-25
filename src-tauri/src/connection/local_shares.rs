@@ -20,7 +20,7 @@ mod cache;
 #[path = "local_shares/tests.rs"]
 mod incremental_tests;
 mod watcher;
-use cache::{AudioQuality, IndexCache};
+use cache::{AudioQuality, IndexCache, LibraryFile};
 
 const SHARES_EVENT: &str = "forever://local-shares";
 const STORE_VERSION: u32 = 3;
@@ -547,8 +547,13 @@ impl LocalSharesHub {
             .unwrap_or_else(|p| p.into_inner())
             .roots
             .clone();
-        let mut cache = IndexCache::open(&self.path.path().with_file_name("share-index.sqlite3"))
-            .with_library(&crate::archive::settings::database_path(&self.app));
+        let mut cache = IndexCache::open(&self.path.path().with_file_name("share-index.sqlite3"));
+        if let Some(library) = crate::archive::library_database_path(
+            &self.app,
+            self.settings.get().archive_database_path,
+        ) {
+            cache = cache.with_library(&library);
+        }
         let previous = {
             let index = self.index.read().unwrap_or_else(|p| p.into_inner());
             ShareIndex {
@@ -821,9 +826,23 @@ fn reconcile(
         last_scan_at_ms: Some(timestamp_ms()),
         ..Default::default()
     };
+    // Music Library is the source of truth for roots it covers: they are read
+    // from its database in full and never walked or partially rescanned.
+    let libraries: Vec<Option<Vec<LibraryFile>>> = roots
+        .iter()
+        .map(|root| {
+            root.enabled
+                .then(|| cache.library_files(&root.path))
+                .flatten()
+        })
+        .collect();
     // Reserve unaffected files across every root before inserting new entries.
     if let Some(paths) = paths {
-        for root in roots.iter().filter(|root| root.enabled) {
+        for (root, _) in roots
+            .iter()
+            .zip(&libraries)
+            .filter(|(root, library)| root.enabled && library.is_none())
+        {
             let root_path = Path::new(&root.path);
             let scopes = scan_scopes(root_path, paths);
             for file in &previous.indexed_files {
@@ -837,14 +856,21 @@ fn reconcile(
             }
         }
     }
-    for root in roots {
+    for (root, library) in roots.iter().zip(libraries) {
         let mut snapshot = root_snapshot(root);
         if root.enabled {
             let root_path = Path::new(&root.path);
-            let scopes = paths
-                .map(|paths| scan_scopes(root_path, paths))
-                .unwrap_or_else(|| vec![root_path.to_path_buf()]);
-            if paths.is_some() {
+            let scopes = if let Some(files) = &library {
+                if let Err(error) = insert_library_files(root, files, &mut next) {
+                    snapshot.error = Some(error.to_string());
+                }
+                Vec::new()
+            } else {
+                paths
+                    .map(|paths| scan_scopes(root_path, paths))
+                    .unwrap_or_else(|| vec![root_path.to_path_buf()])
+            };
+            if paths.is_some() && library.is_none() {
                 snapshot.error = previous
                     .roots
                     .iter()
@@ -888,6 +914,63 @@ fn reconcile(
         });
     }
     next
+}
+
+fn insert_library_files(
+    root: &SharedRootConfig,
+    files: &[LibraryFile],
+    index: &mut ShareIndex,
+) -> Result<(), LocalSharesError> {
+    let root_path = PathBuf::from(&root.path);
+    for file in files {
+        let relative = Path::new(&file.relative_path);
+        // Database rows are data: never let one point outside the share.
+        if !relative
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
+        {
+            continue;
+        }
+        let Some(filename) = relative
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(ToOwned::to_owned)
+        else {
+            continue;
+        };
+        if index.indexed_files.len() >= MAX_SHARED_FILES {
+            return Err(LocalSharesError::IndexLimit);
+        }
+        let directory = match relative.parent().filter(|p| !p.as_os_str().is_empty()) {
+            Some(parent) => format!(
+                "{}\\{}",
+                root.alias,
+                parent.to_string_lossy().replace('/', "\\")
+            ),
+            None => root.alias.clone(),
+        };
+        if !index.directories.contains_key(&directory)
+            && index.directories.len() >= MAX_SHARED_DIRECTORIES
+        {
+            return Err(LocalSharesError::IndexLimit);
+        }
+        insert_file(
+            index,
+            IndexedFile {
+                local_path: root_path.join(relative),
+                remote_filename: format!("{directory}\\{filename}"),
+                extension: relative
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .unwrap_or_default(),
+                filename,
+                size_bytes: file.size_bytes,
+                quality: file.quality.clone(),
+            },
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

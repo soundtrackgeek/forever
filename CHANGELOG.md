@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.0.82] - 2026-10-25
+
+### Fixed
+
+- Settings could show "Scanning…" with 0 files forever. Since 0.0.79 the first
+  share scan ran before the Archive settings were registered, panicked looking up
+  the Music Library path, and left the scan stuck. The path now comes from the
+  unified settings, so it no longer depends on startup order.
+
+### Changed
+
+- Shared folders that Music Library covers are now indexed straight from its
+  database (read-only) with no folder walk, no per-file checks and no partial
+  rescans. The database is the source of truth, including bitrate and duration.
+  Only audio files are listed for those folders, so covers, cue sheets and logs
+  are no longer shared, and sample rate and bit depth are not advertised.
+  Folders Music Library does not cover are still scanned as before.
+
 ## [0.0.81] - 2026-10-25
 
 ### Added
