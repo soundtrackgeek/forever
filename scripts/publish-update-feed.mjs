@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { publishUpdateFeed } from "./release-publisher.mjs";
 
-const gh = (...args) => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
+const gh = (...args) => execFileSync("gh", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "inherit"] }).trim();
 const { version } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const repo = "soundtrackgeek/forever";
 const tag = `v${version}`;

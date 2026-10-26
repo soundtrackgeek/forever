@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.89] - 2026-10-26
+
+### Fixed
+
+- Release publishing failed with `ENOBUFS` once the repository's release list grew
+  past Node's default 1 MB output buffer; the update-feed script now allows far
+  larger `gh` output.
+
 ## [0.0.88] - 2026-10-26
 
 ### Added
