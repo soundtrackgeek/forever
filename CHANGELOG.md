@@ -10,6 +10,11 @@
   ListenBrainz ranking, shown only when ListenBrainz data is available).
   Albums without a release date always sort to the bottom of the date orders.
 
+### Fixed
+
+- Release build failed the lint step over an unnecessary export in the Discovery
+  shelf component.
+
 ## [0.0.86] - 2026-10-26
 
 ### Fixed

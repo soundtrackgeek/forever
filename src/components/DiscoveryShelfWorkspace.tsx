@@ -121,7 +121,7 @@ function reportText(label: string, report: SourceReport) {
 type AlbumSort = "oldest" | "newest" | "alphabetical" | "listened";
 
 /** Dates are partial ISO strings ("2003" or "2003-05-12"), so plain string order is chronological. Albums without a date always sink to the bottom. */
-export function sortAlbums(albums: DiscoveryAlbum[], sort: AlbumSort): DiscoveryAlbum[] {
+function sortAlbums(albums: DiscoveryAlbum[], sort: AlbumSort): DiscoveryAlbum[] {
   if (sort === "listened") return albums;
   const byTitle = (a: DiscoveryAlbum, b: DiscoveryAlbum) => a.title.localeCompare(b.title, undefined, { sensitivity: "base", numeric: true });
   const byDate = (direction: 1 | -1) => (a: DiscoveryAlbum, b: DiscoveryAlbum) => {
