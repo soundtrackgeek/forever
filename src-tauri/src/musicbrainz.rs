@@ -16,6 +16,7 @@ use transport::{Transport, LOOKUP_TIMEOUT};
 
 const MAX_CATALOG_PAGES: usize = 3;
 const MAX_ARTIST_QUERY_LENGTH: usize = 180;
+const MIN_COVER_SCORE: u8 = 90;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +48,19 @@ pub struct AlbumReleaseGroup {
     pub secondary_types: Vec<String>,
     #[serde(default)]
     pub cover_art_url: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CoverSearchResponse {
+    #[serde(rename = "release-groups")]
+    release_groups: Vec<CoverSearchHit>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CoverSearchHit {
+    id: String,
+    #[serde(default)]
+    score: u8,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -254,6 +268,63 @@ impl MusicBrainzClient {
         artists.sort_by_key(|artist| std::cmp::Reverse(artist.score));
         self.cache.put(Entity::Artists, &key, &artists).await;
         Ok(artists)
+    }
+
+    /// Finds the best-matching release group for a folder-style "artist - album"
+    /// pair and returns its Cover Art Archive URL. `None` means no confident match.
+    pub async fn find_cover(&self, artist: &str, title: &str) -> Result<Option<String>, String> {
+        let (artist, title) = (artist.trim(), title.trim());
+        if artist.is_empty()
+            || title.is_empty()
+            || artist.chars().count() > MAX_ARTIST_QUERY_LENGTH
+            || title.chars().count() > MAX_ARTIST_QUERY_LENGTH
+            || artist.chars().chain(title.chars()).any(char::is_control)
+        {
+            return Ok(None);
+        }
+        let key = format!("{}|{}", artist.to_lowercase(), title.to_lowercase());
+        if let Some(value) = self.cache.get::<Option<String>>(Entity::Cover, &key).await {
+            return Ok(value);
+        }
+        let deadline = Instant::now() + LOOKUP_TIMEOUT;
+        let _lookup = self.lookup_slot(deadline).await?;
+        if let Some(value) = self.cache.get::<Option<String>>(Entity::Cover, &key).await {
+            return Ok(value);
+        }
+        let escape = |value: &str| value.replace('\\', "\\\\").replace('"', "\\\"");
+        let response: CoverSearchResponse = self
+            .transport
+            .get(
+                "/release-group",
+                &[
+                    (
+                        "query",
+                        format!(
+                            "releasegroup:\"{}\" AND artist:\"{}\"",
+                            escape(title),
+                            escape(artist)
+                        ),
+                    ),
+                    ("fmt", "json".into()),
+                    ("limit", "3".into()),
+                ],
+                deadline,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let cover = response
+            .release_groups
+            .into_iter()
+            .filter(|hit| hit.score >= MIN_COVER_SCORE && is_musicbrainz_id(&hit.id))
+            .max_by_key(|hit| hit.score)
+            .map(|hit| {
+                format!(
+                    "https://coverartarchive.org/release-group/{}/front-250",
+                    hit.id
+                )
+            });
+        self.cache.put(Entity::Cover, &key, &cover).await;
+        Ok(cover)
     }
 
     pub async fn catalog(&self, artist_id: &str) -> Result<AlbumCatalog, String> {
@@ -633,6 +704,15 @@ pub async fn album_artists_search(
     query: String,
 ) -> Result<Vec<AlbumArtist>, String> {
     client.search_artists(&query).await
+}
+
+#[tauri::command]
+pub async fn album_cover_lookup(
+    client: State<'_, MusicBrainzClient>,
+    artist: String,
+    title: String,
+) -> Result<Option<String>, String> {
+    client.find_cover(&artist, &title).await
 }
 
 #[tauri::command]

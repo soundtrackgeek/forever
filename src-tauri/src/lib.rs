@@ -206,6 +206,7 @@ pub fn run() {
             connection::messages_remove,
             musicbrainz::album_artists_search,
             musicbrainz::album_catalog,
+            musicbrainz::album_cover_lookup,
             musicbrainz::album_official_track_count,
             musicbrainz::album_official_tracklist,
             musicbrainz::album_editions,

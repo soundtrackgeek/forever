@@ -116,7 +116,8 @@
   border-radius: 7px;
 }
 
-.listening-post-active > img {
+.listening-post-active > img,
+.listening-post-active > .release-cover-placeholder {
   position: relative;
   z-index: 1;
   width: 100%;

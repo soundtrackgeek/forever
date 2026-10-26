@@ -31,7 +31,8 @@ import {
 } from "../utils/transfers";
 import { releaseHealth } from "../utils/finishLine";
 import { groupAlbumSources } from "../utils/albumSources";
-import { flakySource, reliabilityDescription, reliabilityScore, sourceMemory } from "../utils/sourceRecovery";
+import { ReleaseCover } from "./ReleaseCover";
+import { flakySource,reliabilityDescription, reliabilityScore, sourceMemory } from "../utils/sourceRecovery";
 import { CountryFlag } from "./CountryFlag";
 
 type Filter = "all" | "active" | "queued" | "completed" | "attention";
@@ -585,7 +586,6 @@ export function TransfersWorkspace({
           const relayAvailable = Boolean(group.releaseId && (waitingTransfer || group.status === "failed"));
           const moved = health.state === "moved";
           const recoverableIssues = !moved && (health.missingCount > 0 || health.failedCount > 0);
-          const knownArt = group.title.toLocaleLowerCase().includes("night geometry");
           return (
             <article
               className={`release-transfer-card is-${group.status} health-${health.state}${highlightedGroupId === group.id ? " is-focus-target" : ""}${draggedReleaseId === group.releaseId ? " is-reordering" : ""}${dropTarget?.id === group.id ? ` is-drop-${dropTarget.placement}` : ""}`}
@@ -595,11 +595,7 @@ export function TransfersWorkspace({
               key={group.id}
             >
               <div className="release-transfer-summary">
-                {knownArt ? (
-                  <img src="/assets/night-geometry-cover.png" alt="" />
-                ) : (
-                  <span className="release-cover-placeholder"><DownloadSimple size={24} weight="thin" /></span>
-                )}
+                <ReleaseCover group={group} />
                 <span className="release-transfer-identity">
                   <strong>{group.title}</strong>
                   <small>

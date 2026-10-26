@@ -196,6 +196,9 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
   active-transfer progress, queued releases, Wanted matches, unread messages,
   room mentions, recent transfer and Archive activity, and collection status;
   every signal links to its exact working destination
+- **Real cover art** on Now receiving and Transfers: albums started from a search
+  use their MusicBrainz cover, and folder-named downloads are matched by
+  artist and album (cached, confident matches only); no art shows a placeholder
 - **Insights** on the Listening Post: received and shared totals, share ratio,
   download success, Wanted hit rate and average time-to-find, Soundcheck pass
   rate, direct-connection share, a 30-day traffic chart, Wanted albums found

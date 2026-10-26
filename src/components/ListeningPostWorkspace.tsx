@@ -27,6 +27,7 @@ import { releaseHealth } from "../utils/finishLine";
 import type { ReactNode } from "react";
 import { buildArrivals } from "../utils/arrivals";
 import { groupTransfers, type TransferGroup } from "../utils/transfers";
+import { ReleaseCover } from "./ReleaseCover";
 
 type ArchiveDestination = "arrivals" | "missing" | "wanted";
 
@@ -246,7 +247,7 @@ export function ListeningPostWorkspace({
           {active ? (
             <>
               <article className="listening-post-active">
-                <img src="/assets/night-geometry-cover.png" alt="" />
+                <ReleaseCover group={active} size={44} />
                 <div className="listening-post-active-copy">
                   <span className="listening-post-signal-lines" aria-hidden="true" />
                   <strong>{active.title}</strong>

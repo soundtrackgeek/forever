@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.0.86] - 2026-10-26
+
+### Fixed
+
+- **Now receiving** and the Transfers list showed a stock placeholder cover for
+  every download. They now show the real album cover from the Cover Art
+  Archive: straight from the album when the transfer began as an album search,
+  otherwise by matching the "Artist - Album (Year)" folder name against
+  MusicBrainz (confident matches only, remembered for a week). When no cover
+  exists the neutral placeholder tile is shown.
+
 ## [0.0.85] - 2026-10-26
 
 ### Added

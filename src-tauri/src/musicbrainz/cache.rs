@@ -16,6 +16,7 @@ const DAY: u64 = 24 * 60 * 60;
 pub(super) enum Entity {
     Artists,
     Catalog,
+    Cover,
     Editions,
     Tracklist,
 }
@@ -25,6 +26,7 @@ impl Entity {
         match self {
             Self::Artists => "artists",
             Self::Catalog => "catalog",
+            Self::Cover => "cover",
             Self::Editions => "editions",
             Self::Tracklist => "tracklist",
         }
@@ -32,7 +34,7 @@ impl Entity {
     fn ttl(self) -> Option<u64> {
         match self {
             Self::Artists => Some(DAY),
-            Self::Catalog | Self::Editions => Some(7 * DAY),
+            Self::Catalog | Self::Cover | Self::Editions => Some(7 * DAY),
             Self::Tracklist => None,
         }
     }
