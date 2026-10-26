@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.0.87] - 2026-10-26
+
+### Added
+
+- **Sort by** menu on the Discovery shelf's studio albums: **Oldest first**
+  (the new default, so an artist's discography reads from debut to latest),
+  **Newest first**, **Alphabetical**, and **Most listened** (the previous
+  ListenBrainz ranking, shown only when ListenBrainz data is available).
+  Albums without a release date always sort to the bottom of the date orders.
+
 ## [0.0.86] - 2026-10-26
 
 ### Fixed

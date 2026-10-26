@@ -675,4 +675,6 @@
 .discovery-verify li { padding: 5px 10px; border: 1px solid #3f4354; border-radius: 99px; font-size: 11px; color: #b2b7c6; }
 .discovery-verify li[data-status="found"] { border-color: #5d7a55; color: #b7d4ae; }
 .discovery-verify li[data-status="unavailable"] { border-color: #8a5a4a; color: #e0aa98; }
-.discovery-bulk { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.discovery-bulk { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.discovery-sort { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; color: #9a9aa6; font-size: 12px; }
+.discovery-sort select { padding: 9px 10px; border: 1px solid #2c2c36; border-radius: 6px; background: #14141b; color: #e4e4e9; font: inherit; font-size: 12px; }

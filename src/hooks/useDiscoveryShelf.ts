@@ -44,12 +44,17 @@ const previewShelf = (steer: DiscoverySteer[]): DiscoveryShelf => {
     ],
   };
 };
+const previewDates: Record<string, string> = {
+  "Hunky Dory": "1971-12-17", Low: "1977-01-14", Heroes: "1977-10-14",
+  "The Dark Side of the Moon": "1973-03-01", "Wish You Were Here": "1975-09-12", Animals: "1977-01-23",
+  Parachutes: "2000-07-10", "A Rush of Blood to the Head": "2002-08-26", "X&Y": "2005-06-07",
+};
 const previewAlbums = (artist: DiscoveryArtist): DiscoveryAlbums => ({
   basis: "listenbrainz", notices: [], musicbrainzArtistId: artist.artistId, imageUrl: null,
   musicbrainz: { status: "found", count: 3, message: null },
   discogs: { status: "found", count: 3, message: null },
   albums: (artist.name === "David Bowie" ? ["Hunky Dory", "Low", "Heroes"] : artist.name === "Pink Floyd" ? ["The Dark Side of the Moon", "Wish You Were Here", "Animals"] : ["Parachutes", "A Rush of Blood to the Head", "X&Y"])
-    .map((title, i) => ({ id: `preview-discovery-${artist.artistId}-${i}`, title, firstReleaseDate: "", coverArtUrl: "", musicbrainz: true, discogs: i !== 2 })),
+    .map((title, i) => ({ id: `preview-discovery-${artist.artistId}-${i}`, title, firstReleaseDate: previewDates[title] ?? "", coverArtUrl: "", musicbrainz: true, discogs: i !== 2 })),
 });
 const previewSources: SourcesStatus = {
   lastFm: { configured: true, origin: "keyring" }, discogs: { configured: true, origin: "keyring" }, fanart: { configured: false, origin: "none" }, listenBrainz: { configured: false, origin: "none" },

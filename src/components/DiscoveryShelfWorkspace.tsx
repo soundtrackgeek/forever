@@ -118,7 +118,20 @@ function reportText(label: string, report: SourceReport) {
   }
 }
 
-function AlbumPicks({ artist, result, online, wantedReady, wantedAlbums, onAddWanted, onSearchAlbums }: Omit<Props, "discovery" | "connected"> & { artist: DiscoveryArtist; result: DiscoveryAlbums }) {
+type AlbumSort = "oldest" | "newest" | "alphabetical" | "listened";
+
+/** Dates are partial ISO strings ("2003" or "2003-05-12"), so plain string order is chronological. Albums without a date always sink to the bottom. */
+export function sortAlbums(albums: DiscoveryAlbum[], sort: AlbumSort): DiscoveryAlbum[] {
+  if (sort === "listened") return albums;
+  const byTitle = (a: DiscoveryAlbum, b: DiscoveryAlbum) => a.title.localeCompare(b.title, undefined, { sensitivity: "base", numeric: true });
+  const byDate = (direction: 1 | -1) => (a: DiscoveryAlbum, b: DiscoveryAlbum) => {
+    if (!a.firstReleaseDate || !b.firstReleaseDate) return Number(!a.firstReleaseDate) - Number(!b.firstReleaseDate) || byTitle(a, b);
+    return direction * a.firstReleaseDate.localeCompare(b.firstReleaseDate) || byTitle(a, b);
+  };
+  return [...albums].sort(sort === "alphabetical" ? byTitle : byDate(sort === "oldest" ? 1 : -1));
+}
+
+function AlbumPicks({ artist, result, sort, onSortChange, online, wantedReady, wantedAlbums, onAddWanted, onSearchAlbums }: Omit<Props, "discovery" | "connected"> & { artist: DiscoveryArtist; result: DiscoveryAlbums; sort: AlbumSort; onSortChange: (sort: AlbumSort) => void }) {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -134,7 +147,7 @@ function AlbumPicks({ artist, result, online, wantedReady, wantedAlbums, onAddWa
     setChecked((current) => { const next = new Set(current); if (!next.delete(id)) next.add(id); return next; });
   }
   function search() {
-    const chosen = result.albums.filter((album) => checked.has(album.id));
+    const chosen = sorted.filter((album) => checked.has(album.id));
     const count = onSearchAlbums(artist.name, chosen);
     setOpened(count === chosen.length
       ? `Opened ${count} ${count === 1 ? "search" : "searches"} in Search.`
@@ -142,23 +155,34 @@ function AlbumPicks({ artist, result, online, wantedReady, wantedAlbums, onAddWa
     setChecked(new Set(chosen.slice(count).map((album) => album.id)));
   }
   const none = !result.albums.length;
+  const listened = result.basis === "listenbrainz";
+  const activeSort = sort === "listened" && !listened ? "oldest" : sort;
+  const sorted = sortAlbums(result.albums, activeSort);
   return <>
     <ul className="discovery-verify" aria-label="Album checks">
       <li data-status={result.musicbrainz.status}>{reportText("MusicBrainz", result.musicbrainz)}</li>
       <li data-status={result.discogs.status}>{reportText("Discogs", result.discogs)}</li>
     </ul>
-    <p className="discovery-caption">{result.basis === "listenbrainz" ? "MusicBrainz albums ranked by ListenBrainz listens; the rest follow release date." : "Studio albums ordered by release date."} Live, compilation and single releases are left out.</p>
+    <p className="discovery-caption">{result.basis === "listenbrainz" ? "MusicBrainz albums can be ranked by ListenBrainz listens; the rest follow release date." : "Studio albums."} Live, compilation and single releases are left out.</p>
     {result.notices.map((notice) => <p className="discovery-notice" role="status" key={notice}>{notice}</p>)}
     {error ? <p className="discovery-notice" role="alert">{error}</p> : null}
     {none ? <p className="discovery-empty">Neither MusicBrainz nor Discogs lists a studio album for this artist, so there is nothing to search for yet.</p> : null}
     {!none ? <div className="discovery-bulk">
       <button type="button" onClick={() => setChecked(checked.size === result.albums.length ? new Set() : new Set(result.albums.map((album) => album.id)))}>{checked.size === result.albums.length ? "Clear selection" : "Select all"}</button>
+      <label className="discovery-sort">Sort by
+        <select value={activeSort} onChange={(event) => onSortChange(event.target.value as AlbumSort)}>
+          <option value="oldest">Oldest first</option>
+          <option value="newest">Newest first</option>
+          <option value="alphabetical">Alphabetical</option>
+          {listened ? <option value="listened">Most listened</option> : null}
+        </select>
+      </label>
       <button type="button" className="discovery-primary" disabled={!online || checked.size === 0} title={online ? undefined : "Connect to Soulseek to search"} onClick={search}>
         Search Soulseek{checked.size ? ` (${checked.size})` : ""} <ArrowRight size={14} />
       </button>
     </div> : null}
     {opened ? <p className="discovery-notice" role="status">{opened}</p> : null}
-    <ul className="discovery-albums">{result.albums.map((album) => {
+    <ul className="discovery-albums">{sorted.map((album) => {
       const wanted = wantedAlbums.some((item) => item.albumId === album.id);
       return <li key={album.id} data-checked={checked.has(album.id)}>
         <label>
@@ -179,6 +203,7 @@ function AlbumPicks({ artist, result, online, wantedReady, wantedAlbums, onAddWa
 
 export function DiscoveryShelfWorkspace({ discovery, connected, ...actions }: Props) {
   const { shelf, selected, albums, loading, error, steer } = discovery;
+  const [sort, setSort] = useState<AlbumSort>("oldest");
   const label = steer.length ? "Discover new artists" : shelf ? "Refresh shelf" : "Discover from my top artists";
   return <section className="discovery-workspace" aria-label="Similar-artist discovery shelf">
     <header className="discovery-heading">
@@ -208,7 +233,7 @@ export function DiscoveryShelfWorkspace({ discovery, connected, ...actions }: Pr
           </button>
         </li>)}</ol>
         <section className="discovery-picks" aria-label="Artist album picks">
-          {selected ? <><span className="discovery-kicker">Studio albums</span><div className="discovery-picks-title">{albums?.imageUrl ? <img src={albums.imageUrl} alt="" /> : null}<h3>{selected.name}</h3></div>{loading === "albums" ? <p role="status"><CircleNotch className="search-spinner" size={16} /> Checking MusicBrainz and Discogs…</p> : albums ? <AlbumPicks key={selected.artistId} artist={selected} result={albums} {...actions} /> : null}</> : <div className="discovery-empty"><Record size={42} weight="thin" /><h3>Check an artist before you search.</h3><p>Select an artist to see their studio albums on MusicBrainz and Discogs, then search for the ones you want.</p></div>}
+          {selected ? <><span className="discovery-kicker">Studio albums</span><div className="discovery-picks-title">{albums?.imageUrl ? <img src={albums.imageUrl} alt="" /> : null}<h3>{selected.name}</h3></div>{loading === "albums" ? <p role="status"><CircleNotch className="search-spinner" size={16} /> Checking MusicBrainz and Discogs…</p> : albums ? <AlbumPicks key={selected.artistId} artist={selected} result={albums} sort={sort} onSortChange={setSort} {...actions} /> : null}</> : <div className="discovery-empty"><Record size={42} weight="thin" /><h3>Check an artist before you search.</h3><p>Select an artist to see their studio albums on MusicBrainz and Discogs, then search for the ones you want.</p></div>}
         </section>
       </div>}
       <p className="discovery-caption">Artist connections: ListenBrainz listening sessions and Last.fm similar artists, weighted by your owned album counts. This is listening affinity, not an audio or genre analysis. Provider results are cached for seven days.</p>

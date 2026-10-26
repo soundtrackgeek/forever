@@ -160,7 +160,8 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
   example Richard Marx), then choose **Discover new artists** to follow only
   those. With no artist chosen, **Discover from my top artists** uses up to five
   of your most-owned artists with verified MusicBrainz identities. The Archive
-  stays read-only. Each suggestion shows which owned artists and which sources
+  stays read-only. An artist's studio albums open oldest first; use **Sort by**
+  to switch to newest first, alphabetical, or most listened. Each suggestion shows which owned artists and which sources
   (ListenBrainz, Last.fm) contributed; sources that agree rank higher. Artists
   without a verified identity can still be chosen by name and are followed
   through Last.fm.

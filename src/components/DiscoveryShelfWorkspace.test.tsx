@@ -22,6 +22,19 @@ describe("discovery shelf interactions", () => {
     expect(checks.getByText("MusicBrainz: 3 studio albums")).toBeInTheDocument();
     expect(checks.getByText("Discogs: 3 studio albums")).toBeInTheDocument();
   });
+  it("sorts an artist's albums oldest first by default and lets the order change", async () => {
+    render(<Harness />);
+    await openPicks();
+    const titles = () => screen.getAllByRole("checkbox").map((box) => box.getAttribute("aria-label")?.replace("Select ", ""));
+    expect(screen.getByRole("combobox", { name: "Sort by" })).toHaveValue("oldest");
+    expect(titles().slice(-3)).toEqual(["Hunky Dory", "Low", "Heroes"]);
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort by" }), { target: { value: "newest" } });
+    expect(titles().slice(-3)).toEqual(["Heroes", "Low", "Hunky Dory"]);
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort by" }), { target: { value: "alphabetical" } });
+    expect(titles().slice(-3)).toEqual(["Heroes", "Hunky Dory", "Low"]);
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort by" }), { target: { value: "listened" } });
+    expect(titles().slice(-3)).toEqual(["Hunky Dory", "Low", "Heroes"]);
+  });
   it("opens one search per selected album and reports a partial batch", async () => {
     const search = vi.fn().mockReturnValueOnce(2).mockReturnValueOnce(1);
     render(<Harness search={search} />);
