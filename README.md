@@ -352,6 +352,12 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
   pause/check/remove controls, in-app and Windows availability alerts, and
   configurable **Smart Match** profiles for format, minimum bitrate, and track
   count, including MP3-only matching and a reusable default for new watches
+- **Smart downloads** for Wanted: save a preferred format once and Forever
+  finds the best source in your accepted range, checks it against MusicBrainz,
+  downloads and verifies it, and switches to another source on its own when one
+  stalls, fails, or sends damaged files, with configurable patience, retries,
+  and track-length tolerance. A Windows notification announces each verified
+  album while Forever is in the background
 - Matching album downloads automatically leave active Wanted monitoring after
   every expected audio track verifies and Soundcheck passes when enabled,
   preventing redundant Smart Match checks and notifications; incomplete
@@ -845,6 +851,52 @@ Different available files or metadata can still change a later review.
 Unknown or zero bitrates in lossy-only folders cannot satisfy a configured minimum.
 Equal scores first compare the proportion of official tracks with agreeing lengths,
 then use stable listener/folder ties, independent of reply order.
+
+### Smart downloads (click Wanted, then forget it)
+
+Turn on **Settings → Smart downloads → Download Wanted albums automatically**
+and every Wanted album downloads itself. It is off by default, and each album
+has an **Auto** button on the Wanted list to opt out. The same panel holds the
+default profile new Wanted albums start with: a preferred format (prefer FLAC,
+lossless only, MP3 only, or any) plus a lossy fallback bitrate. **Apply to the
+albums still wanted** copies that profile onto albums already on the list.
+
+For each album Forever takes the ranked list from the latest Wanted check and
+tries the sources in order. Before queueing one it opens the peer's folder,
+counts the audio files against the album's minimum track count, and compares the
+titles and lengths with the official MusicBrainz edition, exactly as the manual
+review does. The first folder that passes is queued with the usual verification
+and Soundcheck. Sources that cannot be reached, hold the wrong tracks, or differ
+in length are skipped and remembered.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Look for another source after | 20 min | No data received for this long, counted only while the source is the one holding things up; files waiting in your own queue never count. The stalled release is replaced only when another source has already passed the checks above, otherwise it keeps waiting and one fresh search is requested. |
+| Sources to try per album | 5 | After this many queued sources the album rests for six hours, then starts over with a clean slate. Skipped sources do not count. |
+| Albums at the same time | 2 | How many albums Smart downloads queues at once. |
+| A track may differ by up to | 3 s | Length tolerance against MusicBrainz. Raise it for remasters and fades. |
+| Tracks allowed to differ more | 0 | Forgives a few tracks, such as a longer live or hidden track, while still listing them in the summary. |
+
+The length tolerance is the same one used for Smart Match rankings, the review
+dialog, and automatic downloads, so they always agree. Changing it schedules a
+fresh check of every open Wanted album.
+
+A release that fails outright or sends files that fail verification or
+Soundcheck is cancelled and the next source is tried. Soundcheck results that
+only ask for review are left for you. Forever respects your own changes: a
+download you pause stays paused, removing one from Transfers turns **Auto** off
+for that album, and downloads you queue by hand are never touched. Files an abandoned
+source had already finished stay in their release folder in your download
+directory. Progress (attempts, rejected sources, rest periods) is saved with the
+Wanted list, so a restart carries on where it stopped. Albums are managed while
+the window is hidden in the tray, but not while Forever is closed.
+
+**Notify me when an album is verified** (on by default) shows a Windows
+notification, bottom right of the screen, when a download finishes and passes
+verification while Forever is hidden, minimized, or behind another window. It
+does nothing while you are looking at Forever, and only announces albums that
+finished downloading during the current session. Several albums at once share
+one notification.
 
 Archive ownership, album queries, and track matching share NFKD accent folding,
 punctuation spacing, and `&` → `and` normalization (including Björk/Bjork).

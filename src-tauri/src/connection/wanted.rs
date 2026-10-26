@@ -101,6 +101,84 @@ pub struct WantedDownloadFulfillmentRequest {
     pub completed_at_ms: u64,
 }
 
+/// One source Smart Download has already given a chance, so the next attempt
+/// does not repeat it.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartTriedSource {
+    pub username: String,
+    pub folder: String,
+    pub outcome: String,
+    pub at_ms: u64,
+}
+
+/// The release Smart Download is currently waiting on.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartAttempt {
+    pub release_id: Option<String>,
+    pub username: String,
+    pub folder: String,
+    pub started_at_ms: u64,
+}
+
+/// Durable memory for hands-off downloading. The frontend decides what to do;
+/// this keeps retries and rejected sources across restarts.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WantedSmartState {
+    pub attempts: u32,
+    pub tried: Vec<SmartTriedSource>,
+    pub current: Option<SmartAttempt>,
+    pub resume_at_ms: Option<u64>,
+    pub last_recheck_at_ms: Option<u64>,
+    pub message: Option<String>,
+    pub updated_at_ms: u64,
+}
+
+impl WantedSmartState {
+    /// Forget what was tried and rejected, but keep any download in flight.
+    fn reset_history(&mut self) {
+        self.attempts = 0;
+        self.tried.clear();
+        self.resume_at_ms = None;
+        self.last_recheck_at_ms = None;
+        self.message = None;
+    }
+}
+
+const MAX_SMART_TRIED: usize = 40;
+const MAX_SMART_TEXT: usize = 600;
+const MAX_CANDIDATES: usize = 6;
+
+fn default_auto_download() -> bool {
+    true
+}
+
+pub(super) fn validate_smart_state(state: &WantedSmartState) -> Result<(), WantedError> {
+    let text_ok = |value: &str| value.len() <= MAX_SMART_TEXT;
+    let valid = state.attempts <= 1_000
+        && state.tried.len() <= MAX_SMART_TRIED
+        && state.tried.iter().all(|t| {
+            !t.username.is_empty()
+                && text_ok(&t.username)
+                && text_ok(&t.folder)
+                && t.outcome.len() <= 80
+        })
+        && state.current.as_ref().is_none_or(|c| {
+            !c.username.is_empty()
+                && text_ok(&c.username)
+                && text_ok(&c.folder)
+                && c.release_id.as_deref().is_none_or(text_ok)
+        })
+        && state.message.as_deref().is_none_or(text_ok);
+    if valid {
+        Ok(())
+    } else {
+        Err(WantedError::InvalidSmartState)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WantedAlbum {
@@ -144,6 +222,13 @@ pub struct WantedAlbum {
     pub best_speed_bytes_per_second: Option<u32>,
     #[serde(default)]
     pub best_source: Option<WantedBestSource>,
+    /// Ranked acceptable sources from the latest check, best first.
+    #[serde(default)]
+    pub candidates: Vec<WantedBestSource>,
+    #[serde(default = "default_auto_download")]
+    pub auto_download: bool,
+    #[serde(default)]
+    pub smart: WantedSmartState,
     pub error: Option<String>,
     #[serde(default)]
     source_fingerprints: Vec<String>,
@@ -172,6 +257,8 @@ struct WantedStore {
     #[serde(default)]
     default_preferences: WantedPreferences,
     albums: Vec<WantedAlbum>,
+    #[serde(skip)]
+    tolerance: forever_matching::MatchTolerance,
 }
 
 fn default_interval() -> u32 {
@@ -185,6 +272,7 @@ impl Default for WantedStore {
             interval_minutes: DEFAULT_INTERVAL_MINUTES,
             default_preferences: WantedPreferences::default(),
             albums: Vec::new(),
+            tolerance: forever_matching::MatchTolerance::default(),
         }
     }
 }
@@ -310,6 +398,7 @@ impl WantedHub {
         let mut store = load_store(&path)?;
         store.interval_minutes = settings.interval_minutes;
         store.default_preferences = settings.default_preferences.clone();
+        store.tolerance = settings.smart.tolerance();
         Ok(Self {
             app,
             governor,
@@ -425,6 +514,9 @@ impl WantedHub {
                 best_size_bytes: None,
                 best_speed_bytes_per_second: None,
                 best_source: None,
+                candidates: Vec::new(),
+                auto_download: true,
+                smart: WantedSmartState::default(),
                 error: None,
                 source_fingerprints: Vec::new(),
             });
@@ -596,11 +688,74 @@ impl WantedHub {
         Ok(self.snapshot())
     }
 
+    /// Turns hands-off downloading on or off for one album. Turning it back on
+    /// also forgives earlier rejections so the album gets a clean start.
+    pub fn set_auto_download(
+        &self,
+        album_id: &str,
+        auto_download: bool,
+    ) -> Result<WantedSnapshot, WantedError> {
+        let album_id = valid_album_id(album_id)?;
+        let mut store = self.store.write().unwrap_or_else(|p| p.into_inner());
+        let album = store
+            .albums
+            .iter_mut()
+            .find(|album| album.album_id.eq_ignore_ascii_case(album_id))
+            .ok_or(WantedError::AlbumNotFound)?;
+        if album.auto_download != auto_download {
+            album.auto_download = auto_download;
+            album.smart.reset_history();
+            album.smart.updated_at_ms = timestamp_ms();
+        }
+        drop(store);
+        self.persist()?;
+        self.publish();
+        Ok(self.snapshot())
+    }
+
+    /// Replaces an album's Smart Download memory. Ignored for albums that were
+    /// fulfilled or removed while the caller was still working.
+    pub fn update_smart(
+        &self,
+        album_id: &str,
+        mut state: WantedSmartState,
+    ) -> Result<WantedSnapshot, WantedError> {
+        let album_id = valid_album_id(album_id)?;
+        validate_smart_state(&state)?;
+        state.updated_at_ms = timestamp_ms();
+        let mut store = self.store.write().unwrap_or_else(|p| p.into_inner());
+        let Some(album) = store
+            .albums
+            .iter_mut()
+            .find(|album| album.album_id.eq_ignore_ascii_case(album_id))
+            .filter(|album| !album.fulfilled)
+        else {
+            drop(store);
+            return Ok(self.snapshot());
+        };
+        album.smart = state;
+        drop(store);
+        self.persist()?;
+        self.publish();
+        Ok(self.snapshot())
+    }
+
     pub fn apply_settings(&self, settings: &super::app_settings::WantedSettings) {
         {
             let mut store = self.store.write().unwrap_or_else(|p| p.into_inner());
             store.interval_minutes = settings.interval_minutes;
             store.default_preferences = settings.default_preferences.clone();
+            let tolerance = settings.smart.tolerance();
+            if store.tolerance != tolerance {
+                store.tolerance = tolerance;
+                // Sources rejected under the old window may qualify now (or the
+                // reverse), so every open watch gets a fresh look.
+                for album in store.albums.iter_mut().filter(|album| !album.fulfilled) {
+                    album.last_checked_at_ms = None;
+                    album.consecutive_misses = 0;
+                    album.smart.reset_history();
+                }
+            }
         }
         self.publish();
     }
@@ -622,6 +777,8 @@ impl WantedHub {
             .find(|album| album.album_id.eq_ignore_ascii_case(album_id))
             .ok_or(WantedError::AlbumNotFound)?;
         album.preferences = preferences;
+        album.candidates.clear();
+        album.smart.reset_history();
         album.last_checked_at_ms = None;
         album.consecutive_misses = 0;
         album.last_found_at_ms = None;
@@ -1006,10 +1163,17 @@ impl WantedHub {
             .clone()
             .unwrap_or_default();
         let selected_unavailable = active.selected_release_id.is_some() && tracks.is_empty();
-        let mut summary = summarize_ranked_sources(active.sources, &preferences, &tracks, &artist);
+        let tolerance = self
+            .store
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .tolerance;
+        let mut summary =
+            summarize_ranked_sources(active.sources, &preferences, &tracks, &artist, tolerance);
         if selected_unavailable {
             summary.matching_source_count = 0;
             summary.best_source = None;
+            summary.candidates.clear();
             summary.best_format = None;
             summary.best_track_count = None;
             summary.best_size_bytes = None;
@@ -1043,6 +1207,7 @@ impl WantedHub {
             album.best_size_bytes = summary.best_size_bytes;
             album.best_speed_bytes_per_second = summary.best_speed_bytes_per_second;
             album.best_source = summary.best_source;
+            album.candidates = summary.candidates;
             record_check_outcome(album, summary.source_count, timestamp_ms());
             album.error = selected_unavailable.then(|| {
                 "Selected edition tracklist unavailable; try again before reviewing.".into()
@@ -1081,6 +1246,7 @@ struct SourceSummary {
     best_size_bytes: Option<u64>,
     best_speed_bytes_per_second: Option<u32>,
     best_source: Option<WantedBestSource>,
+    candidates: Vec<WantedBestSource>,
     source_fingerprints: Vec<String>,
 }
 
@@ -1089,7 +1255,7 @@ fn summarize_sources(
     sources: HashMap<String, SourceAggregate>,
     preferences: &WantedPreferences,
 ) -> SourceSummary {
-    summarize_ranked_sources(sources, preferences, &[], "")
+    summarize_ranked_sources(sources, preferences, &[], "", Default::default())
 }
 
 fn ranking_source(id: &str, source: &SourceAggregate) -> RankingSource {
@@ -1109,6 +1275,7 @@ fn summarize_ranked_sources(
     preferences: &WantedPreferences,
     official: &[AlbumTrack],
     artist: &str,
+    tolerance: forever_matching::MatchTolerance,
 ) -> SourceSummary {
     let best_track_count = sources.values().map(|source| source.track_count).max();
     let complete_source_count = best_track_count
@@ -1125,9 +1292,9 @@ fn summarize_ranked_sources(
         .iter()
         .map(|(id, source)| ranking_source(id, source))
         .collect();
-    let ranked = matching::rank_sources(&inputs, preferences, official, artist);
+    let ranked = matching::rank_sources_with(&inputs, preferences, official, artist, tolerance);
     let matching_sources: Vec<_> = ranked.iter().filter(|r| r.eligible).collect();
-    let best_source = matching_sources.first().map(|rank| {
+    let describe = |rank: &&matching::RankedSource| {
         let source = &sources[&rank.source_id];
         WantedBestSource {
             username: source.username.clone(),
@@ -1152,7 +1319,13 @@ fn summarize_ranked_sources(
                 folders
             },
         }
-    });
+    };
+    let candidates: Vec<_> = matching_sources
+        .iter()
+        .take(MAX_CANDIDATES)
+        .map(describe)
+        .collect();
+    let best_source = candidates.first().cloned();
     let mut source_fingerprints: Vec<_> = matching_sources
         .iter()
         .map(|r| r.source_id.clone())
@@ -1176,6 +1349,7 @@ fn summarize_ranked_sources(
             .map(|source| source.average_speed_bytes_per_second)
             .filter(|speed| *speed > 0),
         best_source,
+        candidates,
         source_fingerprints,
     }
 }
@@ -1231,6 +1405,8 @@ fn fulfill_downloaded_in_store(
         album.owned_track_count = None;
         album.watch_despite_ownership = false;
         album.new_source_count = 0;
+        album.candidates.clear();
+        album.smart = WantedSmartState::default();
         album.error = None;
         changed += 1;
     }
@@ -1376,6 +1552,8 @@ fn validate_download_fulfillment(
 }
 
 fn reset_for_watch(album: &mut WantedAlbum, added_at_ms: u64) {
+    album.candidates.clear();
+    album.smart = WantedSmartState::default();
     album.paused = false;
     album.fulfilled = false;
     album.fulfilled_at_ms = None;
@@ -1499,6 +1677,9 @@ fn merge_bulk_requests(
                 best_size_bytes: None,
                 best_speed_bytes_per_second: None,
                 best_source: None,
+                candidates: Vec::new(),
+                auto_download: true,
+                smart: WantedSmartState::default(),
                 error: None,
                 source_fingerprints: Vec::new(),
             });
@@ -1594,6 +1775,8 @@ fn migrate_v2_to_v3(value: serde_json::Value) -> Result<serde_json::Value, Decod
 
 fn change_edition(album: &mut WantedAlbum, release_id: Option<String>) {
     album.selected_release_id = release_id;
+    album.candidates.clear();
+    album.smart.reset_history();
     album.last_checked_at_ms = None;
     album.consecutive_misses = 0;
     album.last_found_at_ms = None;
@@ -1645,6 +1828,8 @@ pub enum WantedError {
     InvalidPreferences,
     #[error("Choose a valid verified download before fulfilling this Wanted album.")]
     InvalidDownloadFulfillment,
+    #[error("Smart download progress could not be saved because it was not valid.")]
+    InvalidSmartState,
     #[error("Forever supports up to {MAX_WANTED_ALBUMS} wanted albums.")]
     TooManyAlbums,
     #[error("Choose between 1 and {MAX_BULK_WANTED_ALBUMS} missing albums at a time.")]
@@ -2074,6 +2259,9 @@ mod tests {
             best_size_bytes: None,
             best_speed_bytes_per_second: None,
             best_source: None,
+            candidates: Vec::new(),
+            auto_download: true,
+            smart: WantedSmartState::default(),
             error: None,
             source_fingerprints: vec!["listener\0Music/Artist/Album".to_string()],
         });
@@ -2268,6 +2456,176 @@ mod tests {
         );
     }
 
+    fn smart_state_with_one_attempt() -> WantedSmartState {
+        WantedSmartState {
+            attempts: 1,
+            tried: vec![SmartTriedSource {
+                username: "alice".into(),
+                folder: "Music\\Album".into(),
+                outcome: "stalled".into(),
+                at_ms: 10,
+            }],
+            current: Some(SmartAttempt {
+                release_id: Some("release-1".into()),
+                username: "bob".into(),
+                folder: "Music\\Album".into(),
+                started_at_ms: 20,
+            }),
+            resume_at_ms: None,
+            last_recheck_at_ms: Some(15),
+            message: Some("Downloading from bob".into()),
+            updated_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn older_stores_gain_auto_download_and_empty_smart_state() {
+        let mut store = WantedStore::default();
+        merge_bulk_requests(
+            &mut store,
+            vec![validate_request(request("album-1")).unwrap()],
+            &WantedPreferences::default(),
+            1,
+        )
+        .unwrap();
+        let mut value = serde_json::to_value(&store).unwrap();
+        let album = value["albums"][0].as_object_mut().unwrap();
+        album.remove("autoDownload");
+        album.remove("auto_download");
+        album.remove("candidates");
+        album.remove("smart");
+        let restored: WantedStore = serde_json::from_value(value).unwrap();
+        assert!(restored.albums[0].auto_download);
+        assert!(restored.albums[0].candidates.is_empty());
+        assert_eq!(restored.albums[0].smart, WantedSmartState::default());
+    }
+
+    #[test]
+    fn smart_state_validation_bounds_stored_text_and_history() {
+        assert!(validate_smart_state(&smart_state_with_one_attempt()).is_ok());
+        let mut long_message = smart_state_with_one_attempt();
+        long_message.message = Some("x".repeat(MAX_SMART_TEXT + 1));
+        assert!(validate_smart_state(&long_message).is_err());
+        let mut too_many = smart_state_with_one_attempt();
+        too_many.tried = vec![too_many.tried[0].clone(); MAX_SMART_TRIED + 1];
+        assert!(validate_smart_state(&too_many).is_err());
+        let mut nameless = smart_state_with_one_attempt();
+        nameless.current.as_mut().unwrap().username.clear();
+        assert!(validate_smart_state(&nameless).is_err());
+    }
+
+    #[test]
+    fn restoring_or_fulfilling_clears_smart_progress_and_candidates() {
+        let mut store = WantedStore::default();
+        merge_bulk_requests(
+            &mut store,
+            vec![validate_request(request("album-1")).unwrap()],
+            &WantedPreferences::default(),
+            1,
+        )
+        .unwrap();
+        store.albums[0].smart = smart_state_with_one_attempt();
+        store.albums[0].candidates = vec![WantedBestSource {
+            username: "bob".into(),
+            folder: "Music\\Album".into(),
+            format: "FLAC".into(),
+            track_count: 10,
+            size_bytes: 1,
+            slot_free: true,
+            average_speed_bytes_per_second: 1,
+            queue_length: 0,
+            minimum_bitrate_kbps: None,
+            score: 1,
+            tracklist_label: String::new(),
+            folders: Vec::new(),
+        }];
+        let fulfillment = WantedDownloadFulfillmentRequest {
+            album_id: "album-1".to_owned(),
+            release_id: "release-1".to_owned(),
+            username: "bob".to_owned(),
+            format: "FLAC".to_owned(),
+            track_count: 10,
+            size_bytes: 1,
+            soundcheck: WantedDownloadSoundcheck::Passed,
+            completed_at_ms: 500,
+        };
+        assert_eq!(
+            fulfill_downloaded_in_store(&mut store, vec![fulfillment]),
+            1
+        );
+        assert_eq!(store.albums[0].smart, WantedSmartState::default());
+        assert!(store.albums[0].candidates.is_empty());
+
+        store.albums[0].smart = smart_state_with_one_attempt();
+        reset_for_watch(&mut store.albums[0], 600);
+        assert_eq!(store.albums[0].smart, WantedSmartState::default());
+    }
+
+    #[test]
+    fn resetting_history_keeps_the_download_in_flight() {
+        let mut state = smart_state_with_one_attempt();
+        state.resume_at_ms = Some(99);
+        state.reset_history();
+        assert_eq!(state.attempts, 0);
+        assert!(state.tried.is_empty());
+        assert_eq!(state.resume_at_ms, None);
+        assert_eq!(state.message, None);
+        assert_eq!(
+            state.current.as_ref().map(|c| c.username.as_str()),
+            Some("bob")
+        );
+    }
+
+    #[test]
+    fn summary_lists_ranked_candidates_best_first_and_caps_them() {
+        let mut sources = HashMap::new();
+        for index in 0..8u32 {
+            let name = format!("user{index}");
+            sources.insert(
+                format!("{name}\0Music\\Album"),
+                SourceAggregate {
+                    username: name,
+                    folder: "Music\\Album".to_owned(),
+                    track_count: 10,
+                    total_size_bytes: 500_000_000,
+                    slot_free: index % 2 == 0,
+                    average_speed: 1_000_000 * (index + 1),
+                    queue_length: index,
+                    tracks: test_tracks("FLAC", 10, None),
+                },
+            );
+        }
+        let summary = summarize_sources(sources, &WantedPreferences::default());
+        assert_eq!(summary.candidates.len(), MAX_CANDIDATES);
+        assert_eq!(summary.matching_source_count, 8);
+        assert_eq!(
+            summary.best_source.as_ref().map(|s| s.username.clone()),
+            summary.candidates.first().map(|s| s.username.clone())
+        );
+        assert!(summary
+            .candidates
+            .windows(2)
+            .all(|pair| pair[0].score >= pair[1].score));
+    }
+
+    #[test]
+    fn smart_download_settings_are_bounded() {
+        use super::super::app_settings::SmartDownloadSettings;
+        assert!(SmartDownloadSettings::default().validate().is_ok());
+        let bad = |change: fn(&mut SmartDownloadSettings)| {
+            let mut settings = SmartDownloadSettings::default();
+            change(&mut settings);
+            settings.validate().is_err()
+        };
+        assert!(bad(|s| s.stall_minutes = 4));
+        assert!(bad(|s| s.stall_minutes = 241));
+        assert!(bad(|s| s.max_attempts = 0));
+        assert!(bad(|s| s.max_attempts = 21));
+        assert!(bad(|s| s.max_active_albums = 0));
+        assert!(bad(|s| s.duration_tolerance_seconds = 31));
+        assert!(bad(|s| s.allowed_length_mismatches = 11));
+    }
+
     #[test]
     fn smart_match_prefers_complete_ready_lossless_sources() {
         let mut sources = HashMap::new();
@@ -2350,6 +2708,7 @@ mod tests {
                 &preferences,
                 &official,
                 case["artist"].as_str().unwrap(),
+                Default::default(),
             );
             assert_eq!(
                 summary.matching_source_count as usize,

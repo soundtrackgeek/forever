@@ -12,6 +12,7 @@ import {
   Eye,
   FolderOpen,
   Gauge,
+  Lightning,
   LockKey,
   MusicNotes,
   Pause,
@@ -30,6 +31,8 @@ import { archiveMatchReason } from "../utils/archiveMatch";
 import { formatAlbumBytes } from "../utils/albumSources";
 import { buildArrivals } from "../utils/arrivals";
 import { wantedPreferencesLabel } from "../utils/smartMatches";
+import { smartStatus } from "../utils/smartDownload";
+import type { SmartDownloadSettings } from "../settings";
 import { albumDownloadLabel, type AlbumDownloadState } from "../utils/albumDownloadState";
 import type { TransferGroup } from "../utils/transfers";
 import { ArrivalDesk } from "./ArrivalDesk";
@@ -54,6 +57,8 @@ type ArchiveWorkspaceProps = {
   onOpenWanted: (album: WantedAlbum) => void;
   onReviewBest: (album: WantedAlbum) => void;
   onEditPreferences: (album: WantedAlbum) => void;
+  smartDownloads?: SmartDownloadSettings;
+  onSetAutoDownload?: (albumId: string, auto: boolean) => Promise<unknown>;
   downloadStateByAlbumId: ReadonlyMap<string, AlbumDownloadState>;
   onOpenTransfer: (groupId: string) => void;
   onDismissWantedError: () => void;
@@ -113,6 +118,10 @@ const relativeCompletion = (value: number | null) => {
   return `Completed ${Math.floor(hours / 24)}d ago`;
 };
 
+// Read the clock outside render, like the other relative labels here.
+const currentSmartStatus = (album: WantedAlbum, settings: SmartDownloadSettings, groups: TransferGroup[]) =>
+  smartStatus(album, settings, groups, Date.now());
+
 const speed = (value: number | null) =>
   value ? `${formatAlbumBytes(value)}/s` : "Speed unknown";
 
@@ -157,6 +166,8 @@ export function ArchiveWorkspace({
   onOpenWanted,
   onReviewBest,
   onEditPreferences,
+  smartDownloads,
+  onSetAutoDownload,
   downloadStateByAlbumId,
   onOpenTransfer,
   onDismissWantedError,
@@ -364,6 +375,7 @@ export function ArchiveWorkspace({
               const available = album.matchingSourceCount > 0 && Boolean(album.bestSource);
               const downloadState = downloadStateByAlbumId.get(album.albumId);
               const downloadLabel = downloadState ? albumDownloadLabel(downloadState) : "Download best";
+              const smartLine = smartDownloads ? currentSmartStatus(album, smartDownloads, transferGroups) : null;
               const receipt = album.fulfillmentSource === "download" ? album.downloadReceipt : null;
               const arrival = receipt ? arrivalByReleaseId.get(receipt.releaseId) : null;
               const journey = arrival?.state === "filed"
@@ -383,6 +395,7 @@ export function ArchiveWorkspace({
                     <strong>{album.title}</strong>
                     <p>{receipt ? `Fulfilled by Forever · ${relativeCompletion(receipt.completedAtMs)}` : album.fulfilled ? "Fulfilled by Music Library" : relativeCheck(album.lastCheckedAtMs)}{album.paused && !album.fulfilled ? " · Watch paused" : ""}</p>
                     {!album.fulfilled ? <em><Gauge size={12} /> {wantedPreferencesLabel(album.preferences)}</em> : null}
+                    {smartLine ? <em className={`wanted-smart is-${smartLine.tone}`} title={smartLine.text}><Lightning size={12} weight="fill" /> {smartLine.text}</em> : null}
                   </span>
                   <span className="wanted-availability">
                     <small>{receipt ? "Completion receipt" : album.fulfilled ? "Archive state" : queued ? "Waiting to send" : checking ? "Listening now" : available ? "Smart Match" : "Signal state"}</small>
@@ -407,6 +420,7 @@ export function ArchiveWorkspace({
                     {receipt ? <button type="button" className="wanted-restore" onClick={() => void onRestoreWanted(album.albumId).catch(() => undefined)} title="Start listening for this album again"><ArrowCounterClockwise size={15} /> Add back</button> : null}
                     {available && !album.fulfilled ? <button type="button" className={`wanted-download-best${downloadState ? ` is-${downloadState.status}` : ""}`} disabled={!online && !downloadState} onClick={() => downloadState ? onOpenTransfer(downloadState.groupId) : onReviewBest(album)} title={downloadState ? `${downloadLabel}. Open this album in Transfers.` : online ? "Review and queue Forever's recommended source" : "Reconnect before downloading"}>{downloadState ? <WantedDownloadIcon state={downloadState} /> : <DownloadSimple size={16} weight="bold" />} {downloadLabel}</button> : null}
                     {!album.fulfilled && album.sourceCount > 0 ? <button type="button" className="wanted-open" disabled={!online} onClick={() => onOpenWanted(album)} title={online ? "Run a fresh search and compare album sources" : "Reconnect before comparing sources"}><Eye size={16} /> Compare</button> : null}
+                    {!album.fulfilled && smartDownloads?.enabled && onSetAutoDownload ? <button type="button" className={`wanted-auto${album.autoDownload === false ? "" : " is-on"}`} aria-pressed={album.autoDownload !== false} aria-label={`Automatic download for ${album.title}`} onClick={() => void onSetAutoDownload(album.albumId, album.autoDownload === false).catch(() => undefined)} title={album.autoDownload === false ? "Turn automatic download on for this album" : "Turn automatic download off for this album"}><Lightning size={15} weight={album.autoDownload === false ? "regular" : "fill"} /> Auto</button> : null}
                     {!album.fulfilled ? <button type="button" aria-label={`Edit ${album.title} Smart Match profile`} onClick={() => onEditPreferences(album)} title="Edit Smart Match profile"><SlidersHorizontal size={15} /></button> : null}
                     {!album.fulfilled ? <button type="button" aria-label={`Check ${album.title} now`} disabled={!online || checking || Boolean(wanted.activeAlbumId) || album.paused} onClick={() => void onCheckWanted(album.albumId).catch(() => undefined)} title={!online ? "Reconnect before checking" : "Check this album now"}><ArrowsClockwise size={15} /></button> : null}
                     {!album.fulfilled ? <button type="button" aria-label={`${album.paused ? "Resume" : "Pause"} ${album.title} watch`} onClick={() => void onSetWantedPaused(album.albumId, !album.paused).catch(() => undefined)} title={album.paused ? "Resume automatic checks" : "Pause automatic checks"}>{album.paused ? <Play size={15} /> : <Pause size={15} />}</button> : null}

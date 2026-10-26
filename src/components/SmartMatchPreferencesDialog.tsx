@@ -2,8 +2,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Check, SlidersHorizontal, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { AlbumEditionPicker } from "./AlbumEditionPicker";
-import type { AlbumEditions, AlbumTrack, WantedAlbum, WantedFormatPreference, WantedPreferences } from "../types";
-import { wantedPreferencesLabel } from "../utils/smartMatches";
+import type { AlbumEditions, AlbumTrack, WantedAlbum, WantedPreferences } from "../types";
+import { wantedFormatOptions as formatOptions, wantedPreferencesLabel } from "../utils/smartMatches";
 
 type SmartMatchPreferencesDialogProps = {
   album: WantedAlbum;
@@ -12,18 +12,8 @@ type SmartMatchPreferencesDialogProps = {
   onClose: () => void;
   onLoadEditions: (albumId: string) => Promise<AlbumEditions>;
   onSelectEdition: (releaseId: string | null) => Promise<unknown>;
+  smartDownloadsOn?: boolean;
 };
-
-const formatOptions: Array<{
-  value: WantedFormatPreference;
-  label: string;
-  copy: string;
-}> = [
-  { value: "preferLossless", label: "Prefer FLAC", copy: "Recommend lossless first, with a high-quality lossy fallback." },
-  { value: "losslessOnly", label: "Lossless only", copy: "Ignore MP3, AAC, OGG, and other lossy folders." },
-  { value: "mp3Only", label: "MP3 only", copy: "Recommend folders made entirely of MP3 files at your chosen bitrate." },
-  { value: "any", label: "Any format", copy: "Rank every source by completeness and availability." },
-];
 
 export function SmartMatchPreferencesDialog({
   album,
@@ -32,6 +22,7 @@ export function SmartMatchPreferencesDialog({
   onClose,
   onLoadEditions,
   onSelectEdition,
+  smartDownloadsOn = false,
 }: SmartMatchPreferencesDialogProps) {
   const [preferences, setPreferences] = useState(album.preferences);
   const [pending, setPending] = useState(false);
@@ -152,7 +143,7 @@ export function SmartMatchPreferencesDialog({
         <div className="smart-preference-summary">
           <small>Forever will recommend</small>
           <strong>{wantedPreferencesLabel(preferences)}</strong>
-          <p>Changing this profile schedules a fresh background check. Downloads still require your approval.</p>
+          <p>Changing this profile schedules a fresh background check. {smartDownloadsOn && album.autoDownload !== false ? "Smart downloads will fetch a matching source for you." : "Downloads still require your approval."}</p>
         </div>
 
         <label className="smart-default-profile">

@@ -3,6 +3,7 @@ import { BandwidthSettings } from "./BandwidthSettings";
 import { SettingsPortability } from "./SettingsPortability";
 import { DiagnosticsExport } from "./DiagnosticsExport";
 import { UploadPolicySettings } from "./UploadPolicySettings";
+import { SmartDownloadsPanel } from "./SmartDownloadsPanel";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ReachabilitySettings } from "./ReachabilitySettings";
 import {
@@ -32,6 +33,7 @@ import type {
   LocalSharesSnapshot,
   UploadPolicy,
   ReachabilitySnapshot,
+  WantedPreferences,
 } from "../types";
 
 type ConnectionSettingsProps = {
@@ -80,6 +82,8 @@ type ConnectionSettingsProps = {
   onMessageNotificationsChange: (enabled: boolean) => void;
   roomNotificationsEnabled: boolean;
   onRoomNotificationsChange: (enabled: boolean) => void;
+  waitingAlbums?: number;
+  onApplyWantedProfile?: (preferences: WantedPreferences) => Promise<unknown>;
 };
 
 const formatBytes = (bytes: number) => {
@@ -163,6 +167,8 @@ export function ConnectionSettings({
   onMessageNotificationsChange,
   roomNotificationsEnabled,
   onRoomNotificationsChange,
+  waitingAlbums,
+  onApplyWantedProfile,
 }: ConnectionSettingsProps) {
   const [draft, setDraft] = useState(profile);
   const signature = JSON.stringify(profile);
@@ -467,6 +473,8 @@ export function ConnectionSettings({
             </label>
           </div>
         </section>
+
+        <SmartDownloadsPanel waitingAlbums={waitingAlbums} onApplyProfile={onApplyWantedProfile} />
 
         <section className="settings-panel sharing-panel">
           <div className="settings-panel-heading sharing-panel-heading">

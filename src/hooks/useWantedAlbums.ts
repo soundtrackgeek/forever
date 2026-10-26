@@ -12,6 +12,7 @@ import type {
   WantedAlbum,
   WantedDownloadFulfillment,
   WantedPreferences,
+  WantedSmartState,
   WantedSnapshot,
 } from "../types";
 
@@ -225,6 +226,8 @@ export function useWantedAlbums() {
   const [error, setError] = useState<string | null>(null);
   const [alert, setAlert] = useState<WantedAlbum | null>(null);
   const knownChecks = useRef(new Map<string, number>());
+  const smartEnabled = useRef(false);
+  useEffect(() => { smartEnabled.current = settings.wanted.smart?.enabled ?? false; }, [settings.wanted.smart?.enabled]);
   const initialized = useRef(false);
   const previewTimer = useRef<number | null>(null);
 
@@ -232,6 +235,8 @@ export function useWantedAlbums() {
     if (announce && initialized.current) {
       const available = next.albums.find((album) => {
         const previous = knownChecks.current.get(album.albumId) ?? 0;
+        // Albums that download themselves have nothing to review.
+        if (smartEnabled.current && album.autoDownload !== false) return false;
         return Boolean(
           !album.fulfilled &&
           album.newSourceCount > 0 &&
@@ -529,6 +534,20 @@ export function useWantedAlbums() {
       updatedAtMs: Date.now(),
     })), [invokeOrPreview]);
 
+  const setAutoDownload = useCallback(async (albumId: string, autoDownload: boolean) =>
+    await invokeOrPreview("wanted_set_auto_download", { albumId, autoDownload }, (current) => ({
+      ...current,
+      albums: current.albums.map((album) => album.albumId === albumId ? { ...album, autoDownload } : album),
+      updatedAtMs: Date.now(),
+    })), [invokeOrPreview]);
+
+  const updateSmart = useCallback(async (albumId: string, state: WantedSmartState) =>
+    await invokeOrPreview("wanted_smart_update", { albumId, state }, (current) => ({
+      ...current,
+      albums: current.albums.map((album) => album.albumId === albumId ? { ...album, smart: state } : album),
+      updatedAtMs: Date.now(),
+    })), [invokeOrPreview]);
+
   const setIntervalMinutes = useCallback(async (intervalMinutes: 0 | 15 | 30 | 60) => { await patchSettings({ wantedIntervalMinutes: intervalMinutes }); }, []);
 
   const setPreferences = useCallback(async (
@@ -647,6 +666,8 @@ export function useWantedAlbums() {
     fulfillDownloaded,
     restore,
     setPaused,
+    setAutoDownload,
+    updateSmart,
     setIntervalMinutes,
     setPreferences,
     setEdition,
@@ -655,5 +676,5 @@ export function useWantedAlbums() {
     check,
     dismissAlert: () => setAlert(null),
     clearError: () => setError(null),
-  }), [add, addMany, alert, byAlbumId, check, error, fulfillDownloaded, ready, remove, restore, setDefaultPreferences, setIntervalMinutes, setPaused, setPreferences, setEdition, snapshot, syncFulfilled]);
+  }), [add, addMany, alert, byAlbumId, check, error, fulfillDownloaded, ready, remove, restore, setAutoDownload, setDefaultPreferences, setIntervalMinutes, setPaused, setPreferences, setEdition, snapshot, syncFulfilled, updateSmart]);
 }

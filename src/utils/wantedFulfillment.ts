@@ -20,7 +20,7 @@ const verifiedAfterWatchStarted = (album: WantedAlbum, transfers: Transfer[]) =>
   return verifiedAtMs >= album.addedAtMs;
 };
 
-const releasePassedVerification = (transfers: Transfer[]) => {
+export const releasePassedVerification = (transfers: Transfer[]) => {
   if (!transfers.length || transfers.some((transfer) => transfer.status !== "completed")) {
     return false;
   }

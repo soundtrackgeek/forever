@@ -169,3 +169,68 @@ describe("Fulfilled Shelf", () => {
     expect(restore).toHaveBeenCalledWith("release-group-unveiled");
   });
 });
+
+describe("Smart downloads on the Wanted list", () => {
+  const watching: WantedAlbum = {
+    ...receiptAlbum,
+    fulfilled: false,
+    fulfilledAtMs: null,
+    fulfillmentSource: null,
+    downloadReceipt: null,
+    bestSource: null,
+    autoDownload: true,
+    smart: { attempts: 2, tried: [], resumeAtMs: null, lastRecheckAtMs: null, message: null, updatedAtMs: 1,
+      current: { releaseId: "download-unveiled", username: "signalsource", folder: "Music\\Whitecross\\Unveiled", startedAtMs: 300 } },
+  };
+  const smartSettings = { enabled: true, stallMinutes: 20, maxAttempts: 5, maxActiveAlbums: 2, durationToleranceSeconds: 3, allowedLengthMismatches: 0 };
+
+  const renderWanted = (album: WantedAlbum, extra: Partial<React.ComponentProps<typeof ArchiveWorkspace>> = {}) => {
+    const setAuto = vi.fn(async () => undefined);
+    render(
+      <ArchiveWorkspace
+        initialTab="wanted" status={null} loading={false} error={null}
+        wanted={{ ...wanted, albums: [album] }} wantedReady wantedMatches={new Map()}
+        onSelectDatabase={vi.fn()} wantedError={null} online
+        onRefresh={vi.fn()} onSetWantedInterval={vi.fn(async () => undefined)} onCheckWanted={vi.fn(async () => undefined)}
+        onSetWantedPaused={vi.fn(async () => undefined)} onRemoveWanted={vi.fn(async () => undefined)} onRestoreWanted={vi.fn(async () => undefined)}
+        onOpenWanted={vi.fn()} onReviewBest={vi.fn()} onEditPreferences={vi.fn()}
+        smartDownloads={smartSettings} onSetAutoDownload={setAuto}
+        downloadStateByAlbumId={new Map()} onOpenTransfer={vi.fn()} onDismissWantedError={vi.fn()}
+        transferGroups={[{ ...group, status: "active" }]} archiveOwnedReleaseIds={new Set()}
+        onRevealRelease={vi.fn(async () => undefined)} onVerifyRelease={vi.fn(async () => undefined)} onSoundcheckRelease={vi.fn(async () => undefined)}
+        onFindAlternatives={vi.fn(async () => undefined)} onPatchReleaseFile={vi.fn(async () => undefined)} relayRecords={{}}
+        onLoadOfficialTracklist={vi.fn(async () => [])} soundcheckEnabled
+        onSetReleaseFiled={vi.fn(async () => undefined)} onClearReleaseHistory={vi.fn(async () => undefined)}
+        missingShelf={<div>Missing shelf</div>} onOpenMissing={vi.fn()}
+        {...extra}
+      />,
+    );
+    return setAuto;
+  };
+
+  it("says which source is downloading and how many have been tried", () => {
+    renderWanted(watching);
+    expect(screen.getByText("Auto · downloading from signalsource · source 2 of 5")).toBeInTheDocument();
+  });
+
+  it("lets one album opt out of automatic downloading, and back in", () => {
+    const setAuto = renderWanted(watching);
+    const toggle = screen.getByRole("button", { name: "Automatic download for Unveiled" });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(toggle);
+    expect(setAuto).toHaveBeenCalledWith("release-group-unveiled", false);
+  });
+
+  it("shows an opted-out album as off and offers to turn it on", () => {
+    const setAuto = renderWanted({ ...watching, autoDownload: false });
+    expect(screen.getByText("Auto-download off for this album")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Automatic download for Unveiled" }));
+    expect(setAuto).toHaveBeenCalledWith("release-group-unveiled", true);
+  });
+
+  it("shows nothing about Auto while Smart downloads is switched off", () => {
+    renderWanted(watching, { smartDownloads: { ...smartSettings, enabled: false } });
+    expect(screen.queryByRole("button", { name: /Automatic download for/ })).toBeNull();
+    expect(screen.queryByText(/^Auto/)).toBeNull();
+  });
+});

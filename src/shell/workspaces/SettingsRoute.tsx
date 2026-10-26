@@ -15,6 +15,7 @@ export default function SettingsRoute() {
     transfers,
     messages,
     rooms,
+    wanted,
   } = useShell((s) => ({
     native: s.native,
     connection: s.connection,
@@ -26,7 +27,9 @@ export default function SettingsRoute() {
     transfers: s.transfers,
     messages: s.messages,
     rooms: s.rooms,
+    wanted: s.wanted,
   }));
+  const waitingAlbums = wanted.snapshot.albums.filter((album) => !album.fulfilled);
   return (
     <ConnectionSettings
       onSettingsApplied={() => {
@@ -85,6 +88,12 @@ export default function SettingsRoute() {
       onMessageNotificationsChange={messages.setNotificationsEnabled}
       roomNotificationsEnabled={rooms.notificationsEnabled}
       onRoomNotificationsChange={rooms.setNotificationsEnabled}
+      waitingAlbums={waitingAlbums.length}
+      onApplyWantedProfile={async (preferences) => {
+        // One at a time: each change clears that album's check state and the
+        // backend saves after every call.
+        for (const album of waitingAlbums) await wanted.setPreferences(album.albumId, preferences);
+      }}
     />
   );
 }

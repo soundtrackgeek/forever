@@ -16,6 +16,8 @@ struct RankArgs {
     preferences: WantedPreferences,
     official_tracks: Vec<AlbumTrack>,
     artist: String,
+    #[serde(default)]
+    tolerance: Option<MatchTolerance>,
 }
 
 #[derive(Deserialize)]
@@ -24,6 +26,8 @@ struct ConfidenceArgs {
     source_titles: Vec<SourceTitle>,
     official_tracks: Vec<AlbumTrack>,
     artist: String,
+    #[serde(default)]
+    tolerance: Option<MatchTolerance>,
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,16 +39,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let value = match request.command.as_str() {
         "rank_album_sources" => {
             let a: RankArgs = serde_json::from_value(request.args)?;
-            serde_json::to_value(rank_sources(
+            serde_json::to_value(rank_sources_with(
                 &a.sources,
                 &a.preferences,
                 &a.official_tracks,
                 &a.artist,
+                a.tolerance.unwrap_or_default(),
             ))?
         }
         "tracklist_confidence" => {
             let a: ConfidenceArgs = serde_json::from_value(request.args)?;
-            serde_json::to_value(confidence(&a.source_titles, &a.official_tracks, &a.artist))?
+            serde_json::to_value(confidence_with(
+                &a.source_titles,
+                &a.official_tracks,
+                &a.artist,
+                a.tolerance.unwrap_or_default(),
+            ))?
         }
         "normalize_title" => serde_json::to_value(normalize_title(
             request.args["value"]

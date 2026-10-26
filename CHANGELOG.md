@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.0.90] - 2026-10-26
+
+### Added
+
+- **Smart downloads** for Wanted albums (Settings → Smart downloads, off by
+  default). Click Wanted and forget it: Forever takes the ranked sources from the
+  latest Wanted check, opens each peer's folder, checks the audio count and the
+  titles and lengths against the official MusicBrainz edition, queues the first
+  folder that passes, and lets the usual verification and Soundcheck confirm it.
+  Each album has an **Auto** button to opt out, and a status line on the Wanted
+  list says which source is downloading and how many have been tried.
+- **Automatic source switching.** When a source sends no data for the chosen time
+  (20 minutes by default, counted only while the source is the one holding things
+  up), the release is replaced by the next source that has already passed the
+  checks. A release that fails outright or delivers files that fail verification
+  or Soundcheck is cancelled and the next source is tried. If nothing better is
+  known, the download keeps waiting and one fresh search is requested.
+- **Retries and rest.** Each album tries up to five sources (configurable), then
+  rests for six hours and starts over with a clean slate. Sources that were only
+  offline are tried again after three hours. Progress is saved with the Wanted
+  list, so a restart carries on where it stopped. Removing an automatic download
+  from Transfers turns **Auto** off for that album; downloads you queue yourself
+  are never touched.
+- **Preferred format in settings.** The default Wanted profile (prefer FLAC,
+  lossless only, MP3 only, or any, plus a lossy fallback bitrate) is now editable
+  in Settings, with **Apply to the albums still wanted** to copy it onto albums
+  already on the list.
+- **Track length tolerance.** How far a track may differ from the MusicBrainz
+  length (0–30 seconds, 3 by default) and how many tracks may differ by more
+  (0–10, none by default). It applies to Smart Matches, the review dialog and
+  automatic downloads alike, and changing it schedules a fresh check of every
+  open Wanted album.
+- **Verified-album notification.** A Windows notification appears bottom right
+  when an album finishes downloading and passes verification while Forever is
+  hidden in the tray, minimized, or behind another window. It stays quiet while
+  you are looking at Forever and can be switched off in Settings.
+
+### Changed
+
+- Wanted checks now keep up to six ranked, acceptable sources per album instead
+  of only the best one, so a fallback is available immediately.
+- Albums that download themselves no longer raise the "has a Smart Match" alert,
+  since there is nothing to review.
+
 ## [0.0.89] - 2026-10-26
 
 ### Fixed

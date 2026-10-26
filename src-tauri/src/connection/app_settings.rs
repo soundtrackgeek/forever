@@ -152,13 +152,65 @@ impl Default for TransferSettings {
 pub struct WantedSettings {
     pub interval_minutes: u32,
     pub default_preferences: WantedPreferences,
+    #[serde(default)]
+    pub smart: SmartDownloadSettings,
 }
 impl Default for WantedSettings {
     fn default() -> Self {
         Self {
             interval_minutes: 30,
             default_preferences: WantedPreferences::default(),
+            smart: SmartDownloadSettings::default(),
         }
+    }
+}
+
+/// Hands-off downloading for Wanted albums. The accepted format range is the
+/// album's own Smart Match profile; these values decide how patient to be.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct SmartDownloadSettings {
+    pub enabled: bool,
+    /// Minutes without any received bytes before the source is replaced.
+    pub stall_minutes: u32,
+    /// Sources tried for one album before it rests for a while.
+    pub max_attempts: u32,
+    /// Albums downloading automatically at the same time.
+    pub max_active_albums: u32,
+    /// Seconds a track may differ from MusicBrainz and still count as matching.
+    pub duration_tolerance_seconds: u32,
+    /// Tracks allowed to differ by more than that.
+    pub allowed_length_mismatches: u32,
+}
+impl Default for SmartDownloadSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            stall_minutes: 20,
+            max_attempts: 5,
+            max_active_albums: 2,
+            duration_tolerance_seconds: 3,
+            allowed_length_mismatches: 0,
+        }
+    }
+}
+impl SmartDownloadSettings {
+    pub fn tolerance(&self) -> forever_matching::MatchTolerance {
+        forever_matching::MatchTolerance {
+            duration_seconds: self.duration_tolerance_seconds,
+            allowed_mismatches: self.allowed_length_mismatches,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if !(5..=240).contains(&self.stall_minutes)
+            || !(1..=20).contains(&self.max_attempts)
+            || !(1..=6).contains(&self.max_active_albums)
+            || !self.tolerance().is_valid()
+        {
+            return Err("Invalid smart download settings.".into());
+        }
+        Ok(())
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -169,7 +221,12 @@ pub struct Preferences {
     pub update_channel: crate::updater::UpdateChannel,
     pub message_notifications_enabled: bool,
     pub room_notifications_enabled: bool,
+    #[serde(default = "default_true")]
+    pub download_notifications_enabled: bool,
     pub music_brainz_fallback_track_count: u16,
+}
+fn default_true() -> bool {
+    true
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -178,6 +235,7 @@ impl Default for Preferences {
             update_channel: crate::updater::UpdateChannel::Stable,
             message_notifications_enabled: true,
             room_notifications_enabled: true,
+            download_notifications_enabled: true,
             music_brainz_fallback_track_count: 10,
         }
     }
@@ -255,6 +313,7 @@ impl Settings {
         }
         wanted::validate_preferences(&self.wanted.default_preferences)
             .map_err(|e| e.to_string())?;
+        self.wanted.smart.validate()?;
         self.sharing.validate()?;
         self.dial_memory.validate()?;
         if let Some(path) = &self.archive_database_path {
@@ -404,10 +463,12 @@ pub struct SettingsPatch {
     pub upload_policy: Option<super::upload_policy::UploadPolicy>,
     pub wanted_interval_minutes: Option<u32>,
     pub wanted_default_preferences: Option<WantedPreferences>,
+    pub wanted_smart_downloads: Option<SmartDownloadSettings>,
     pub update_check_interval_minutes: Option<u32>,
     pub update_channel: Option<crate::updater::UpdateChannel>,
     pub message_notifications_enabled: Option<bool>,
     pub room_notifications_enabled: Option<bool>,
+    pub download_notifications_enabled: Option<bool>,
     pub music_brainz_fallback_track_count: Option<u16>,
     pub dial_memory: Option<DialMemory>,
 }
@@ -447,6 +508,7 @@ impl SettingsPatch {
         assign!(upload_policy, s.sharing.upload_policy);
         assign!(wanted_interval_minutes, s.wanted.interval_minutes);
         assign!(wanted_default_preferences, s.wanted.default_preferences);
+        assign!(wanted_smart_downloads, s.wanted.smart);
         assign!(update_channel, s.preferences.update_channel);
         assign!(
             update_check_interval_minutes,
@@ -459,6 +521,10 @@ impl SettingsPatch {
         assign!(
             room_notifications_enabled,
             s.preferences.room_notifications_enabled
+        );
+        assign!(
+            download_notifications_enabled,
+            s.preferences.download_notifications_enabled
         );
         assign!(
             music_brainz_fallback_track_count,
@@ -645,6 +711,82 @@ mod tests {
         assert!(!serde_json::to_string(&restored)
             .unwrap()
             .contains("\"password\""));
+    }
+
+    #[test]
+    fn settings_saved_before_smart_downloads_load_with_safe_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path());
+        let mut value = serde_json::to_value(store.get()).unwrap();
+        value["wanted"].as_object_mut().unwrap().remove("smart");
+        value["preferences"]
+            .as_object_mut()
+            .unwrap()
+            .remove("downloadNotificationsEnabled");
+        fs::write(store.file.path(), serde_json::to_vec(&value).unwrap()).unwrap();
+
+        let reopened = open(dir.path()).get();
+        assert!(!reopened.wanted.smart.enabled);
+        assert_eq!(reopened.wanted.smart, SmartDownloadSettings::default());
+        assert!(reopened.preferences.download_notifications_enabled);
+        assert_eq!(reopened.wanted.smart.stall_minutes, 20);
+        assert_eq!(reopened.wanted.smart.tolerance().duration_seconds, 3);
+    }
+
+    #[test]
+    fn smart_download_patch_saves_atomically_and_rejects_out_of_range_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open(dir.path());
+        let chosen = SmartDownloadSettings {
+            enabled: true,
+            stall_minutes: 45,
+            max_attempts: 8,
+            max_active_albums: 4,
+            duration_tolerance_seconds: 8,
+            allowed_length_mismatches: 2,
+        };
+        let saved = store
+            .update(|s| {
+                SettingsPatch {
+                    wanted_smart_downloads: Some(chosen.clone()),
+                    download_notifications_enabled: Some(false),
+                    ..Default::default()
+                }
+                .apply(s)
+            })
+            .unwrap();
+        assert_eq!(saved.wanted.smart, chosen);
+        assert!(!saved.preferences.download_notifications_enabled);
+        assert_eq!(open(dir.path()).get().wanted.smart, chosen);
+
+        let before = store.get();
+        let bytes = fs::read(store.file.path()).unwrap();
+        for bad in [
+            SmartDownloadSettings {
+                stall_minutes: 1,
+                ..chosen.clone()
+            },
+            SmartDownloadSettings {
+                max_attempts: 0,
+                ..chosen.clone()
+            },
+            SmartDownloadSettings {
+                max_active_albums: 9,
+                ..chosen.clone()
+            },
+            SmartDownloadSettings {
+                duration_tolerance_seconds: 99,
+                ..chosen.clone()
+            },
+            SmartDownloadSettings {
+                allowed_length_mismatches: 99,
+                ..chosen.clone()
+            },
+        ] {
+            assert!(store.update(|s| s.wanted.smart = bad.clone()).is_err());
+        }
+        assert_eq!(store.get(), before);
+        assert_eq!(fs::read(store.file.path()).unwrap(), bytes);
     }
 
     #[test]

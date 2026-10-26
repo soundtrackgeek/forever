@@ -192,6 +192,28 @@ pub async fn wanted_set_paused(
 }
 
 #[tauri::command]
+pub async fn wanted_set_auto_download(
+    manager: State<'_, ConnectionManager>,
+    album_id: String,
+    auto_download: bool,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .set_wanted_auto_download(&album_id, auto_download)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn wanted_smart_update(
+    manager: State<'_, ConnectionManager>,
+    album_id: String,
+    state: wanted::WantedSmartState,
+) -> Result<wanted::WantedSnapshot, String> {
+    manager
+        .update_wanted_smart(&album_id, state)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn wanted_set_interval(
     manager: State<'_, ConnectionManager>,
     interval_minutes: u32,

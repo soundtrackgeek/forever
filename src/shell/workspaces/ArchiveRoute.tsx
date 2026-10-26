@@ -27,6 +27,7 @@ export default function ArchiveRoute() {
     musicBrainzFallbackTrackCount,
     officialTrackCountFor,
     queueAlbumSourceFor,
+    appSettings,
   } = useShell((s) => ({
     archiveFocus: s.archiveFocus,
     archive: s.archive,
@@ -50,6 +51,7 @@ export default function ArchiveRoute() {
     musicBrainzFallbackTrackCount: s.musicBrainzFallbackTrackCount,
     officialTrackCountFor: s.officialTrackCountFor,
     queueAlbumSourceFor: s.queueAlbumSourceFor,
+    appSettings: s.appSettings,
   }));
   return (
     <ArchiveWorkspace
@@ -87,6 +89,8 @@ export default function ArchiveRoute() {
       onOpenTransfer={openTransfer}
       onReviewBest={(album) => void inspectSmartMatch(album)}
       onEditPreferences={setPreferencesAlbum}
+      smartDownloads={appSettings.settings.wanted.smart}
+      onSetAutoDownload={wanted.setAutoDownload}
       onOpenWanted={(album) =>
         openAlbumSources({
           albumId: album.albumId,

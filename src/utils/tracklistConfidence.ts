@@ -1,5 +1,6 @@
 import { matchingCommand as invoke } from "./matchingClient";
 import type { AlbumTrack, FolderInspection } from "../types";
+import { matchTolerance, type MatchTolerance } from "./matchTolerance";
 
 export type TracklistConfidenceState =
   | "exact"
@@ -42,17 +43,21 @@ type SourceTitle = {
   durationSeconds?: number | null;
 };
 
-export function tracklistConfidenceForTitles(sourceTitles: SourceTitle[], officialTracks: AlbumTrack[], artist = ""): Promise<TracklistConfidence> {
-  return invoke("tracklist_confidence", { sourceTitles, officialTracks, artist });
+export function tracklistConfidenceForTitles(sourceTitles: SourceTitle[], officialTracks: AlbumTrack[], artist = "", tolerance: MatchTolerance = matchTolerance()): Promise<TracklistConfidence> {
+  return invoke("tracklist_confidence", { sourceTitles, officialTracks, artist, tolerance });
 }
 
+const audioExtensions = ["aac", "aif", "aiff", "alac", "ape", "caf", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "wma", "wv"];
+export const inspectionAudioFiles = (inspection: FolderInspection) =>
+  inspection.files.filter((file) => audioExtensions.includes(file.extension.toLowerCase()));
+
 export function inspectionTitles(inspection: FolderInspection) {
-  return inspection.files.filter((file) => ["aac", "aif", "aiff", "alac", "ape", "caf", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "wma", "wv"].includes(file.extension.toLowerCase()))
+  return inspectionAudioFiles(inspection)
     .map((file) => ({ id: file.remoteFilename, name: file.filename, durationSeconds: file.durationSeconds ?? null }));
 }
 
-export const tracklistConfidenceForInspection = (inspection: FolderInspection, officialTracks: AlbumTrack[], artist = "") =>
-  tracklistConfidenceForTitles(inspectionTitles(inspection), officialTracks, artist);
+export const tracklistConfidenceForInspection = (inspection: FolderInspection, officialTracks: AlbumTrack[], artist = "", tolerance?: MatchTolerance) =>
+  tracklistConfidenceForTitles(inspectionTitles(inspection), officialTracks, artist, tolerance);
 
 export const durationEvidence = (match: TracklistTitleMatch) => {
   if (match.durationDeltaMs == null) return "Length unknown";

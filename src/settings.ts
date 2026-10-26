@@ -11,25 +11,29 @@ export type DialPreset = { id: string; mode: "files" | "albums"; query: string; 
 export type DialMemory = { pinned: DialPreset[]; recent: { mode: "files" | "albums"; query: string; closedAtMs: number }[] };
 export type UpdateChannel = "stable" | "beta";
 export type UpdateCheckIntervalMinutes = 0 | 1 | 5 | 15 | 30 | 60 | 360;
-export type Preferences = { updateCheckIntervalMinutes: UpdateCheckIntervalMinutes; updateChannel: UpdateChannel; messageNotificationsEnabled: boolean; roomNotificationsEnabled: boolean; musicBrainzFallbackTrackCount: number };
+export type Preferences = { updateCheckIntervalMinutes: UpdateCheckIntervalMinutes; updateChannel: UpdateChannel; messageNotificationsEnabled: boolean; roomNotificationsEnabled: boolean; downloadNotificationsEnabled: boolean; musicBrainzFallbackTrackCount: number };
+// Hands-off downloading for Wanted albums. The accepted format range is each
+// album's own Smart Match profile; these decide how patient to be.
+export type SmartDownloadSettings = { enabled: boolean; stallMinutes: number; maxAttempts: number; maxActiveAlbums: number; durationToleranceSeconds: number; allowedLengthMismatches: number };
+export const defaultSmartDownloads = (): SmartDownloadSettings => ({ enabled: false, stallMinutes: 20, maxAttempts: 5, maxActiveAlbums: 2, durationToleranceSeconds: 3, allowedLengthMismatches: 0 });
 export type Settings = {
   desktop: { closeToTray: boolean; startInTray: boolean };
   version: number; revision: number; webviewMigrated: boolean; connection: ConnectionProfile | null;
   transfers: { bandwidth?: BandwidthSettings; maxConcurrentDownloads: number; relaySuggestionMinutes: number; autoMirrorMinutes: number; soundcheckEnabled: boolean; filing?: FilingSettings };
   sharing: { version: number; uploadSlots: number; uploadPolicy: UploadPolicy; roots: { id: string; path: string; alias: string; enabled: boolean; addedAtMs: number }[] };
-  wanted: { intervalMinutes: 0 | 15 | 30 | 60; defaultPreferences: WantedPreferences };
+  wanted: { intervalMinutes: 0 | 15 | 30 | 60; defaultPreferences: WantedPreferences; smart: SmartDownloadSettings };
   archiveDatabasePath: string | null; preferences: Preferences; dialMemory: DialMemory;
 };
-export type SettingsPatch = Partial<Preferences & Settings["desktop"] & Settings["transfers"] & Pick<Settings["sharing"], "uploadSlots" | "uploadPolicy"> & { wantedIntervalMinutes: 0 | 15 | 30 | 60; wantedDefaultPreferences: WantedPreferences; dialMemory: DialMemory }>;
+export type SettingsPatch = Partial<Preferences & Settings["desktop"] & Settings["transfers"] & Pick<Settings["sharing"], "uploadSlots" | "uploadPolicy"> & { wantedIntervalMinutes: 0 | 15 | 30 | 60; wantedDefaultPreferences: WantedPreferences; wantedSmartDownloads: SmartDownloadSettings; dialMemory: DialMemory }>;
 export type SettingsSection = "desktop" | "connection" | "transfers" | "sharing" | "wanted" | "archive" | "preferences" | "searches";
 export const defaultSettings = (): Settings => ({
   desktop: { closeToTray: true, startInTray: true },
   version: 1, revision: 0, webviewMigrated: false, connection: null,
   transfers: { bandwidth: defaultBandwidth(), maxConcurrentDownloads: 3, relaySuggestionMinutes: 10, autoMirrorMinutes: 0, soundcheckEnabled: true, filing: defaultFilingSettings() },
   sharing: { version: 3, uploadSlots: 1, uploadPolicy: { maxFilesPerUser: 100, maxMegabytesPerUser: 10000, prioritizeFavorites: false, prioritizePrivileged: false }, roots: [] },
-  wanted: { intervalMinutes: 30, defaultPreferences: { formatPreference: "preferLossless", minimumBitrateKbps: 320, minimumTrackCount: null } },
+  wanted: { intervalMinutes: 30, defaultPreferences: { formatPreference: "preferLossless", minimumBitrateKbps: 320, minimumTrackCount: null }, smart: defaultSmartDownloads() },
   archiveDatabasePath: null,
-  preferences: { updateCheckIntervalMinutes: 360, updateChannel: "stable", messageNotificationsEnabled: true, roomNotificationsEnabled: true, musicBrainzFallbackTrackCount: 10 },
+  preferences: { updateCheckIntervalMinutes: 360, updateChannel: "stable", messageNotificationsEnabled: true, roomNotificationsEnabled: true, downloadNotificationsEnabled: true, musicBrainzFallbackTrackCount: 10 },
   dialMemory: { pinned: [], recent: [] },
 });
 
@@ -116,13 +120,14 @@ async function applyPatch(patch: SettingsPatch) {
       const next = await invoke<Settings>("settings_patch", { patch }); acceptSettings(next); return next;
     }
     const next = structuredClone(state.settings);
-    const { wantedIntervalMinutes, wantedDefaultPreferences, dialMemory, ...fields } = patch;
+    const { wantedIntervalMinutes, wantedDefaultPreferences, wantedSmartDownloads, dialMemory, ...fields } = patch;
     for (const [key, value] of Object.entries(fields)) {
       const target = key in next.desktop ? next.desktop : key in next.preferences ? next.preferences : key in next.transfers ? next.transfers : next.sharing;
       Object.assign(target, { [key]: value });
     }
     if (wantedIntervalMinutes !== undefined) next.wanted.intervalMinutes = wantedIntervalMinutes;
     if (wantedDefaultPreferences) next.wanted.defaultPreferences = wantedDefaultPreferences;
+    if (wantedSmartDownloads) next.wanted.smart = wantedSmartDownloads;
     if (dialMemory) next.dialMemory = dialMemory;
     next.revision++; acceptSettings(next); return next;
   } catch (error) { reportSettingsError(error); throw error; }
@@ -137,6 +142,8 @@ export async function validateSettingsImport(json: string): Promise<Settings> {
   if (value?.transfers?.bandwidth && value.transfers.bandwidth.manualPaused === undefined) value.transfers.bandwidth.manualPaused = false;
   if (value?.transfers && value.transfers.bandwidth === undefined) value.transfers.bandwidth = defaultBandwidth();
   if (value?.transfers && value.transfers.autoMirrorMinutes === undefined) value.transfers.autoMirrorMinutes = 0;
+  if (value?.wanted && value.wanted.smart === undefined) value.wanted.smart = defaultSmartDownloads();
+  if (value?.preferences && value.preferences.downloadNotificationsEnabled === undefined) value.preferences.downloadNotificationsEnabled = true;
   // Browser previews never write desktop settings; Rust performs full validation.
   const shape = (input: unknown, example: unknown): boolean => {
     if (example === null) return input === null || typeof input === "string" || typeof input === "number";

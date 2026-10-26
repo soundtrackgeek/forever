@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { AlbumSource, AlbumTrack, FolderInspection, WantedPreferences } from "../types";
 import { attachSources, rankingInput, type RankedSourceResponse } from "../utils/smartMatches";
 import { inspectionTitles, type TracklistConfidence } from "../utils/tracklistConfidence";
+import { matchTolerance } from "../utils/matchTolerance";
 
 // The serialized request is also the result identity. Old results disappear on
 // the first render of new inputs, before the next effect has run.
@@ -29,5 +30,5 @@ export function useRankedSources(sources: AlbumSource[], preferences: WantedPref
 }
 
 export function useInspectionConfidence(inspection: FolderInspection | null, officialTracks: AlbumTrack[], artist: string) {
-  return useMatchingRequest<TracklistConfidence>("tracklist_confidence", inspection ? JSON.stringify({ sourceTitles: inspectionTitles(inspection), officialTracks, artist }) : null);
+  return useMatchingRequest<TracklistConfidence>("tracklist_confidence", inspection ? JSON.stringify({ sourceTitles: inspectionTitles(inspection), officialTracks, artist, tolerance: matchTolerance() }) : null);
 }

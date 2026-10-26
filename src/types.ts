@@ -103,6 +103,31 @@ export type WantedBestSource = {
 
 export type WantedFulfillmentSource = "archive" | "download";
 
+export type WantedSmartTriedSource = {
+  username: string;
+  folder: string;
+  outcome: string;
+  atMs: number;
+};
+
+export type WantedSmartAttempt = {
+  releaseId: string | null;
+  username: string;
+  folder: string;
+  startedAtMs: number;
+};
+
+/** Durable memory for Smart Downloads: what was tried, what is in flight. */
+export type WantedSmartState = {
+  attempts: number;
+  tried: WantedSmartTriedSource[];
+  current: WantedSmartAttempt | null;
+  resumeAtMs: number | null;
+  lastRecheckAtMs: number | null;
+  message: string | null;
+  updatedAtMs: number;
+};
+
 export type WantedDownloadReceipt = {
   releaseId: string;
   username: string;
@@ -144,6 +169,10 @@ export type WantedAlbum = {
   bestSizeBytes: number | null;
   bestSpeedBytesPerSecond: number | null;
   bestSource: WantedBestSource | null;
+  /** Acceptable sources from the latest check, best first. */
+  candidates?: WantedBestSource[];
+  autoDownload?: boolean;
+  smart?: WantedSmartState;
   error: string | null;
 };
 

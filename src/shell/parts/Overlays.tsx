@@ -27,6 +27,7 @@ export default function Overlays() {
     pauseSafelyAndExit,
     preferencesAlbum,
     wanted,
+    smartDownloadsOn,
     loadEditions,
     setPreferencesAlbum,
     reviewAlbum,
@@ -59,6 +60,7 @@ export default function Overlays() {
     pauseSafelyAndExit: s.pauseSafelyAndExit,
     preferencesAlbum: s.preferencesAlbum,
     wanted: s.wanted,
+    smartDownloadsOn: s.appSettings.settings.wanted.smart?.enabled ?? false,
     loadEditions: s.loadEditions,
     setPreferencesAlbum: s.setPreferencesAlbum,
     reviewAlbum: s.reviewAlbum,
@@ -227,6 +229,7 @@ export default function Overlays() {
             wanted.byAlbumId.get(preferencesAlbum.albumId) ?? preferencesAlbum
           }
           onLoadEditions={loadEditions}
+          smartDownloadsOn={smartDownloadsOn}
           onSelectEdition={(releaseId) =>
             wanted.setEdition(preferencesAlbum.albumId, releaseId)
           }

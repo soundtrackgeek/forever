@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SearchMode } from "../components/SearchModeSwitch";
 import { type AlbumResultView } from "../components/SearchWorkspace";
 import { useAutomaticRelay } from "../hooks/useAutomaticRelay";
+import { createSmartDownloadDeps } from "../hooks/smartDownloadDeps";
+import { useDownloadToasts } from "../hooks/useDownloadToasts";
+import { useSmartDownloads } from "../hooks/useSmartDownloads";
 import { useAlbumDiscovery } from "../hooks/useAlbumDiscovery";
 import { useAppUpdater } from "../hooks/useAppUpdater";
 import { useArchiveInventory } from "../hooks/useArchiveInventory";
@@ -22,7 +25,7 @@ import { useSoulseekSearch } from "../hooks/useSoulseekSearch";
 import { useSoulseekShares } from "../hooks/useSoulseekShares";
 import { useSoulseekTransfers } from "../hooks/useSoulseekTransfers";
 import { useWantedAlbums } from "../hooks/useWantedAlbums";
-import { useSettings } from "../settings";
+import { defaultSmartDownloads, useSettings } from "../settings";
 import type {
   AlbumEditions,
   AlbumReleaseGroup,
@@ -419,6 +422,33 @@ export function useShellController() {
     },
     [native, editionSelections],
   );
+
+  const smartSettings = appSettings.settings.wanted.smart ?? defaultSmartDownloads();
+  const smartSignature = useMemo(
+    () => wanted.snapshot.albums
+      .map((album) => `${album.albumId}:${album.lastCheckedAtMs ?? 0}:${album.autoDownload === false ? 0 : 1}:${album.paused ? 1 : 0}:${album.fulfilled ? 1 : 0}:${album.smart?.updatedAtMs ?? 0}`)
+      .join("|"),
+    [wanted.snapshot.albums],
+  );
+  useSmartDownloads({
+    enabled: native && wanted.ready && transfers.ready && connection.snapshot.state === "online" && transfers.snapshot.safetyState === "running",
+    settings: smartSettings,
+    albums: wanted.snapshot.albums,
+    groups: transferGroups,
+    checking: Boolean(wanted.snapshot.activeAlbumId),
+    signature: smartSignature,
+    excluded: (user) => { const person = people.personByUsername(user); return !!person?.blocked || !!person?.ignored; },
+    deps: createSmartDownloadDeps({
+      officialTracks: loadOfficialTracklist,
+      save: wanted.updateSmart,
+      setAuto: wanted.setAutoDownload,
+    }),
+  });
+  useDownloadToasts({
+    ready: native && transfers.ready,
+    enabled: appSettings.settings.preferences.downloadNotificationsEnabled ?? true,
+    groups: transferGroups,
+  });
 
   const relayReleaseSource = async (releaseId: string, source: AlbumSource) => {
     const inspection = await folders.inspect(

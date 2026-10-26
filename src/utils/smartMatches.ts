@@ -1,6 +1,7 @@
 import { matchingCommand as invoke } from "./matchingClient";
-import type { AlbumSource, AlbumTrack, WantedPreferences } from "../types";
+import type { AlbumSource, AlbumTrack, WantedFormatPreference, WantedPreferences } from "../types";
 import type { TracklistConfidence } from "./tracklistConfidence";
+import { matchTolerance, type MatchTolerance } from "./matchTolerance";
 
 export type RankedAlbumSource = {
   source: AlbumSource;
@@ -12,12 +13,12 @@ export type RankedAlbumSource = {
   tracklistConfidence: TracklistConfidence;
 };
 
-export function rankingInput(sources: AlbumSource[], preferences: WantedPreferences, officialTracks: AlbumTrack[] = [], artist = "") {
+export function rankingInput(sources: AlbumSource[], preferences: WantedPreferences, officialTracks: AlbumTrack[] = [], artist = "", tolerance: MatchTolerance = matchTolerance()) {
   return { sources: sources.map((source) => ({
     id: source.id, owner: source.owner, folder: source.folder,
     slotFree: source.slotFree, averageSpeed: source.averageSpeed, queueLength: source.queueLength,
     tracks: source.tracks.map((track) => ({ id: track.id, name: track.filename ?? track.title, format: track.format, bitrate: track.bitrate ?? null, durationSeconds: track.durationSeconds ?? null })),
-  })), preferences, officialTracks, artist };
+  })), preferences, officialTracks, artist, tolerance };
 }
 
 export type RankedSourceResponse = Omit<RankedAlbumSource, "source"> & { sourceId: string };
@@ -34,6 +35,13 @@ export function attachSources(ranked: RankedSourceResponse[], sources: AlbumSour
     return source ? [{ ...rank, source }] : [];
   });
 }
+
+export const wantedFormatOptions: Array<{ value: WantedFormatPreference; label: string; copy: string }> = [
+  { value: "preferLossless", label: "Prefer FLAC", copy: "Recommend lossless first, with a high-quality lossy fallback." },
+  { value: "losslessOnly", label: "Lossless only", copy: "Ignore MP3, AAC, OGG, and other lossy folders." },
+  { value: "mp3Only", label: "MP3 only", copy: "Recommend folders made entirely of MP3 files at your chosen bitrate." },
+  { value: "any", label: "Any format", copy: "Rank every source by completeness and availability." },
+];
 
 export const wantedPreferencesLabel = (preferences: WantedPreferences) => {
   const format = preferences.formatPreference === "losslessOnly"

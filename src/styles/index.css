@@ -36,4 +36,5 @@
 @import "./shared/editions.css";
 @import "./workspaces/upload-policy.css";
 @import "./workspaces/settings-portability.css";
+@import "./workspaces/smart-downloads.css";
 @import "./workspace-status.css";

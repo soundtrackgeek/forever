@@ -117,6 +117,8 @@ pub fn run() {
             connection::wanted_add_many,
             connection::wanted_remove,
             connection::wanted_set_paused,
+            connection::wanted_set_auto_download,
+            connection::wanted_smart_update,
             connection::wanted_set_interval,
             connection::wanted_set_preferences,
             connection::wanted_set_edition,

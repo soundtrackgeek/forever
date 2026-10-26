@@ -29,7 +29,7 @@ use super::upload_policy::UploadPolicy;
 use super::uploads::{UploadError, UploadHub, UploadQueueSnapshot};
 use super::wanted::{
     WantedAlbumRequest, WantedDownloadFulfillmentRequest, WantedError, WantedFulfillmentRequest,
-    WantedHub, WantedPreferences, WantedSnapshot,
+    WantedHub, WantedPreferences, WantedSmartState, WantedSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -773,6 +773,22 @@ impl ConnectionManager {
         paused: bool,
     ) -> Result<WantedSnapshot, ConnectionServiceError> {
         Ok(self.wanted.set_paused(album_id, paused)?)
+    }
+
+    pub fn set_wanted_auto_download(
+        &self,
+        album_id: &str,
+        auto_download: bool,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.set_auto_download(album_id, auto_download)?)
+    }
+
+    pub fn update_wanted_smart(
+        &self,
+        album_id: &str,
+        state: WantedSmartState,
+    ) -> Result<WantedSnapshot, ConnectionServiceError> {
+        Ok(self.wanted.update_smart(album_id, state)?)
     }
 
     pub fn set_wanted_interval(

@@ -3,9 +3,10 @@ import { matchingCommand as invoke } from "./matchingClient";
 import fixture from "../../fixtures/matching.json";
 import type { AlbumSource, WantedPreferences } from "../types";
 import { rankAlbumSources, rankingInput, wantedPreferencesLabel } from "./smartMatches";
+import { acceptSettings, defaultSettings, resetSettingsState } from "../settings";
 
 vi.mock("./matchingClient", () => ({ matchingCommand: vi.fn() }));
-beforeEach(() => { vi.mocked(invoke).mockReset(); });
+beforeEach(() => { vi.mocked(invoke).mockReset(); resetSettingsState(); });
 const scenario = fixture.ranking[0];
 const sources = scenario.sources.map((s) => ({ ...s, tracks: s.tracks.map((t) => ({ ...t, filename: t.name, title: "display title" })) })) as unknown as AlbumSource[];
 const preferences = scenario.preferences as WantedPreferences;
@@ -14,7 +15,15 @@ describe("Rust ranking bridge", () => {
   it("sends raw filenames, preferences and the official tracklist without local scoring", async () => {
     vi.mocked(invoke).mockResolvedValue([]);
     await rankAlbumSources(sources, preferences, scenario.officialTracks, scenario.artist);
-    expect(invoke).toHaveBeenCalledWith("rank_album_sources", { sources: scenario.sources, preferences, officialTracks: scenario.officialTracks, artist: scenario.artist });
+    expect(invoke).toHaveBeenCalledWith("rank_album_sources", { sources: scenario.sources, preferences, officialTracks: scenario.officialTracks, artist: scenario.artist, tolerance: { durationSeconds: 3, allowedMismatches: 0 } });
+  });
+  it("sends the saved track length tolerance with every ranking request", async () => {
+    const settings = defaultSettings();
+    settings.wanted.smart = { ...settings.wanted.smart, durationToleranceSeconds: 8, allowedLengthMismatches: 2 };
+    acceptSettings(settings);
+    vi.mocked(invoke).mockResolvedValue([]);
+    await rankAlbumSources(sources, preferences, scenario.officialTracks, scenario.artist);
+    expect(vi.mocked(invoke).mock.calls[0][1]).toMatchObject({ tolerance: { durationSeconds: 8, allowedMismatches: 2 } });
   });
   it("preserves backend order and attaches current source objects by id", async () => {
     vi.mocked(invoke).mockResolvedValue(scenario.ids.map((sourceId, i) => ({ sourceId, score: scenario.scores[i], eligible: scenario.eligible[i] })));

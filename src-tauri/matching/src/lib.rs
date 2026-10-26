@@ -140,6 +140,35 @@ pub struct TracklistConfidence {
     pub duration_agreement: u32,
 }
 
+/// How far a track's length may drift from the official length, and how many
+/// tracks may drift further, before a folder stops being safe to recommend.
+/// The defaults are the strict policy Forever has always used.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MatchTolerance {
+    pub duration_seconds: u32,
+    pub allowed_mismatches: u32,
+}
+
+impl Default for MatchTolerance {
+    fn default() -> Self {
+        Self {
+            duration_seconds: 3,
+            allowed_mismatches: 0,
+        }
+    }
+}
+
+impl MatchTolerance {
+    pub const MAX_DURATION_SECONDS: u32 = 30;
+    pub const MAX_ALLOWED_MISMATCHES: u32 = 10;
+
+    pub fn is_valid(&self) -> bool {
+        self.duration_seconds <= Self::MAX_DURATION_SECONDS
+            && self.allowed_mismatches <= Self::MAX_ALLOWED_MISMATCHES
+    }
+}
+
 fn duration_delta(source: Option<u32>, official: Option<u32>) -> Option<i64> {
     Some(i64::from(source.filter(|v| *v > 0)?) * 1000 - i64::from(official.filter(|v| *v > 0)?))
 }
@@ -215,6 +244,15 @@ pub fn confidence(
     official: &[AlbumTrack],
     artist: &str,
 ) -> TracklistConfidence {
+    confidence_with(sources, official, artist, MatchTolerance::default())
+}
+
+pub fn confidence_with(
+    sources: &[SourceTitle],
+    official: &[AlbumTrack],
+    artist: &str,
+    tolerance: MatchTolerance,
+) -> TracklistConfidence {
     if official.is_empty() {
         return TracklistConfidence {
             state: "unavailable".into(),
@@ -284,7 +322,9 @@ pub fn confidence(
                 sources[si].duration_seconds,
                 official[oi].duration_ms,
             ) {
-                Some(delta) if delta.abs() <= 3000 => "matched",
+                Some(delta) if delta.abs() <= i64::from(tolerance.duration_seconds) * 1000 => {
+                    "matched"
+                }
                 Some(_) => "mismatch",
                 None => "unknown",
             }
@@ -314,7 +354,8 @@ pub fn confidence(
         .filter(|m| m.duration_state == "mismatch")
         .count();
     let duration_unknown_count = count - duration_matched_count - duration_mismatch_count;
-    let state = if count == official.len() && duration_mismatch_count > 0 {
+    let lengths_acceptable = duration_mismatch_count <= tolerance.allowed_mismatches as usize;
+    let state = if count == official.len() && !lengths_acceptable {
         "durationMismatch"
     } else if count == official.len() {
         if extras == 0 {
@@ -362,7 +403,7 @@ pub fn confidence(
         missing_tracks,
         extra_source_names,
         matches,
-        safe_to_recommend: count == official.len() && duration_mismatch_count == 0,
+        safe_to_recommend: count == official.len() && lengths_acceptable,
         score,
         duration_matched_count,
         duration_mismatch_count,
@@ -411,6 +452,22 @@ pub fn rank_sources(
     official: &[AlbumTrack],
     artist: &str,
 ) -> Vec<RankedSource> {
+    rank_sources_with(
+        sources,
+        preferences,
+        official,
+        artist,
+        MatchTolerance::default(),
+    )
+}
+
+pub fn rank_sources_with(
+    sources: &[RankingSource],
+    preferences: &WantedPreferences,
+    official: &[AlbumTrack],
+    artist: &str,
+    tolerance: MatchTolerance,
+) -> Vec<RankedSource> {
     let mut ranked: Vec<_> = sources
         .iter()
         .map(|source| {
@@ -423,7 +480,7 @@ pub fn rank_sources(
                     duration_seconds: t.duration_seconds,
                 })
                 .collect::<Vec<_>>();
-            let confidence = confidence(&titles, official, artist);
+            let confidence = confidence_with(&titles, official, artist, tolerance);
             let formats: HashSet<_> = source
                 .tracks
                 .iter()
@@ -591,6 +648,122 @@ mod tests {
             1
         );
         assert!(duration_delta(Some(u32::MAX), Some(1)).unwrap() > 0);
+    }
+
+    fn three_track_album() -> (Vec<AlbumTrack>, Vec<SourceTitle>) {
+        let official: Vec<AlbumTrack> = serde_json::from_value(serde_json::json!([
+            {"position":1,"discNumber":1,"discPosition":1,"title":"Alpha","durationMs":180000},
+            {"position":2,"discNumber":1,"discPosition":2,"title":"Bravo","durationMs":200000},
+            {"position":3,"discNumber":1,"discPosition":3,"title":"Charlie","durationMs":220000}
+        ]))
+        .unwrap();
+        let sources: Vec<SourceTitle> = serde_json::from_value(serde_json::json!([
+            {"id":"1","name":"01 Alpha.flac","durationSeconds":180},
+            {"id":"2","name":"02 Bravo.flac","durationSeconds":206},
+            {"id":"3","name":"03 Charlie.flac","durationSeconds":221}
+        ]))
+        .unwrap();
+        (official, sources)
+    }
+
+    #[test]
+    fn default_tolerance_keeps_the_strict_three_second_policy() {
+        let (official, sources) = three_track_album();
+        let strict = confidence(&sources, &official, "");
+        assert_eq!(strict.state, "durationMismatch");
+        assert!(!strict.safe_to_recommend);
+        assert_eq!(strict.duration_mismatch_count, 1);
+        assert_eq!(
+            confidence_with(&sources, &official, "", MatchTolerance::default()).score,
+            strict.score
+        );
+    }
+
+    #[test]
+    fn wider_length_window_accepts_a_remaster_with_a_longer_track() {
+        let (official, sources) = three_track_album();
+        let tolerance = MatchTolerance {
+            duration_seconds: 6,
+            allowed_mismatches: 0,
+        };
+        let result = confidence_with(&sources, &official, "", tolerance);
+        assert_eq!(result.state, "exact");
+        assert!(result.safe_to_recommend);
+        assert_eq!(result.duration_matched_count, 3);
+    }
+
+    #[test]
+    fn allowed_mismatches_forgive_whole_tracks_but_still_report_them() {
+        let (official, sources) = three_track_album();
+        let one_off = MatchTolerance {
+            duration_seconds: 3,
+            allowed_mismatches: 1,
+        };
+        let result = confidence_with(&sources, &official, "", one_off);
+        assert!(result.safe_to_recommend);
+        assert_eq!(result.duration_mismatch_count, 1);
+        assert!(result.summary.contains("1 lengths differ"));
+        let mut worse = sources.clone();
+        worse[0].duration_seconds = Some(150);
+        let result = confidence_with(&worse, &official, "", one_off);
+        assert!(!result.safe_to_recommend);
+        assert_eq!(result.state, "durationMismatch");
+    }
+
+    #[test]
+    fn tolerance_changes_which_sources_are_eligible_when_ranking() {
+        let (official, sources) = three_track_album();
+        let source = RankingSource {
+            id: "alice".into(),
+            owner: "alice".into(),
+            folder: "Music\\Album".into(),
+            tracks: sources
+                .iter()
+                .map(|t| RankingTrack {
+                    id: t.id.clone(),
+                    name: t.name.clone(),
+                    format: "FLAC".into(),
+                    bitrate: None,
+                    duration_seconds: t.duration_seconds,
+                })
+                .collect(),
+            slot_free: true,
+            average_speed: 1_000_000,
+            queue_length: 0,
+        };
+        let preferences = WantedPreferences::default();
+        let strict = rank_sources(std::slice::from_ref(&source), &preferences, &official, "");
+        assert!(!strict[0].eligible);
+        assert_eq!(strict[0].reason, "1 track lengths differ");
+        let relaxed = rank_sources_with(
+            &[source],
+            &preferences,
+            &official,
+            "",
+            MatchTolerance {
+                duration_seconds: 10,
+                allowed_mismatches: 0,
+            },
+        );
+        assert!(relaxed[0].eligible);
+    }
+
+    #[test]
+    fn tolerance_bounds_and_partial_json_defaults() {
+        assert!(MatchTolerance::default().is_valid());
+        assert!(!MatchTolerance {
+            duration_seconds: 31,
+            allowed_mismatches: 0
+        }
+        .is_valid());
+        assert!(!MatchTolerance {
+            duration_seconds: 3,
+            allowed_mismatches: 11
+        }
+        .is_valid());
+        let parsed: MatchTolerance = serde_json::from_str(r#"{"durationSeconds":8}"#).unwrap();
+        assert_eq!(parsed.duration_seconds, 8);
+        assert_eq!(parsed.allowed_mismatches, 0);
     }
 
     #[test]
