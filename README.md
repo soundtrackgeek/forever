@@ -203,7 +203,8 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
 - **Insights** on the Listening Post: received and shared totals, share ratio,
   download success, Wanted hit rate and average time-to-find, Soundcheck pass
   rate, direct-connection share, a 30-day traffic chart, Wanted albums found
-  over time, and top sources with their reliability. Counting starts when you
+  over time, and top sources with their reliability and average download speed (click a
+  source to open their profile or browse their shares). Counting starts when you
   install the version that adds it and the totals stay on this computer in
   `stats.sqlite3` (400 days of daily totals, 500 sources); delete the file to
   start over

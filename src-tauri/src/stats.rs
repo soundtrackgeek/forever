@@ -12,7 +12,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const KEEP_DAYS: i64 = 400;
 const KEEP_SOURCES: i64 = 500;
 const CHART_DAYS: u32 = 30;
@@ -30,14 +30,29 @@ pub enum Outcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
-    Download { username: String, bytes: u64 },
-    DownloadFailed { username: String },
-    Upload { bytes: u64 },
+    Download {
+        username: String,
+        bytes: u64,
+        /// Measured bytes per second for this file; 0 when unknown.
+        speed: u64,
+    },
+    DownloadFailed {
+        username: String,
+    },
+    Upload {
+        bytes: u64,
+    },
     WantedAdded(u32),
-    WantedCheck { hit: bool },
-    WantedFulfilled { found_after_ms: u64 },
+    WantedCheck {
+        hit: bool,
+    },
+    WantedFulfilled {
+        found_after_ms: u64,
+    },
     Soundcheck(Outcome),
-    Reachability { reachable: bool },
+    Reachability {
+        reachable: bool,
+    },
 }
 
 pub fn record(event: Event) {
@@ -104,7 +119,9 @@ fn prepare(connection: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS sources (
             username TEXT PRIMARY KEY, files INTEGER NOT NULL DEFAULT 0,
             bytes INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
-            last_ms INTEGER NOT NULL DEFAULT 0);
+            last_ms INTEGER NOT NULL DEFAULT 0,
+            speed_total INTEGER NOT NULL DEFAULT 0,
+            speed_samples INTEGER NOT NULL DEFAULT 0);
         PRAGMA user_version={SCHEMA_VERSION};",
         COLUMNS
             .iter()
@@ -112,6 +129,21 @@ fn prepare(connection: &Connection) -> rusqlite::Result<()> {
             .collect::<Vec<_>>()
             .join(",\n")
     ))?;
+    // Version 1 databases predate the speed columns; CREATE TABLE IF NOT EXISTS
+    // leaves them untouched, so add what is missing.
+    for column in ["speed_total", "speed_samples"] {
+        let present: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('sources') WHERE name = ?1",
+            params![column],
+            |r| r.get(0),
+        )?;
+        if present == 0 {
+            connection.execute(
+                &format!("ALTER TABLE sources ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"),
+                [],
+            )?;
+        }
+    }
     let cutoff = (Local::now().date_naive() - Duration::days(KEEP_DAYS))
         .format("%Y-%m-%d")
         .to_string();
@@ -172,18 +204,23 @@ fn bump_source(
     files: i64,
     bytes: i64,
     failures: i64,
+    speed: i64,
 ) -> rusqlite::Result<()> {
     connection.execute(
-        "INSERT INTO sources(username,files,bytes,failures,last_ms) VALUES(?1,?2,?3,?4,?5)
+        "INSERT INTO sources(username,files,bytes,failures,last_ms,speed_total,speed_samples)
+         VALUES(?1,?2,?3,?4,?5,?6,?7)
          ON CONFLICT(username) DO UPDATE SET files=files+excluded.files,
          bytes=bytes+excluded.bytes, failures=failures+excluded.failures,
-         last_ms=excluded.last_ms",
+         last_ms=excluded.last_ms, speed_total=speed_total+excluded.speed_total,
+         speed_samples=speed_samples+excluded.speed_samples",
         params![
             username.to_ascii_lowercase(),
             files,
             bytes,
             failures,
-            now_ms()
+            now_ms(),
+            speed,
+            i64::from(speed > 0)
         ],
     )?;
     Ok(())
@@ -191,17 +228,21 @@ fn bump_source(
 
 fn apply(connection: &Connection, day: &str, event: &Event) -> rusqlite::Result<()> {
     match event {
-        Event::Download { username, bytes } => {
+        Event::Download {
+            username,
+            bytes,
+            speed,
+        } => {
             bump(
                 connection,
                 day,
                 &[("down_bytes", clamp(*bytes)), ("down_files", 1)],
             )?;
-            bump_source(connection, username, 1, clamp(*bytes), 0)
+            bump_source(connection, username, 1, clamp(*bytes), 0, clamp(*speed))
         }
         Event::DownloadFailed { username } => {
             bump(connection, day, &[("down_failures", 1)])?;
-            bump_source(connection, username, 0, 0, 1)
+            bump_source(connection, username, 0, 0, 1, 0)
         }
         Event::Upload { bytes } => bump(
             connection,
@@ -309,6 +350,8 @@ pub struct SourceStats {
     pub failures: u64,
     /// Completed files over completed plus failed attempts.
     pub reliability: Option<f64>,
+    /// Average measured download speed in bytes per second, when known.
+    pub speed_bytes_per_second: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -378,12 +421,14 @@ fn read(connection: &Connection, today: NaiveDate) -> rusqlite::Result<StatsSnap
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let top_sources = connection
         .prepare(
-            "SELECT username,files,bytes,failures FROM sources
+            "SELECT username,files,bytes,failures,speed_total,speed_samples FROM sources
              WHERE files > 0 ORDER BY bytes DESC, files DESC LIMIT ?1",
         )?
         .query_map(params![TOP_SOURCES as i64], |row| {
             let files = row.get::<_, i64>(1)?.max(0) as u64;
             let failures = row.get::<_, i64>(3)?.max(0) as u64;
+            let speed_total = row.get::<_, i64>(4)?.max(0) as u64;
+            let speed_samples = row.get::<_, i64>(5)?.max(0) as u64;
             Ok(SourceStats {
                 username: row.get(0)?,
                 files,
@@ -391,6 +436,7 @@ fn read(connection: &Connection, today: NaiveDate) -> rusqlite::Result<StatsSnap
                 failures,
                 reliability: (files + failures > 0)
                     .then(|| files as f64 / (files + failures) as f64),
+                speed_bytes_per_second: (speed_samples > 0).then(|| speed_total / speed_samples),
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -444,6 +490,7 @@ mod tests {
                 Event::Download {
                     username: "Ada".into(),
                     bytes: 600,
+                    speed: 300,
                 },
             ),
             (
@@ -451,6 +498,7 @@ mod tests {
                 Event::Download {
                     username: "ada".into(),
                     bytes: 400,
+                    speed: 100,
                 },
             ),
             (
@@ -464,6 +512,7 @@ mod tests {
                 Event::Download {
                     username: "bob".into(),
                     bytes: 5,
+                    speed: 0,
                 },
             ),
             (&day, Event::Upload { bytes: 250 }),
@@ -522,6 +571,8 @@ mod tests {
         assert_eq!(top[0].username, "ada");
         assert_eq!((top[0].files, top[0].bytes, top[0].failures), (2, 1_000, 1));
         assert!((top[0].reliability.unwrap() - 2.0 / 3.0).abs() < 1e-9);
+        assert_eq!(top[0].speed_bytes_per_second, Some(200));
+        assert_eq!(top[1].speed_bytes_per_second, None);
     }
 
     #[test]
@@ -532,6 +583,24 @@ mod tests {
         assert_eq!(snapshot.totals, Counts::default());
         assert_eq!(snapshot.daily.len(), CHART_DAYS as usize);
         assert!(snapshot.top_sources.is_empty());
+    }
+
+    #[test]
+    fn version_one_database_gains_speed_columns() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE sources (username TEXT PRIMARY KEY, files INTEGER NOT NULL DEFAULT 0,
+                 bytes INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
+                 last_ms INTEGER NOT NULL DEFAULT 0);
+                 INSERT INTO sources VALUES('old', 2, 10, 0, 1);
+                 PRAGMA user_version=1;",
+            )
+            .unwrap();
+        prepare(&connection).unwrap();
+        let snapshot = read(&connection, Local::now().date_naive()).unwrap();
+        assert_eq!(snapshot.top_sources[0].username, "old");
+        assert_eq!(snapshot.top_sources[0].speed_bytes_per_second, None);
     }
 
     #[test]

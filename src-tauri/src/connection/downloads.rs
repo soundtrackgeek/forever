@@ -2063,6 +2063,7 @@ impl TransferHub {
                 crate::stats::record(crate::stats::Event::Download {
                     username: transfer.username.clone(),
                     bytes: transfer.size_bytes,
+                    speed: transfer.speed_bytes_per_second,
                 });
                 transfer.status = TransferStatus::Completed;
                 transfer.transferred_bytes = transfer.size_bytes;

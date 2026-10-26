@@ -19,6 +19,8 @@ export default function HomeRoute() {
     openArchive,
     navigate,
     openRoom,
+    openPerson,
+    browseUser,
     dial,
     setSearchMode,
     setActiveView,
@@ -37,6 +39,8 @@ export default function HomeRoute() {
     openArchive: s.openArchive,
     navigate: s.navigate,
     openRoom: s.openRoom,
+    openPerson: s.openPerson,
+    browseUser: s.browseUser,
     dial: s.dial,
     setSearchMode: s.setSearchMode,
     setActiveView: s.setActiveView,
@@ -47,7 +51,7 @@ export default function HomeRoute() {
         if (!dial.create({ mode: "albums" })) setSearchMode("albums");
         setActiveView("search");
       }} />}
-      statistics={<StatisticsPanel />}
+      statistics={<StatisticsPanel onOpenProfile={openPerson} onBrowseUser={browseUser} />}
       connection={connection.snapshot}
       searchNetwork={connection.searchNetwork}
       transfers={transfers.snapshot.transfers}

@@ -24,6 +24,7 @@ export type StatSource = {
   bytes: number;
   failures: number;
   reliability: number | null;
+  speedBytesPerSecond: number | null;
 };
 
 export type StatisticsSnapshot = {
@@ -57,6 +58,8 @@ export const emptySnapshot: StatisticsSnapshot = {
   daily: [],
   topSources: [],
 };
+
+export const formatStatSpeed = (bytesPerSecond: number) => `${formatStatBytes(bytesPerSecond)}/s`;
 
 export const formatStatBytes = (bytes: number) => {
   if (bytes < 1_000) return `${bytes} B`;

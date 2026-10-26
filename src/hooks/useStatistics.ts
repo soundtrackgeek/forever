@@ -44,9 +44,9 @@ const previewSnapshot = (): StatisticsSnapshot => {
     },
     daily,
     topSources: [
-      { username: "vinylhoarder", files: 88, bytes: 3_400_000_000, failures: 4, reliability: 88 / 92 },
-      { username: "nightshift_fm", files: 41, bytes: 1_700_000_000, failures: 9, reliability: 41 / 50 },
-      { username: "quietroom", files: 17, bytes: 640_000_000, failures: 0, reliability: 1 },
+      { username: "vinylhoarder", files: 88, bytes: 3_400_000_000, failures: 4, reliability: 88 / 92, speedBytesPerSecond: 1_850_000 },
+      { username: "nightshift_fm", files: 41, bytes: 1_700_000_000, failures: 9, reliability: 41 / 50, speedBytesPerSecond: 420_000 },
+      { username: "quietroom", files: 17, bytes: 640_000_000, failures: 0, reliability: 1, speedBytesPerSecond: null },
     ],
   };
 };

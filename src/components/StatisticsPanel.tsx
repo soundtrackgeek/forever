@@ -5,6 +5,7 @@ import {
   deriveInsights,
   formatDuration,
   formatStatBytes,
+  formatStatSpeed,
   percent,
   type StatDay,
 } from "../utils/statistics";
@@ -90,7 +91,12 @@ function CollectionChart({ daily }: { daily: StatDay[] }) {
   );
 }
 
-export function StatisticsPanel() {
+type StatisticsPanelProps = {
+  onOpenProfile?: (username: string) => void;
+  onBrowseUser?: (username: string) => void;
+};
+
+export function StatisticsPanel({ onOpenProfile, onBrowseUser }: StatisticsPanelProps = {}) {
   const { snapshot, ready, error, preview } = useStatistics();
   const insights = deriveInsights(snapshot);
   const totals = snapshot.totals;
@@ -152,14 +158,37 @@ export function StatisticsPanel() {
               <ol>
                 {snapshot.topSources.map((source) => (
                   <li key={source.username}>
-                    <strong>{source.username}</strong>
-                    <span>{formatStatBytes(source.bytes)} · {source.files} {source.files === 1 ? "file" : "files"}</span>
+                    {onOpenProfile ? (
+                      <button
+                        type="button"
+                        className="statistics-source-name"
+                        title={`View ${source.username}'s profile`}
+                        onClick={() => onOpenProfile(source.username)}
+                      >
+                        {source.username}
+                      </button>
+                    ) : (
+                      <strong>{source.username}</strong>
+                    )}
+                    <span>{formatStatBytes(source.bytes)} · {source.files} {source.files === 1 ? "file" : "files"}
+                      {source.speedBytesPerSecond ? ` · ${formatStatSpeed(source.speedBytesPerSecond)}` : ""}
+                    </span>
                     <span
                       className="statistics-reliability"
                       title={source.reliability === null ? undefined : `${source.files} finished, ${source.failures} failed attempts`}
                     >
                       {percent(source.reliability)} reliable
                     </span>
+                    {onBrowseUser && (
+                      <button
+                        type="button"
+                        className="statistics-source-browse"
+                        aria-label={`Browse ${source.username}'s shares`}
+                        onClick={() => onBrowseUser(source.username)}
+                      >
+                        Browse shares
+                      </button>
+                    )}
                   </li>
                 ))}
               </ol>

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.0.88] - 2026-10-26
+
+### Added
+
+- **Top sources** on the Listening Post Insights are now clickable: the username
+  opens that person's profile, and a **Browse shares** button opens their shares.
+- **Top sources** also show the average download speed you get from each source.
+  Speeds are counted from this version on; sources seen before show none until
+  their next finished download.
+
 ## [0.0.87] - 2026-10-26
 
 ### Added
