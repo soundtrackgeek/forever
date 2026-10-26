@@ -32,6 +32,7 @@ type ArchiveDestination = "arrivals" | "missing" | "wanted";
 
 type ListeningPostWorkspaceProps = {
   releaseRadar?: ReactNode;
+  statistics?: ReactNode;
   connection: ConnectionSnapshot;
   searchNetwork: DistributedSnapshot;
   transfers: Transfer[];
@@ -179,6 +180,7 @@ const archiveActivity = (
 
 export function ListeningPostWorkspace({
   releaseRadar,
+  statistics,
   connection,
   searchNetwork,
   transfers,
@@ -320,6 +322,8 @@ export function ListeningPostWorkspace({
           )}
         </div>
       </section>
+
+      {statistics}
 
       <section className="listening-post-archive" aria-label="Archive pulse">
         <h2>Archive pulse</h2>

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.84] - 2026-10-26
+
+### Added
+
+- **Insights** on the Listening Post: received and shared totals, share ratio,
+  download success, Wanted hit rate and average time-to-find, Soundcheck pass
+  rate, direct-connection share, a 30-day traffic chart, a running total of
+  Wanted albums found, and your top sources with how reliable each has been.
+- Forever now keeps compact daily totals in a local `stats.sqlite3` file (400
+  days, 500 sources). Counting begins with this version, nothing is back-filled,
+  and the numbers never leave your computer.
+
 ## [0.0.83] - 2026-10-25
 
 ### Fixed

@@ -3,6 +3,7 @@ mod connection;
 mod desktop;
 mod matching;
 mod musicbrainz;
+mod stats;
 mod updater;
 
 use tauri::Manager;
@@ -58,6 +59,7 @@ pub fn run() {
                     .ok()
                     .map(|path| path.join("discovery.sqlite3")),
             ));
+            stats::start(app.path().app_config_dir()?.join("stats.sqlite3"));
             desktop::initialize(app.handle());
             Ok(())
         })
@@ -88,6 +90,7 @@ pub fn run() {
             connection::filing::filing_metadata,
             updater::updater_check,
             connection::bandwidth::bandwidth_snapshot,
+            stats::stats_snapshot,
             connection::settings_commands::settings_get,
             connection::settings_commands::settings_patch,
             connection::settings_commands::settings_migrate_webview,

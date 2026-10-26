@@ -1,5 +1,6 @@
 import { ListeningPostWorkspace } from "../../components/ListeningPostWorkspace";
 import { NewReleaseRadar } from "../../components/NewReleaseRadar";
+import { StatisticsPanel } from "../../components/StatisticsPanel";
 import { useShell } from "../shellStore";
 
 export default function HomeRoute() {
@@ -46,6 +47,7 @@ export default function HomeRoute() {
         if (!dial.create({ mode: "albums" })) setSearchMode("albums");
         setActiveView("search");
       }} />}
+      statistics={<StatisticsPanel />}
       connection={connection.snapshot}
       searchNetwork={connection.searchNetwork}
       transfers={transfers.snapshot.transfers}

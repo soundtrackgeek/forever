@@ -626,6 +626,9 @@ impl UploadHub {
             }
             upload.status = status;
             if status == UploadStatus::Completed {
+                crate::stats::record(crate::stats::Event::Upload {
+                    bytes: upload.size_bytes,
+                });
                 upload.transferred_bytes = upload.size_bytes;
                 upload.eta_seconds = Some(0);
             } else {

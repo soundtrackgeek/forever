@@ -151,6 +151,17 @@ impl ReachabilityHub {
         let mut state = self.inner.lock().unwrap();
         let before = state.snapshot.clone();
         if state.update(session, update) && state.snapshot != before {
+            if state.snapshot.status != before.status {
+                match state.snapshot.status {
+                    DirectStatus::Reachable => {
+                        crate::stats::record(crate::stats::Event::Reachability { reachable: true })
+                    }
+                    DirectStatus::Firewalled => {
+                        crate::stats::record(crate::stats::Event::Reachability { reachable: false })
+                    }
+                    DirectStatus::Unknown => {}
+                }
+            }
             let _ = self.app.emit(EVENT, state.snapshot.clone());
         }
     }

@@ -1015,7 +1015,20 @@ with a `losslessOnly` profile and an "upgrade" flag. That flag keeps the album
 watched even though the Archive says it is owned (the `watchDespiteOwnership`
 field already exists).
 
-### 18. Statistics and insights dashboard
+### 18. Statistics and insights dashboard - DONE
+
+**Implemented in 0.0.84 (2026-10-26):** a bounded local SQLite database
+(`stats.sqlite3`) keeps daily aggregates and per-source totals, written by one
+background thread so transfer locks never wait on disk. The Listening Post gains
+an **Insights** section: received and shared totals, share ratio, download
+success, Wanted hit rate and average time-to-find, Soundcheck pass rate, direct
+connection share, a 30-day traffic chart, a Wanted-found running total and the
+top sources with their reliability. Counting starts at this release (nothing is
+back-filled), keeps 400 days and 500 sources, and never leaves the computer.
+Collection completion is shown as albums found through Wanted downloads;
+Archive-detected ownership is not counted. Reachability history counts changes
+between reachable and firewalled evidence, not time online. Days use the local
+calendar. The original proposal follows for context.
 
 **What:** Downloaded and uploaded totals, a share ratio, top sources and their
 reliability, Wanted hit rate and time-to-find, Soundcheck pass rate, collection

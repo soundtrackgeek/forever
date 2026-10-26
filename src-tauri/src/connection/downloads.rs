@@ -2060,6 +2060,10 @@ impl TransferHub {
                         r.successes = r.successes.saturating_add(1);
                     },
                 );
+                crate::stats::record(crate::stats::Event::Download {
+                    username: transfer.username.clone(),
+                    bytes: transfer.size_bytes,
+                });
                 transfer.status = TransferStatus::Completed;
                 transfer.transferred_bytes = transfer.size_bytes;
                 transfer.speed_bytes_per_second = 0;
@@ -2076,6 +2080,19 @@ impl TransferHub {
                 let patch_repair = transfer.patch_repair.is_some();
                 if !patch_repair && self.soundcheck_enabled.load(Ordering::SeqCst) {
                     refresh_soundcheck(transfer, false);
+                    use crate::stats::{record, Event, Outcome};
+                    match transfer.soundcheck.as_ref().map(|r| r.status) {
+                        Some(SoundcheckStatus::Passed) => {
+                            record(Event::Soundcheck(Outcome::Passed))
+                        }
+                        Some(SoundcheckStatus::Review) => {
+                            record(Event::Soundcheck(Outcome::Review))
+                        }
+                        Some(SoundcheckStatus::Failed) => {
+                            record(Event::Soundcheck(Outcome::Failed))
+                        }
+                        _ => {}
+                    }
                 }
             }
         })?;
@@ -2206,6 +2223,9 @@ impl TransferHub {
                 .iter_mut()
                 .find(|transfer| transfer.status.occupies_slot() && matches(transfer))
             {
+                crate::stats::record(crate::stats::Event::DownloadFailed {
+                    username: transfer.username.clone(),
+                });
                 if let Some(denied) = peer_denial {
                     recovery::observe(
                         &mut self
@@ -2248,6 +2268,9 @@ impl TransferHub {
             {
                 self.abort(&transfer.id);
                 refresh_partial_size(transfer);
+                crate::stats::record(crate::stats::Event::DownloadFailed {
+                    username: transfer.username.clone(),
+                });
                 recovery::observe(
                     &mut self
                         .source_reliability

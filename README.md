@@ -193,6 +193,13 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
   active-transfer progress, queued releases, Wanted matches, unread messages,
   room mentions, recent transfer and Archive activity, and collection status;
   every signal links to its exact working destination
+- **Insights** on the Listening Post: received and shared totals, share ratio,
+  download success, Wanted hit rate and average time-to-find, Soundcheck pass
+  rate, direct-connection share, a 30-day traffic chart, Wanted albums found
+  over time, and top sources with their reliability. Counting starts when you
+  install the version that adds it and the totals stay on this computer in
+  `stats.sqlite3` (400 days of daily totals, 500 sources); delete the file to
+  start over
 - First-run Soulseek account setup with native download-folder selection and
   a clear explanation of automatic username registration
 - Live TCP login to the Soulseek server with explicit connecting,

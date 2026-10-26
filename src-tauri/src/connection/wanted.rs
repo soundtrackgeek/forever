@@ -395,6 +395,7 @@ impl WantedHub {
                 return Err(WantedError::TooManyAlbums);
             }
             let preferences = store.default_preferences.clone();
+            crate::stats::record(crate::stats::Event::WantedAdded(1));
             store.albums.push(WantedAlbum {
                 album_id: request.album_id,
                 artist: request.artist,
@@ -1218,6 +1219,11 @@ fn fulfill_downloaded_in_store(
         {
             continue;
         }
+        if !album.fulfilled {
+            crate::stats::record(crate::stats::Event::WantedFulfilled {
+                found_after_ms: receipt.completed_at_ms.saturating_sub(album.added_at_ms),
+            });
+        }
         album.fulfilled = true;
         album.fulfilled_at_ms = Some(receipt.completed_at_ms);
         album.fulfillment_source = Some(WantedFulfillmentSource::Download);
@@ -1235,6 +1241,7 @@ fn fulfill_downloaded_in_store(
 // interrupted session never counts as evidence that an album is unavailable.
 fn record_check_outcome(album: &mut WantedAlbum, sources: u32, now: u64) {
     album.last_checked_at_ms = Some(now);
+    crate::stats::record(crate::stats::Event::WantedCheck { hit: sources > 0 });
     if sources > 0 {
         album.consecutive_misses = 0;
         album.last_found_at_ms = Some(now);
@@ -1462,6 +1469,7 @@ fn merge_bulk_requests(
                 reset_for_watch(album, added_at_ms);
             }
         } else {
+            crate::stats::record(crate::stats::Event::WantedAdded(1));
             store.albums.push(WantedAlbum {
                 album_id: request.album_id,
                 artist: request.artist,
