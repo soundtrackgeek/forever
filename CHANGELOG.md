@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.85] - 2026-10-26
+
+### Added
+
+- **ListenBrainz token** under Discovery shelf **Sources**. ListenBrainz now
+  refuses uncached requests for album listening counts without a free user token
+  (from listenbrainz.org/settings), so lesser-known artists always failed with
+  HTTP 401. A saved token is kept in the system credential store and sent only
+  to ListenBrainz on its album and similar-artist lookups. It is optional;
+  without one the shelf still works and falls back to release-date order.
+
+### Changed
+
+- A ListenBrainz HTTP 401 now says a token is needed (or that the saved token
+  was rejected) and points at Sources, instead of "Try again later."
+
 ## [0.0.84] - 2026-10-26
 
 ### Added

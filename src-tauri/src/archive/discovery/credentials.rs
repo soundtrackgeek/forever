@@ -16,6 +16,7 @@ pub(super) enum Source {
     LastFm,
     Discogs,
     Fanart,
+    ListenBrainz,
 }
 
 impl Source {
@@ -24,7 +25,8 @@ impl Source {
             "lastFm" => Ok(Self::LastFm),
             "discogs" => Ok(Self::Discogs),
             "fanart" => Ok(Self::Fanart),
-            _ => Err("Choose Last.fm, Discogs, or Fanart.tv.".into()),
+            "listenBrainz" => Ok(Self::ListenBrainz),
+            _ => Err("Choose Last.fm, Discogs, Fanart.tv, or ListenBrainz.".into()),
         }
     }
 
@@ -33,6 +35,7 @@ impl Source {
             Self::LastFm => "Last.fm",
             Self::Discogs => "Discogs",
             Self::Fanart => "Fanart.tv",
+            Self::ListenBrainz => "ListenBrainz",
         }
     }
 
@@ -42,6 +45,7 @@ impl Source {
             Self::LastFm => ("lastfm-api-key", None),
             Self::Discogs => ("discogs-consumer-key", Some("discogs-consumer-secret")),
             Self::Fanart => ("fanart-api-key", None),
+            Self::ListenBrainz => ("listenbrainz-user-token", None),
         }
     }
 
@@ -51,6 +55,7 @@ impl Source {
             Self::LastFm => ("LAST_FM", None),
             Self::Discogs => ("DISCOGS", Some("DISCOGS_SECRET")),
             Self::Fanart => ("FANART_TV", None),
+            Self::ListenBrainz => ("LISTENBRAINZ", None),
         }
     }
 }
@@ -76,6 +81,7 @@ pub struct SourcesStatus {
     pub last_fm: SourceStatus,
     pub discogs: SourceStatus,
     pub fanart: SourceStatus,
+    pub listen_brainz: SourceStatus,
 }
 
 /// A resolved key and optional secret. Zeroized on drop.
@@ -232,6 +238,7 @@ pub(super) fn all_status() -> SourcesStatus {
         last_fm: status(Source::LastFm),
         discogs: status(Source::Discogs),
         fanart: status(Source::Fanart),
+        listen_brainz: status(Source::ListenBrainz),
     }
 }
 
@@ -260,6 +267,7 @@ mod tests {
             "abcdef123456"
         );
         assert!(Source::parse("lastFm").is_ok());
+        assert!(Source::parse("listenBrainz").is_ok());
         assert!(Source::parse("spotify").is_err());
     }
 

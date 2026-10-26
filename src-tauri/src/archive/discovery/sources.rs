@@ -1,4 +1,4 @@
-//! Last.fm, Discogs and Fanart.tv lookups used by the discovery shelf.
+//! ListenBrainz, Last.fm, Discogs and Fanart.tv lookups used by the discovery shelf.
 //!
 //! Each function returns `Ok(None)` when its key is not configured, so callers can
 //! skip a source quietly and say why in a notice.
@@ -6,7 +6,8 @@ use super::credentials::{self, Source};
 use super::provider::{self, Data, DiscoveryProvider};
 use super::{mbid, Candidate};
 use crate::archive::normalize_title;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
+use zeroize::Zeroizing;
 
 const LASTFM_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 const DISCOGS_SEARCH_URL: &str = "https://api.discogs.com/database/search";
@@ -27,6 +28,55 @@ fn flexible_year<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<i3
         serde_json::Value::String(s) => s.trim().parse().ok(),
         _ => None,
     })
+}
+
+// ---- ListenBrainz --------------------------------------------------------
+
+const LISTENBRAINZ_UNAUTHORIZED: &str = "ListenBrainz returned HTTP 401. Try again later.";
+
+/// ListenBrainz answers HTTP 401 for uncached requests that carry no user token, or a bad one.
+/// Say which, instead of the generic "try again later".
+fn explain_listenbrainz(text: String, has_token: bool) -> String {
+    let hint = if has_token {
+        "ListenBrainz rejected your token. Check it under Sources."
+    } else {
+        "ListenBrainz now needs a free user token for this. Add one under Sources."
+    };
+    text.replace(LISTENBRAINZ_UNAUTHORIZED, hint)
+}
+
+/// A ListenBrainz GET. Sends the user token from Sources when one is configured;
+/// the token is only ever sent as a header, never in the URL or cache key.
+pub(super) async fn listenbrainz_get<T: DeserializeOwned + Serialize>(
+    provider: &DiscoveryProvider,
+    key: String,
+    url: &str,
+    query: &[(&str, &str)],
+) -> Result<Data<T>, String> {
+    let credential = credentials::resolve(Source::ListenBrainz)?.map(|(credential, _)| credential);
+    let authorization = credential
+        .as_ref()
+        .map(|credential| Zeroizing::new(format!("Token {}", credential.key.as_str())));
+    let headers: Vec<(&str, &str)> = authorization
+        .iter()
+        .map(|value| ("Authorization", value.as_str()))
+        .collect();
+    let has_token = credential.is_some();
+    provider
+        .get_with(
+            provider::LISTENBRAINZ,
+            key,
+            url,
+            query,
+            &headers,
+            |_| Ok(()),
+        )
+        .await
+        .map(|data| Data {
+            value: data.value,
+            notice: data.notice.map(|n| explain_listenbrainz(n, has_token)),
+        })
+        .map_err(|error| explain_listenbrainz(error, has_token))
 }
 
 // ---- Last.fm -------------------------------------------------------------
@@ -320,6 +370,18 @@ pub(super) async fn fanart_image(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listenbrainz_401_points_at_the_token_setting() {
+        let raw = "ListenBrainz returned HTTP 401. Try again later.";
+        assert!(explain_listenbrainz(raw.into(), false).contains("needs a free user token"));
+        assert!(explain_listenbrainz(raw.into(), true).contains("rejected your token"));
+        let cached = format!("{raw} Showing saved data (up to 30 days old).");
+        let text = explain_listenbrainz(cached, false);
+        assert!(text.contains("Add one under Sources.") && text.ends_with("(up to 30 days old)."));
+        let other = "ListenBrainz returned HTTP 500. Try again later.";
+        assert_eq!(explain_listenbrainz(other.into(), true), other);
+    }
 
     #[test]
     fn lastfm_parses_scores_ids_and_drops_unusable_rows() {

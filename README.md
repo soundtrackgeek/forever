@@ -112,7 +112,7 @@ of Soulseek login and the active workspace. **Check releases** permits an earlie
 check with a 15-minute cooldown per artist. Failed or interrupted checks retry
 after an hour, including after restart. Checks use the shared MusicBrainz pacing,
 retry, timeout, and response-size controls; no account or API key is needed
-for ListenBrainz and MusicBrainz (Last.fm, Discogs, and Fanart.tv keys are optional).
+for MusicBrainz (ListenBrainz, Last.fm, Discogs, and Fanart.tv keys are optional).
 
 The inbox shows official release groups for albums, EPs, and singles with first
 release dates overlapping the past 90 days or next 90 days. Editions are deduplicated
@@ -165,11 +165,14 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
   without a verified identity can still be chosen by name and are followed
   through Last.fm.
 - **Sources** (collapsed panel on the shelf) holds optional API keys:
-  **Last.fm** (similar artists), **Discogs** consumer key and secret (studio
+  **ListenBrainz** user token (album listening counts), **Last.fm** (similar artists), **Discogs** consumer key and secret (studio
   album check) and **Fanart.tv** (artist photo). Keys are stored in the
   operating-system credential store, never in settings files or exports, and are
-  sent only to their own service. ListenBrainz and MusicBrainz need no key.
-  Development builds also read `LAST_FM`, `DISCOGS`, `DISCOGS_SECRET` and
+  sent only to their own service. MusicBrainz needs no key. The ListenBrainz
+  token is free (listenbrainz.org/settings) and optional: without one,
+  ListenBrainz refuses album listening counts for lesser-known artists
+  (HTTP 401) and the shelf lists their albums by release date instead.
+  Development builds also read `LISTENBRAINZ`, `LAST_FM`, `DISCOGS`, `DISCOGS_SECRET` and
   `FANART_TV` from the environment or a gitignored `.env.local`.
 - Select a suggested artist to check both catalogs: MusicBrainz studio albums
   and Discogs studio-album masters (exact artist match; live, compilation, EP,

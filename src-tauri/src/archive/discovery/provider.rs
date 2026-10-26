@@ -130,6 +130,7 @@ impl DiscoveryProvider {
             .clone()
     }
 
+    #[cfg(test)]
     pub(super) async fn get<T: DeserializeOwned + Serialize>(
         &self,
         key: String,

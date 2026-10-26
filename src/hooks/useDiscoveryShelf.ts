@@ -8,7 +8,7 @@ export type DiscoveryShelf = { artists: DiscoveryArtist[]; seeds: DiscoverySeed[
 export type DiscoveryAlbum = { id: string; title: string; firstReleaseDate: string; coverArtUrl: string; musicbrainz: boolean; discogs: boolean };
 export type SourceReport = { status: "found" | "empty" | "unavailable" | "notConfigured"; count: number; message: string | null };
 export type DiscoveryAlbums = { albums: DiscoveryAlbum[]; musicbrainz: SourceReport; discogs: SourceReport; musicbrainzArtistId: string | null; imageUrl: string | null; basis: "listenbrainz" | "catalog"; notices: string[] };
-export type SourceKey = "lastFm" | "discogs" | "fanart";
+export type SourceKey = "lastFm" | "discogs" | "fanart" | "listenBrainz";
 export type SourceStatus = { configured: boolean; origin: "keyring" | "environment" | "none" };
 export type SourcesStatus = Record<SourceKey, SourceStatus>;
 /** An Archive artist chosen to steer discovery. */
@@ -52,7 +52,7 @@ const previewAlbums = (artist: DiscoveryArtist): DiscoveryAlbums => ({
     .map((title, i) => ({ id: `preview-discovery-${artist.artistId}-${i}`, title, firstReleaseDate: "", coverArtUrl: "", musicbrainz: true, discogs: i !== 2 })),
 });
 const previewSources: SourcesStatus = {
-  lastFm: { configured: true, origin: "keyring" }, discogs: { configured: true, origin: "keyring" }, fanart: { configured: false, origin: "none" },
+  lastFm: { configured: true, origin: "keyring" }, discogs: { configured: true, origin: "keyring" }, fanart: { configured: false, origin: "none" }, listenBrainz: { configured: false, origin: "none" },
 };
 
 type State = { sourceKey: string; shelf: DiscoveryShelf | null; selected: DiscoveryArtist | null; albums: DiscoveryAlbums | null; steer: DiscoverySteer[]; loading: "idle" | "shelf" | "albums"; error: string | null };

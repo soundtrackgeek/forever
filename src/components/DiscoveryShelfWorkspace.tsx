@@ -64,7 +64,8 @@ function SeedPicker({ discovery, connected }: { discovery: Props["discovery"]; c
   </div>;
 }
 
-const sourceRows: { key: SourceKey; label: string; secret?: boolean; help: string }[] = [
+const sourceRows: { key: SourceKey; label: string; secret?: boolean; token?: boolean; help: string }[] = [
+  { key: "listenBrainz", label: "ListenBrainz", token: true, help: "Free user token from listenbrainz.org/settings. Needed for album listening counts on lesser-known artists." },
   { key: "lastFm", label: "Last.fm", help: "API key from last.fm/api. Finds similar artists." },
   { key: "discogs", label: "Discogs", secret: true, help: "Consumer key and secret from discogs.com/settings/developers. Confirms an artist's studio albums." },
   { key: "fanart", label: "Fanart.tv", help: "Project API key from fanart.tv. Adds an artist photo." },
@@ -89,7 +90,7 @@ function SourceRow({ row, status, discovery }: { row: (typeof sourceRows)[number
   return <li>
     <div><strong>{row.label}</strong><small>{originText(status)}</small><small>{row.help}</small></div>
     <form onSubmit={(event) => { event.preventDefault(); void run(() => discovery.saveSource(row.key, key, row.secret ? secret : undefined)); }}>
-      <input type="password" autoComplete="off" aria-label={`${row.label} ${row.secret ? "consumer key" : "API key"}`} placeholder={row.secret ? "Consumer key" : "API key"} value={key} onChange={(event) => setKey(event.target.value)} />
+      <input type="password" autoComplete="off" aria-label={`${row.label} ${row.secret ? "consumer key" : row.token ? "user token" : "API key"}`} placeholder={row.secret ? "Consumer key" : row.token ? "User token" : "API key"} value={key} onChange={(event) => setKey(event.target.value)} />
       {row.secret ? <input type="password" autoComplete="off" aria-label={`${row.label} consumer secret`} placeholder="Consumer secret" value={secret} onChange={(event) => setSecret(event.target.value)} /> : null}
       <button type="submit" disabled={busy || !key.trim() || (row.secret === true && !secret.trim())}>Save</button>
       {status.configured && status.origin === "keyring" ? <button type="button" disabled={busy} onClick={() => void run(() => discovery.clearSource(row.key))}>Remove</button> : null}
@@ -103,7 +104,7 @@ function SourcesPanel({ discovery }: { discovery: Props["discovery"] }) {
   useEffect(() => { void loadSources(); }, [loadSources]);
   return <details className="discovery-sources">
     <summary>Sources{sources ? ` · ${sourceRows.filter((row) => sources[row.key].configured).length} of ${sourceRows.length} connected` : ""}</summary>
-    <p className="discovery-caption">ListenBrainz and MusicBrainz need no key. Add keys to widen the search; they stay in your system credential store and are sent only to their own service.</p>
+    <p className="discovery-caption">MusicBrainz needs no key. Add keys to widen the search; they stay in your system credential store and are sent only to their own service. ListenBrainz works without a token but may refuse lesser-known artists.</p>
     {sources ? <ul>{sourceRows.map((row) => <SourceRow key={row.key} row={row} status={sources[row.key]} discovery={discovery} />)}</ul> : null}
   </details>;
 }

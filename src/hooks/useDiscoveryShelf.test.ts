@@ -75,7 +75,7 @@ describe("discovery shelf", () => {
     expect(result.current.steer).toEqual([]);
   });
   it("saves and clears source keys through the native commands without echoing them back", async () => {
-    const status = { lastFm: { configured: true, origin: "keyring" }, discogs: { configured: false, origin: "none" }, fanart: { configured: false, origin: "none" } };
+    const status = { lastFm: { configured: true, origin: "keyring" }, discogs: { configured: false, origin: "none" }, fanart: { configured: false, origin: "none" }, listenBrainz: { configured: false, origin: "none" } };
     invoke.mockResolvedValue(status);
     const { result } = renderHook(() => useDiscoveryShelf("source"));
     await act(() => result.current.saveSource("lastFm", "abcdef123456"));

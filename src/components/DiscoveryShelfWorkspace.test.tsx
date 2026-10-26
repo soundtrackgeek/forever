@@ -62,10 +62,10 @@ describe("discovery shelf interactions", () => {
   });
   it("shows which sources are connected and lets a key be removed", async () => {
     render(<Harness />);
-    expect(screen.getByText("Sources · 2 of 3 connected")).toBeInTheDocument();
+    expect(screen.getByText("Sources · 2 of 4 connected")).toBeInTheDocument();
     fireEvent.click(screen.getByText(/^Sources/));
     fireEvent.click(within(screen.getByText("Last.fm").closest("li")!).getByRole("button", { name: "Remove" }));
-    expect(await screen.findByText("Sources · 1 of 3 connected")).toBeInTheDocument();
+    expect(await screen.findByText("Sources · 1 of 4 connected")).toBeInTheDocument();
     expect(screen.getByLabelText("Discogs consumer key")).toHaveAttribute("type", "password");
     expect(screen.getAllByRole("button", { name: "Save" }).every((button) => button.hasAttribute("disabled"))).toBe(true);
   });

@@ -330,16 +330,16 @@ pub async fn discovery_shelf(
     for seed in &chosen {
         if seed.resolved {
             let key = format!("similar:{}:{}", provider::ALGORITHM, seed.artist_id);
-            match provider
-                .get::<Vec<Similar>>(
-                    key,
-                    "https://labs.api.listenbrainz.org/similar-artists/json",
-                    &[
-                        ("artist_mbids", &seed.artist_id),
-                        ("algorithm", provider::ALGORITHM),
-                    ],
-                )
-                .await
+            match sources::listenbrainz_get::<Vec<Similar>>(
+                &provider,
+                key,
+                "https://labs.api.listenbrainz.org/similar-artists/json",
+                &[
+                    ("artist_mbids", &seed.artist_id),
+                    ("algorithm", provider::ALGORITHM),
+                ],
+            )
+            .await
             {
                 Ok(data) => {
                     notices.extend(data.notice);
@@ -644,9 +644,13 @@ pub async fn discovery_albums(
     if let Some(id) = side.artist_id.as_deref().filter(|_| !albums.is_empty()) {
         let url =
             format!("https://api.listenbrainz.org/1/popularity/top-release-groups-for-artist/{id}");
-        match provider
-            .get::<Vec<PopularAlbum>>(format!("albums:{id}"), &url, &[])
-            .await
+        match sources::listenbrainz_get::<Vec<PopularAlbum>>(
+            &provider,
+            format!("albums:{id}"),
+            &url,
+            &[],
+        )
+        .await
         {
             Ok(data) => {
                 notices.extend(data.notice);
