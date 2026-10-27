@@ -5,7 +5,7 @@ resolver = "2"
 
 [package]
 name = "forever"
-version = "0.0.92"
+version = "0.0.93"
 description = "A polished, modern desktop client for the Soulseek network."
 authors = ["soundtrackgeek"]
 edition = "2021"

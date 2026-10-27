@@ -48,6 +48,58 @@ fn mbid(value: &str) -> bool {
         })
 }
 
+const CONNECTOR: &str = " & ";
+
+/// The parts of a name around "&", "+" or "and", without "the": "Mike + The
+/// Mechanics" and "Mike & The Mechanics" both give [[mike], [mechanics]].
+fn name_segments(name: &str) -> Vec<Vec<String>> {
+    let mut segments = vec![vec![]];
+    for word in crate::matching::words(&name.replace('+', "&")) {
+        match word.as_str() {
+            "the" => {}
+            "and" => segments.push(vec![]),
+            _ => segments.last_mut().expect("one segment").push(word),
+        }
+    }
+    segments.retain(|segment| !segment.is_empty());
+    segments
+}
+
+/// Compares artists by this key rather than by `normalize_title`, so that "The
+/// Carpenters" is "Carpenters" and "Go-Go's" is "The Go-Go's".
+fn owned_key(name: &str) -> String {
+    name_segments(name)
+        .iter()
+        .map(|segment| segment.join(" "))
+        .collect::<Vec<_>>()
+        .join(CONNECTOR)
+}
+
+fn ends_with_words(long: &[String], short: &[String]) -> bool {
+    long.ends_with(short)
+}
+
+/// "Hall & Oates" is "Daryl Hall & John Oates": same number of two or more parts,
+/// each part of one name ending a part of the other. A single-part name never
+/// qualifies, so a solo "John Oates" or "Dave Matthews" is not taken as owned.
+fn same_group(a: &str, b: &str) -> bool {
+    let (a, b) = (name_segments(a), name_segments(b));
+    a.len() >= 2
+        && a.len() == b.len()
+        && (a.iter().zip(&b).all(|(x, y)| ends_with_words(y, x))
+            || a.iter().zip(&b).all(|(x, y)| ends_with_words(x, y)))
+}
+
+fn is_owned_name(inventory: &Inventory, name: &str) -> bool {
+    let key = owned_key(name);
+    inventory.owned_names.contains(&key)
+        || (key.contains(CONNECTOR)
+            && inventory
+                .owned_names
+                .iter()
+                .any(|owned| owned.contains(CONNECTOR) && same_group(owned, &key)))
+}
+
 fn inventory(path: &Path) -> Result<Inventory, String> {
     let db = open_read_only(path)?;
     let links = query_artist_links(&db)?;
@@ -67,14 +119,14 @@ fn inventory(path: &Path) -> Result<Inventory, String> {
     for row in rows {
         let (name, count) = row.map_err(|e| e.to_string())?;
         let normalized = normalize_title(&name);
-        result.owned_names.insert(normalized.clone());
+        result.owned_names.insert(owned_key(&name));
         let link = links.get(&normalized).filter(|l| mbid(&l.artist_id));
         let (id, display, resolved) = match link {
             Some(link) => {
                 let id = link.artist_id.to_ascii_lowercase();
                 result.owned_ids.insert(id.clone());
                 if let Some(canonical) = &link.canonical_name {
-                    result.owned_names.insert(normalize_title(canonical));
+                    result.owned_names.insert(owned_key(canonical));
                 }
                 (id, link.canonical_name.clone().unwrap_or(name), true)
             }
@@ -263,7 +315,7 @@ fn rank(inventory: &Inventory, blocks: Vec<Block>) -> Vec<Recommendation> {
                 .mbid
                 .as_ref()
                 .is_some_and(|id| inventory.owned_ids.contains(id))
-                || inventory.owned_names.contains(&key)
+                || is_owned_name(inventory, &row.name)
             {
                 continue;
             }
@@ -792,6 +844,54 @@ mod tests {
         assert_eq!(ranked[0].artist_id, C);
         assert_eq!(ranked[0].because.len(), 2);
         assert!((ranked[0].score - (11.0_f64.ln() * 0.5 + 6.0_f64.ln())).abs() < 0.00001);
+    }
+
+    #[test]
+    fn owned_artists_match_despite_the_connectors_and_group_forms() {
+        let first = seed(A, "Queen", 10);
+        let names = [
+            "Carpenters",
+            "The Go-Go's",
+            "Mike & The Mechanics",
+            "Daryl Hall & John Oates",
+            "Dave Matthews Band",
+            "Nick Cave",
+        ];
+        let owned = Inventory {
+            all: vec![first.clone()],
+            owned_ids: HashSet::new(),
+            owned_names: names.iter().map(|name| owned_key(name)).collect(),
+            unresolved_artists: 0,
+        };
+        let candidates = [
+            "The Carpenters",
+            "Go-Go's",
+            "Mike + The Mechanics",
+            "Hall & Oates",
+            "Hall and Oates",
+            // Not owned: solo members, shortened bands and near misses.
+            "John Oates",
+            "Daryl Hall",
+            "Dave Matthews",
+            "Nick Cave & The Bad Seeds",
+            "Mike Oldfield",
+            "The Carpenter Ants",
+        ];
+        let rows = candidates
+            .iter()
+            .enumerate()
+            .map(|(i, name)| similar(&format!("00000000-0000-0000-0000-{i:012}"), name, A, 50))
+            .collect();
+        let kept: Vec<_> = rank(&owned, vec![block(&first, rows)])
+            .into_iter()
+            .map(|r| r.name)
+            .collect();
+        for name in &candidates[..5] {
+            assert!(!kept.contains(&name.to_string()), "{name} is owned");
+        }
+        for name in &candidates[5..] {
+            assert!(kept.contains(&name.to_string()), "{name} is not owned");
+        }
     }
 
     #[test]

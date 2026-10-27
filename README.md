@@ -164,7 +164,7 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
   of your most-owned artists with verified MusicBrainz identities. The Archive
   stays read-only. An artist's studio albums open oldest first; use **Sort by**
   to switch to newest first, alphabetical, or most listened. Each suggestion shows which owned artists and which sources
-  (ListenBrainz, Last.fm) contributed; sources that agree rank higher. Artists
+  (ListenBrainz, Last.fm) contributed; sources that agree rank higher. Artists you own are left out even when spelled differently ("The" or not, "&" or "+", "Hall & Oates" for Daryl Hall & John Oates). Artists
   without a verified identity can still be chosen by name and are followed
   through Last.fm.
 - **Sources** (collapsed panel on the shelf) holds optional API keys:

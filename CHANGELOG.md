@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.0.93] - 2026-10-27
+
+### Fixed
+
+- **Discovery shelf no longer suggests artists you already own under another
+  spelling.** Owned artists are now matched ignoring "The" and treating "&",
+  "+" and "and" alike, so The Carpenters, The Go-Go's and Mike + The Mechanics
+  are recognised as the Carpenters, Go-Go's and Mike & The Mechanics you have.
+  Duos are matched by surname too: Hall & Oates is recognised as Daryl Hall &
+  John Oates. A solo member such as John Oates is still suggested.
+
 ## [0.0.92] - 2026-10-27
 
 ### Changed
