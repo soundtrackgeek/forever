@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.0.92] - 2026-10-27
+
+### Changed
+
+- **Smarter artist search in the Discovery shelf.** Searching your Archive now
+  ignores accents, punctuation and skipped words, and matches word beginnings
+  in any order. "was not" finds Was (Not Was); "Blue Oyster" and "Blue Cult"
+  both find Blue Öyster Cult. Names that start with what you typed are listed
+  first.
+
 ## [0.0.91] - 2026-10-27
 
 ### Fixed

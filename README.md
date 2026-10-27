@@ -156,7 +156,9 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
 ## Current foundation
 
 - **Discovery shelf** in Archive recommends up to 24 artists outside your
-  collection. **Search your Archive** for one to five artists you own (for
+  collection. **Search your Archive** for one to five artists you own; the search ignores
+  accents, punctuation and skipped words, so "was not" finds Was (Not Was) and
+  "Blue Oyster" or "Blue Cult" finds Blue Öyster Cult (for
   example Richard Marx), then choose **Discover new artists** to follow only
   those. With no artist chosen, **Discover from my top artists** uses up to five
   of your most-owned artists with verified MusicBrainz identities. The Archive

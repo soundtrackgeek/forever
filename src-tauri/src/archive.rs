@@ -349,6 +349,35 @@ fn query_cached_catalog_summaries(
         .map_err(|error| format!("Could not read cached MusicBrainz catalogs: {error}"))
 }
 
+/// Ranks an artist name against a query, both already split by `words` (so
+/// accents, case and punctuation are ignored). Lower is better; `None` means no
+/// match. 0: name starts with the query, 1: every query word starts a name word
+/// ("Blue Cult"), 2: every query word appears somewhere in the name.
+fn artist_match_rank(name_words: &[String], query_words: &[String]) -> Option<u8> {
+    if query_words.is_empty() {
+        return Some(0);
+    }
+    if name_words.len() >= query_words.len()
+        && name_words
+            .iter()
+            .zip(query_words)
+            .all(|(name, query)| name.starts_with(query.as_str()))
+    {
+        return Some(0);
+    }
+    if query_words
+        .iter()
+        .all(|query| name_words.iter().any(|name| name.starts_with(query.as_str())))
+    {
+        return Some(1);
+    }
+    let joined = name_words.join(" ");
+    query_words
+        .iter()
+        .all(|query| joined.contains(query.as_str()))
+        .then_some(2)
+}
+
 fn artists_for_path(path: &Path, query: &str) -> ArchiveArtistsResponse {
     let connection = match open_read_only(path) {
         Ok(connection) => connection,
@@ -397,10 +426,8 @@ fn artists_for_path(path: &Path, query: &str) -> ArchiveArtistsResponse {
                 MAX(COALESCE(release_year, year))
          FROM albums
          WHERE NULLIF(TRIM(album_artist_display), '') IS NOT NULL
-           AND (?1 = '' OR LOWER(album_artist_display) LIKE '%' || LOWER(?1) || '%')
          GROUP BY album_artist_display COLLATE NOCASE
-         ORDER BY COUNT(*) DESC, LOWER(album_artist_display)
-         LIMIT ?2",
+         ORDER BY COUNT(*) DESC, LOWER(album_artist_display)",
     ) {
         Ok(statement) => statement,
         Err(error) => {
@@ -414,17 +441,22 @@ fn artists_for_path(path: &Path, query: &str) -> ArchiveArtistsResponse {
             };
         }
     };
-    let rows = match statement.query_map(
-        rusqlite::params![query, (MAX_ARTIST_RESULTS + 1) as u64],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, u64>(1)?,
-                row.get::<_, Option<i32>>(2)?,
-                row.get::<_, Option<i32>>(3)?,
-            ))
-        },
-    ) {
+    let query_words = words(query);
+    if !query.is_empty() && query_words.is_empty() {
+        return ArchiveArtistsResponse {
+            source,
+            artists: Vec::new(),
+            truncated: false,
+        };
+    }
+    let rows = match statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, u64>(1)?,
+            row.get::<_, Option<i32>>(2)?,
+            row.get::<_, Option<i32>>(3)?,
+        ))
+    }) {
         Ok(rows) => rows,
         Err(error) => {
             return ArchiveArtistsResponse {
@@ -452,22 +484,32 @@ fn artists_for_path(path: &Path, query: &str) -> ArchiveArtistsResponse {
                 };
             }
         };
+        let Some(rank) = artist_match_rank(&words(&name), &query_words) else {
+            continue;
+        };
         let link = links.get(&normalize_title(&name));
         let catalog = link
             .and_then(|link| cached.get(&link.artist_id))
             .cloned()
             .unwrap_or_default();
-        artists.push(ArchiveArtistSummary {
-            name,
-            owned_album_count,
-            first_year,
-            last_year,
-            artist_id: link.map(|link| link.artist_id.clone()),
-            canonical_name: link.and_then(|link| link.canonical_name.clone()),
-            cached_release_count: catalog.release_count,
-            catalog_fetched_at: catalog.fetched_at,
-        });
+        artists.push((
+            rank,
+            ArchiveArtistSummary {
+                name,
+                owned_album_count,
+                first_year,
+                last_year,
+                artist_id: link.map(|link| link.artist_id.clone()),
+                canonical_name: link.and_then(|link| link.canonical_name.clone()),
+                cached_release_count: catalog.release_count,
+                catalog_fetched_at: catalog.fetched_at,
+            },
+        ));
     }
+    // Stable sort: better matches first, then the SQL order (most albums owned).
+    artists.sort_by_key(|(rank, _)| *rank);
+    let mut artists: Vec<ArchiveArtistSummary> =
+        artists.into_iter().map(|(_, artist)| artist).collect();
     let truncated = artists.len() > MAX_ARTIST_RESULTS;
     artists.truncate(MAX_ARTIST_RESULTS);
     ArchiveArtistsResponse {
@@ -1379,6 +1421,39 @@ mod tests {
             response.artists[0].artist_id.as_deref(),
             Some("7249b899-8db8-43e7-9e6e-22f1e736024e")
         );
+    }
+
+    #[test]
+    fn artist_search_ignores_punctuation_accents_and_skipped_words() {
+        let file = fixture();
+        let connection = Connection::open(file.path()).unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO albums VALUES
+                    ('was-1', 'Born to Laugh at Tornadoes', 'Was (Not Was)', 1983, 1983, 9),
+                    ('boc-1', 'Agents of Fortune', 'Blue Öyster Cult', 1976, 1976, 9),
+                    ('boc-2', 'Secret Treaties', 'Blue Öyster Cult', 1974, 1974, 8),
+                    ('blue-1', 'Kind of Blue', 'Blue Note Players', 1959, 1959, 5);",
+            )
+            .unwrap();
+        drop(connection);
+        let names = |query: &str| -> Vec<String> {
+            artists_for_path(file.path(), query)
+                .artists
+                .into_iter()
+                .map(|artist| artist.name)
+                .collect()
+        };
+        assert_eq!(names("was not"), vec!["Was (Not Was)"]);
+        assert_eq!(names("Was Not Was"), vec!["Was (Not Was)"]);
+        assert_eq!(names("blue oyster"), vec!["Blue Öyster Cult"]);
+        assert_eq!(names("Blue Cult"), vec!["Blue Öyster Cult"]);
+        assert_eq!(names("öyster"), vec!["Blue Öyster Cult"]);
+        assert_eq!(names("oyst cult"), vec!["Blue Öyster Cult"]);
+        // Prefix matches outrank looser ones; "blue" also hits two artists.
+        assert_eq!(names("blue"), vec!["Blue Öyster Cult", "Blue Note Players"]);
+        assert!(names("???").is_empty());
+        assert_eq!(names("").len(), 4);
     }
 
     #[test]
