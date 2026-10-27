@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.0.91] - 2026-10-27
+
+### Fixed
+
+- **Connects to the Soulseek server on startup again.** Automatic connection used to
+  be started by the window, which may never load when Forever launches hidden in
+  the tray after a reboot, so you had to press Connect by hand. Forever now
+  connects from the app itself as soon as it starts, whenever Connect
+  automatically is on and a password is saved.
+
 ## [0.0.90] - 2026-10-26
 
 ### Added

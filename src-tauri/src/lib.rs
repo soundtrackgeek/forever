@@ -61,6 +61,8 @@ pub fn run() {
             ));
             stats::start(app.path().app_config_dir()?.join("stats.sqlite3"));
             desktop::initialize(app.handle());
+            app.state::<connection::ConnectionManager>()
+                .auto_connect_on_startup();
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())

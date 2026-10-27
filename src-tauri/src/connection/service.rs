@@ -637,6 +637,27 @@ impl ConnectionManager {
         Ok(self.current_snapshot())
     }
 
+    /// Connects at launch when the saved profile asks for it, without waiting for the webview
+    /// (which may never load while Forever starts hidden in the tray).
+    pub fn auto_connect_on_startup(&self) {
+        let Ok(Some(profile)) = self.settings.load() else {
+            return;
+        };
+        if !profile.auto_connect || !matches!(self.vault.has(&profile.username), Ok(true)) {
+            return;
+        }
+        if self.current_snapshot().state != ConnectionState::Offline {
+            return;
+        }
+        if let Err(error) = self.connect() {
+            self.diagnostics.record(
+                "warn",
+                "auto_connect_failed",
+                &format!("Automatic connection at startup failed: {error}"),
+            );
+        }
+    }
+
     pub fn disconnect(&self) -> Result<ConnectionSnapshot, ConnectionServiceError> {
         self.stop_active_task();
         let snapshot = match self.settings.load()? {
