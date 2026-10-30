@@ -2,6 +2,8 @@
 
 ## [0.0.94] - 2026-10-30
 
+Also includes the changes from 0.0.92 and 0.0.93, which were never released.
+
 ### Added
 
 - **Files search now shows albums by default.** A new "Albums only" option in
@@ -13,12 +15,13 @@
   Friday Night Lights, and "Download album" fetches the whole folder. The
   setting is saved with the search tab and pinned presets.
 
-### Fixed
+### Changed
 
-- **Releases publish again.** A Rust formatting mismatch had stopped the
-  release build since 0.0.92, so 0.0.92 and 0.0.93 never reached the updater.
-
-## [0.0.93] - 2026-10-27
+- **Smarter artist search in the Discovery shelf.** Searching your Archive now
+  ignores accents, punctuation and skipped words, and matches word beginnings
+  in any order. "was not" finds Was (Not Was); "Blue Oyster" and "Blue Cult"
+  both find Blue Öyster Cult. Names that start with what you typed are listed
+  first.
 
 ### Fixed
 
@@ -28,16 +31,8 @@
   are recognised as the Carpenters, Go-Go's and Mike & The Mechanics you have.
   Duos are matched by surname too: Hall & Oates is recognised as Daryl Hall &
   John Oates. A solo member such as John Oates is still suggested.
-
-## [0.0.92] - 2026-10-27
-
-### Changed
-
-- **Smarter artist search in the Discovery shelf.** Searching your Archive now
-  ignores accents, punctuation and skipped words, and matches word beginnings
-  in any order. "was not" finds Was (Not Was); "Blue Oyster" and "Blue Cult"
-  both find Blue Öyster Cult. Names that start with what you typed are listed
-  first.
+- **Releases publish again.** A Rust formatting mismatch had stopped the
+  release build since 0.0.92, so 0.0.92 and 0.0.93 never reached the updater.
 
 ## [0.0.91] - 2026-10-27
 
