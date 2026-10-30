@@ -365,10 +365,11 @@ fn artist_match_rank(name_words: &[String], query_words: &[String]) -> Option<u8
     {
         return Some(0);
     }
-    if query_words
-        .iter()
-        .all(|query| name_words.iter().any(|name| name.starts_with(query.as_str())))
-    {
+    if query_words.iter().all(|query| {
+        name_words
+            .iter()
+            .any(|name| name.starts_with(query.as_str()))
+    }) {
         return Some(1);
     }
     let joined = name_words.join(" ");

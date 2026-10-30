@@ -13,6 +13,11 @@
   Friday Night Lights, and "Download album" fetches the whole folder. The
   setting is saved with the search tab and pinned presets.
 
+### Fixed
+
+- **Releases publish again.** A Rust formatting mismatch had stopped the
+  release build since 0.0.92, so 0.0.92 and 0.0.93 never reached the updater.
+
 ## [0.0.93] - 2026-10-27
 
 ### Fixed
