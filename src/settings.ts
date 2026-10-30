@@ -155,12 +155,19 @@ export async function validateSettingsImport(json: string): Promise<Settings> {
     }
     return typeof input === typeof example && (typeof input !== "number" || Number.isFinite(input));
   };
+  // Older exports predate newer filter fields; fill their defaults before checking.
+  const withFilterDefaults = (item: unknown) => {
+    if (!item || typeof item !== "object") return item;
+    const filters = (item as { advancedFilters?: unknown }).advancedFilters;
+    return filters && typeof filters === "object" && !Array.isArray(filters)
+      ? { ...item, advancedFilters: { ...normalizeAdvancedFilters(null), ...filters } } : item;
+  };
   const profile = { username: "", serverHost: "", serverPort: 0, downloadDirectory: "", rememberPassword: false, autoConnect: false, listenPort: 0, automaticPortMapping: false, allowDistributedChildren: false };
   const root = { id: "", path: "", alias: "", enabled: false, addedAtMs: 0 };
   if (!value || value.version !== 1 || !shape({ ...value, connection: null }, defaultSettings())
     || (value.connection !== null && !shape(value.connection, profile))
     || !value.sharing.roots.every((item) => shape(item, root))
-    || !value.dialMemory.pinned.every((item) => shape(item, { id: "", mode: "", query: "", searchFilter: "", searchSort: "", searchLayout: "", albumFilter: "", advancedFilters: normalizeAdvancedFilters(null) }))
+    || !value.dialMemory.pinned.every((item) => shape(withFilterDefaults(item), { id: "", mode: "", query: "", searchFilter: "", searchSort: "", searchLayout: "", albumFilter: "", advancedFilters: normalizeAdvancedFilters(null) }))
     || !value.dialMemory.recent.every((item) => shape(item, { mode: "", query: "", closedAtMs: 0 }))) throw new Error("Invalid settings file.");
   if (value.transfers.bandwidth) { const error = validateBandwidth(value.transfers.bandwidth); if (error) throw new Error(error); }
   return value;

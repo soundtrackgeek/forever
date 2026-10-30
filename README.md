@@ -234,6 +234,11 @@ Provider reference: [MusicBrainz release-group search](https://musicbrainz.org/d
   depth, free upload slots, maximum queue length, size range (decimal MB),
   extensions, excluded path words, country, and blocked/ignored users;
   a per-user cap applies after sorting, counting whole sources in album view
+- **Albums only** (in Advanced filters, on by default) shows Files search results
+  as album folders: replies are grouped by each person's folder, loose files are
+  hidden, and you can set a minimum album track count (default 2). It finds albums
+  MusicBrainz album search leaves out, such as soundtracks, and downloads the whole
+  folder. Switch it off to see single songs
 - Click search column headers to reverse sorting, or use the sort menu for
   best match, readiness, speed, size, name, user, quality, track count, or format.
   Advanced filters and sort follow preset switching, duplication, and pinned

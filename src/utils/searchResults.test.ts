@@ -62,5 +62,8 @@ describe("search filters and ordering", () => {
   it("restores old presets with defaults and rejects invalid persisted filter values", () => {
     expect(normalizeAdvancedFilters(undefined)).toEqual(defaultAdvancedFilters);
     expect(normalizeAdvancedFilters({ minimumBitrate: -1, maximumQueue: "0", freeSlotOnly: "false", resultsPerUser: 2.9, minimumBitDepth: Infinity })).toEqual({ ...defaultAdvancedFilters, resultsPerUser: 2 });
+    expect(defaultAdvancedFilters.albumsOnly).toBe(true);
+    expect(normalizeAdvancedFilters({ albumsOnly: false, minimumAlbumTracks: 0.4 })).toEqual({ ...defaultAdvancedFilters, albumsOnly: false, minimumAlbumTracks: 1 });
+    expect(normalizeAdvancedFilters({ albumsOnly: "yes", minimumAlbumTracks: -3 })).toEqual(defaultAdvancedFilters);
   });
 });

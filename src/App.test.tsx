@@ -29,6 +29,10 @@ async function click(element: Element) {
   await act(async () => { fireEvent.click(element); });
   if (!vi.isFakeTimers()) await waitForWorkspace();
 }
+// Files search starts in Albums only; preview data is single files.
+async function showSingleFiles() {
+  await click(screen.getByLabelText("Albums only"));
+}
 
 describe("Forever shell", () => {
   it("opens real Settings after a fresh profile chooses to explore offline", async () => {
@@ -261,8 +265,9 @@ describe("Forever shell", () => {
     fireEvent.change(search, { target: { value: "unfindable transmission" } });
     fireEvent.keyDown(search, { key: "Enter" });
 
+    // Files search starts in Albums only.
     expect(
-      screen.getByRole("heading", { name: "Listening for responses" }),
+      screen.getByRole("heading", { name: "Listening for album folders" }),
     ).toBeInTheDocument();
 
     await waitFor(
@@ -277,6 +282,7 @@ describe("Forever shell", () => {
   it("filters preview results by real audio type counts", async () => {
     await renderApp();
     await click(screen.getByRole("button", { name: "Search" }));
+    await showSingleFiles();
 
     await click(screen.getByRole("button", { name: "All types" }));
     await click(screen.getByRole("menuitem", { name: "Compressed audio 1" }));
@@ -735,6 +741,7 @@ describe("Forever shell", () => {
   it("explores a user's complete shares and downloads a selection", async () => {
     await renderApp();
     await click(screen.getByRole("button", { name: "Search" }));
+    await showSingleFiles();
 
     await click(
       screen.getAllByRole("button", {
@@ -767,6 +774,7 @@ describe("Forever shell", () => {
   it("searches folders and expands or collapses the share hierarchy", async () => {
     await renderApp();
     await click(screen.getByRole("button", { name: "Search" }));
+    await showSingleFiles();
 
     await click(
       screen.getAllByRole("button", {
@@ -950,6 +958,7 @@ describe("Forever shell", () => {
   it("opens a user profile directly from a search result", async () => {
     await renderApp();
     await click(screen.getByRole("button", { name: "Search" }));
+    await showSingleFiles();
 
     await click(
       screen.getAllByRole("button", { name: "View audiophile92's profile" })[0],

@@ -45,6 +45,10 @@ type AlbumSourceResultsProps = {
   onOpenPerson: (username: string) => void;
   smartPreferences?: WantedPreferences;
   minimumTrackCount?: number | null;
+  // Plain file search grouped by "Albums only" (no MusicBrainz album).
+  folderAlbums?: boolean;
+  // Set when the search has no replies at all (nothing for filters to hide): the hint to show.
+  noRepliesHint?: string | null;
   officialTracks: AlbumTrack[];
   tracklistState: "idle" | "loading" | "ready" | "unavailable";
   artist: string;
@@ -172,9 +176,12 @@ export function AlbumSourceResults({
   personByUsername,
   onOpenPerson,
   minimumTrackCount,
+  folderAlbums = false,
+  noRepliesHint = null,
   officialTracks,
   tracklistState,
 }: AlbumSourceResultsProps) {
+  const looseFilesHint = folderAlbums ? "Turn off Albums only" : "Try Individual files";
   const [preparingSourceId, setPreparingSourceId] = useState<string | null>(null);
   const [openConfidenceSourceId, setOpenConfidenceSourceId] = useState<string | null>(null);
   const [confirmingSourceId, setConfirmingSourceId] = useState<string | null>(null);
@@ -254,13 +261,15 @@ export function AlbumSourceResults({
               ) : (
                 <FolderOpen size={28} weight="light" />
               )}
-              <h3>{searching ? "Listening for album folders" : minimumTrackCount ? "No complete album folders yet" : "No album folders found"}</h3>
+              <h3>{searching ? "Listening for album folders" : noRepliesHint ? "No signals found" : minimumTrackCount ? "No complete album folders yet" : "No album folders found"}</h3>
               <p>
                 {searching
                   ? "Sources will group here as people respond."
+                  : noRepliesHint
+                    ? noRepliesHint
                   : minimumTrackCount
-                    ? `Forever is hiding folders below your ${minimumTrackCount}-track minimum. Try Individual files if you want to inspect every reply.`
-                  : "Adjust or reset the filters, try Individual files, or search for a broader release title."}
+                    ? `Forever is hiding folders below your ${minimumTrackCount}-track minimum. ${looseFilesHint} if you want to inspect every reply.`
+                  : `Adjust or reset the filters, ${looseFilesHint.toLowerCase()}, or search for a broader release title.`}
               </p>
             </div>
           )}>

@@ -12,7 +12,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdvancedFilters {
     pub minimum_bitrate: Option<f64>,
@@ -27,6 +27,34 @@ pub struct AdvancedFilters {
     pub extensions: String,
     pub excluded_words: String,
     pub countries: String,
+    /// Files mode: show per-user album folders instead of loose files (on by default).
+    #[serde(default = "albums_only_default")]
+    pub albums_only: bool,
+    #[serde(default)]
+    pub minimum_album_tracks: Option<f64>,
+}
+fn albums_only_default() -> bool {
+    true
+}
+impl Default for AdvancedFilters {
+    fn default() -> Self {
+        Self {
+            minimum_bitrate: None,
+            minimum_sample_rate: None,
+            minimum_bit_depth: None,
+            maximum_queue: None,
+            minimum_size_mb: None,
+            maximum_size_mb: None,
+            results_per_user: None,
+            free_slot_only: false,
+            hide_blocked_ignored: false,
+            extensions: String::new(),
+            excluded_words: String::new(),
+            countries: String::new(),
+            albums_only: albums_only_default(),
+            minimum_album_tracks: None,
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -100,6 +128,7 @@ impl DialMemory {
                     a.minimum_size_mb,
                     a.maximum_size_mb,
                     a.results_per_user,
+                    a.minimum_album_tracks,
                 ]
                 .into_iter()
                 .flatten()
@@ -573,6 +602,33 @@ mod tests {
         let mut invalid = serde_json::to_value(next).unwrap();
         invalid["desktop"]["autostartEnabled"] = true.into();
         assert!(parse_import(&invalid.to_string()).is_err());
+    }
+
+    #[test]
+    fn album_folder_filters_default_on_for_older_presets_and_reject_negative_minimums() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        let mut filters = serde_json::to_value(AdvancedFilters::default()).unwrap();
+        let fields = filters.as_object_mut().unwrap();
+        fields.remove("albumsOnly");
+        fields.remove("minimumAlbumTracks");
+        value["dialMemory"]["pinned"] = serde_json::json!([{
+            "id": "p", "mode": "files", "query": "friday night lights", "searchFilter": "all",
+            "searchSort": "best", "searchLayout": "list", "albumFilter": "all",
+            "advancedFilters": filters,
+        }]);
+        let settings = parse_import(&value.to_string()).unwrap();
+        let restored = &settings.dial_memory.pinned[0].advanced_filters;
+        assert!(restored.albums_only);
+        assert_eq!(restored.minimum_album_tracks, None);
+
+        value["dialMemory"]["pinned"][0]["advancedFilters"]["albumsOnly"] = false.into();
+        value["dialMemory"]["pinned"][0]["advancedFilters"]["minimumAlbumTracks"] = 8.into();
+        let settings = parse_import(&value.to_string()).unwrap();
+        let restored = &settings.dial_memory.pinned[0].advanced_filters;
+        assert!(!restored.albums_only);
+        assert_eq!(restored.minimum_album_tracks, Some(8.0));
+        value["dialMemory"]["pinned"][0]["advancedFilters"]["minimumAlbumTracks"] = (-1).into();
+        assert!(parse_import(&value.to_string()).is_err());
     }
 
     #[test]

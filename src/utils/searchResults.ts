@@ -23,28 +23,38 @@ export type AdvancedSearchFilters = {
   countries: string;
   hideBlockedIgnored: boolean;
   resultsPerUser: number | null;
+  // Files mode only (on by default): group replies into per-user folders and hide loose files.
+  albumsOnly: boolean;
+  // Audio tracks a folder needs to count as an album (null = default of 2).
+  minimumAlbumTracks: number | null;
 };
 export const defaultAdvancedFilters: AdvancedSearchFilters = {
   minimumBitrate: null, minimumSampleRate: null, minimumBitDepth: null,
   freeSlotOnly: false, maximumQueue: null, minimumSizeMb: null, maximumSizeMb: null,
   extensions: "", excludedWords: "", countries: "", hideBlockedIgnored: false, resultsPerUser: null,
+  albumsOnly: true, minimumAlbumTracks: null,
 };
+export const defaultMinimumAlbumTracks = 2;
+const atLeastOneKeys = new Set<keyof AdvancedSearchFilters>(["resultsPerUser", "minimumAlbumTracks"]);
+export const filterMinimum = (key: keyof AdvancedSearchFilters) => atLeastOneKeys.has(key) ? 1 : 0;
 
 // Older pinned presets have no advanced settings. Never trust persisted values.
 export function normalizeAdvancedFilters(value: unknown): AdvancedSearchFilters {
   const result = { ...defaultAdvancedFilters };
   if (!value || typeof value !== "object") return result;
   const data = value as Record<string, unknown>;
-  for (const key of ["minimumBitrate", "minimumSampleRate", "minimumBitDepth", "maximumQueue", "minimumSizeMb", "maximumSizeMb", "resultsPerUser"] as const) {
+  for (const key of ["minimumBitrate", "minimumSampleRate", "minimumBitDepth", "maximumQueue", "minimumSizeMb", "maximumSizeMb", "resultsPerUser", "minimumAlbumTracks"] as const) {
     const number = data[key];
     result[key] = typeof number === "number" && Number.isFinite(number) && number >= 0
-      ? key === "resultsPerUser" ? Math.max(1, Math.floor(number)) : number : null;
+      ? atLeastOneKeys.has(key) ? Math.max(1, Math.floor(number)) : number : null;
   }
   for (const key of ["extensions", "excludedWords", "countries"] as const) {
     result[key] = typeof data[key] === "string" ? data[key].slice(0, 500) : "";
   }
   result.freeSlotOnly = data.freeSlotOnly === true;
   result.hideBlockedIgnored = data.hideBlockedIgnored === true;
+  // Presets saved before this setting existed get the default (albums).
+  result.albumsOnly = typeof data.albumsOnly === "boolean" ? data.albumsOnly : defaultAdvancedFilters.albumsOnly;
   return result;
 }
 

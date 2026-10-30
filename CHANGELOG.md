@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.0.94] - 2026-10-30
+
+### Added
+
+- **Files search now shows albums by default.** A new "Albums only" option in
+  Advanced filters, on by default, shows album folders instead of single files;
+  switch it off to see single songs. Replies are grouped by
+  each person's folder (CD1/CD2 subfolders count as one album), and you can set
+  a minimum number of tracks per album (default 2). This finds albums that
+  Albums search does not show, such as soundtracks like Explosions in the Sky's
+  Friday Night Lights, and "Download album" fetches the whole folder. The
+  setting is saved with the search tab and pinned presets.
+
 ## [0.0.93] - 2026-10-27
 
 ### Fixed

@@ -51,7 +51,7 @@ import { useRankedSources } from "../hooks/useMatching";
 import { AdvancedSearchFilters } from "./AdvancedSearchFilters";
 import { VirtualResultList, type ResultScrollMemory } from "./VirtualResultList";
 import { SearchSortHeader } from "./SearchSortHeader";
-import { capResultsPerUser, createSearchPredicates, sortSearchItems, sortLabels, losslessFormats, compressedFormats,
+import { capResultsPerUser, createSearchPredicates, sortSearchItems, sortLabels, losslessFormats, compressedFormats, defaultMinimumAlbumTracks,
   type AdvancedSearchFilters as AdvancedFilters, type SearchFilter, type SearchSort } from "../utils/searchResults";
 export type { SearchFilter, SearchSort } from "../utils/searchResults";
 export type AlbumResultView = "sources" | "files";
@@ -100,6 +100,7 @@ type SearchWorkspaceProps = {
 };
 
 const emptyOfficialTracks: AlbumTrack[] = [];
+const noAlbumSources: AlbumSource[] = [];
 const resultKey = (result: SearchResult) => result.id;
 const neutralAlbumPreferences: WantedPreferences = {
   formatPreference: "any",
@@ -240,16 +241,18 @@ export function SearchWorkspace({
   const compressedCount = results.filter((result) =>
     compressedFormats.has(result.format),
   ).length;
+  // "Albums only" turns a plain file search into per-user folders, no MusicBrainz needed.
+  const folderAlbums = !albumContext && advancedFilters.albumsOnly;
   const albumSources = useMemo(
-    () => albumContext ? groupAlbumSources(deferredResults) : [],
-    [deferredResults, albumContext],
+    () => albumContext || folderAlbums ? groupAlbumSources(deferredResults) : noAlbumSources,
+    [deferredResults, albumContext, folderAlbums],
   );
+  const minimumAlbumTracks = folderAlbums
+    ? advancedFilters.minimumAlbumTracks ?? defaultMinimumAlbumTracks
+    : Math.max(albumContext?.minimumTrackCount ?? 0, advancedFilters.minimumAlbumTracks ?? 0) || null;
   const qualifiedAlbumSources = useMemo(
-    () => albumSourcesMeetingTrackMinimum(
-      albumSources,
-      albumContext?.minimumTrackCount,
-    ),
-    [albumContext?.minimumTrackCount, albumSources],
+    () => albumSourcesMeetingTrackMinimum(albumSources, minimumAlbumTracks),
+    [minimumAlbumTracks, albumSources],
   );
   const sourceCounts = useMemo(() => {
     let lossless = 0;
@@ -263,7 +266,8 @@ export function SearchWorkspace({
 
   const predicates = useMemo(() => createSearchPredicates(filter, advancedFilters, personByUsername), [filter, advancedFilters, personByUsername]);
   const visibleResults = useMemo(() => capResultsPerUser(sortSearchItems(deferredResults.filter(predicates.file), sort), advancedFilters.resultsPerUser), [deferredResults, predicates, sort, advancedFilters.resultsPerUser]);
-  const ranking = useRankedSources(qualifiedAlbumSources, wantedAlbum?.preferences ?? neutralAlbumPreferences, officialTracks, albumContext?.artist ?? "");
+  // Ranking compares against an official tracklist, so folder albums skip it.
+  const ranking = useRankedSources(albumContext ? qualifiedAlbumSources : noAlbumSources, wantedAlbum?.preferences ?? neutralAlbumPreferences, officialTracks, albumContext?.artist ?? "");
   const visibleAlbumSources = useMemo(() => {
     const base = sort === "best" && officialTracks.length > 0 && !ranking.pending && !ranking.error
       ? ranking.ranked.map((match) => match.source) : qualifiedAlbumSources;
@@ -271,7 +275,7 @@ export function SearchWorkspace({
   }, [qualifiedAlbumSources, ranking, officialTracks.length, predicates, sort, advancedFilters.resultsPerUser]);
   const listSignature = JSON.stringify([filter, advancedFilters, sort, search.token]);
 
-  const showingAlbumSources = Boolean(albumContext) && albumResultView === "sources";
+  const showingAlbumSources = (Boolean(albumContext) && albumResultView === "sources") || folderAlbums;
   const visibleCount = showingAlbumSources
     ? visibleAlbumSources.length
     : visibleResults.length;
@@ -506,9 +510,9 @@ export function SearchWorkspace({
               <dt>Files</dt>
               <dd>{showingAlbumSources ? qualifiedFileCount : search.resultCount}</dd>
             </div>
-            {albumContext ? (
+            {albumContext || folderAlbums ? (
               <div>
-                <dt>Sources</dt>
+                <dt>{folderAlbums ? "Albums" : "Sources"}</dt>
                 <dd>{showingAlbumSources ? qualifiedAlbumSources.length : albumSources.length}</dd>
               </div>
             ) : null}
@@ -539,7 +543,11 @@ export function SearchWorkspace({
           </strong>
           <span>
             {visibleCount}{" "}
-            {showingAlbumSources
+            {folderAlbums
+              ? visibleCount === 1
+                ? "album folder"
+                : "album folders"
+              : showingAlbumSources
               ? visibleCount === 1
                 ? "album source"
                 : "album sources"
@@ -553,7 +561,7 @@ export function SearchWorkspace({
           </span>
         </p>
         <div className="results-actions">
-          <AdvancedSearchFilters value={advancedFilters} onChange={onAdvancedFiltersChange} albumSources={showingAlbumSources} />
+          <AdvancedSearchFilters value={advancedFilters} onChange={onAdvancedFiltersChange} albumSources={showingAlbumSources} albumSearch={Boolean(albumContext)} />
           {albumContext ? (
             <div className="album-result-view-switch" role="tablist" aria-label="Soulseek result view">
               <button
@@ -650,7 +658,11 @@ export function SearchWorkspace({
           personByUsername={personByUsername}
           onOpenPerson={onOpenPerson}
           smartPreferences={wantedAlbum?.preferences}
-          minimumTrackCount={albumContext?.minimumTrackCount}
+          minimumTrackCount={minimumAlbumTracks}
+          folderAlbums={folderAlbums}
+          noRepliesHint={results.length ? null : search.state === "idle"
+            ? "Search for an artist, album, track, or filename."
+            : "Try a broader artist, album, or track name."}
           officialTracks={officialTracks}
           tracklistState={tracklistState}
           artist={albumContext?.artist ?? ""}
