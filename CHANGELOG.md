@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.0.95] - 2026-10-31
+
+### Fixed
+
+- **Download album works for Discogs-only Discovery albums.** Their album id
+  (for example `discogs:123456`) was sent to the transfer queue as a
+  MusicBrainz release group id, so every album download from that source page
+  was rejected with the misleading "Choose at least one valid file before
+  downloading the release." These albums now download with the folder's own
+  track count, matching what browsing the same listener folder already did.
+
 ## [0.0.94] - 2026-10-30
 
 Also includes the changes from 0.0.92 and 0.0.93, which were never released.

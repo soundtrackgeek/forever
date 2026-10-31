@@ -42,6 +42,7 @@ import {
   type AlbumDownloadState,
 } from "../utils/albumDownloadState";
 import { groupAlbumSources } from "../utils/albumSources";
+import { musicBrainzId } from "../utils/musicBrainzId";
 import { tracklistConfidenceForInspection } from "../utils/tracklistConfidence";
 import { groupTransfers } from "../utils/transfers";
 import {
@@ -640,8 +641,12 @@ export function useShellController() {
       source.representative,
       source.folders,
     );
+    // Discogs-only Discovery albums carry a `discogs:<master>` id, which is not
+    // a MusicBrainz release group. Sending it as one made the queue reject the
+    // whole folder as an invalid release.
+    const releaseGroupId = musicBrainzId(context?.albumId);
     const expectedTrackCount = await expectedTrackCountFor(
-      context?.albumId ?? null,
+      releaseGroupId,
       source.tracks.length,
     );
     await transfers.enqueueRelease({
@@ -650,7 +655,7 @@ export function useShellController() {
       remoteFolder: inspection.requestedFolder,
       files: inspection.files,
       expectedTrackCount,
-      releaseGroupId: context?.albumId ?? null,
+      releaseGroupId,
       searchAlbum: context
         ? { artist: context.artist, title: context.title }
         : null,
