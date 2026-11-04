@@ -73,6 +73,7 @@ type TransfersWorkspaceProps = {
   personByUsername: (username: string) => PersonProfile | null;
   onOpenPerson: (username: string) => void;
   onCancelUpload: (id: string) => void;
+  onRetryUpload: (id: string) => void;
   onClearFinishedUploads: () => void;
   onDismissUploadError: () => void;
   focusTarget?: { groupId: string; requestId: number } | null;
@@ -193,6 +194,7 @@ export function TransfersWorkspace({
   personByUsername,
   onOpenPerson,
   onCancelUpload,
+  onRetryUpload,
   onClearFinishedUploads,
   onDismissUploadError,
   focusTarget = null,
@@ -527,9 +529,16 @@ export function TransfersWorkspace({
                   <i><b style={{ width: `${progress}%` }} /></i>
                   <small>{formatBytes(upload.transferredBytes)} / {formatBytes(upload.sizeBytes)}{upload.speedBytesPerSecond ? ` · ${formatBytes(upload.speedBytesPerSecond)}/s` : ""}{upload.etaSeconds !== null && upload.status === "uploading" ? ` · ${formatEta(upload.etaSeconds)}` : ""}</small>
                 </span>
-                <button type="button" onClick={() => onCancelUpload(upload.id)} aria-label={`${finished ? "Remove" : "Cancel"} upload ${upload.filename}`}>
-                  <X size={15} /> <small>{finished ? "Remove" : "Cancel"}</small>
-                </button>
+                <span className="upload-transfer-actions">
+                  {upload.status === "failed" ? (
+                    <button type="button" onClick={() => onRetryUpload(upload.id)} aria-label={`Retry upload ${upload.filename}`}>
+                      <ArrowClockwise size={15} /> <small>Retry</small>
+                    </button>
+                  ) : null}
+                  <button type="button" onClick={() => onCancelUpload(upload.id)} aria-label={`${finished ? "Remove" : "Cancel"} upload ${upload.filename}`}>
+                    <X size={15} /> <small>{finished ? "Remove" : "Cancel"}</small>
+                  </button>
+                </span>
                 {upload.error ? <p>{upload.error}</p> : null}
               </article>
             );

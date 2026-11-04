@@ -182,6 +182,31 @@ export function useLocalSharing() {
     [native],
   );
 
+  const retryUpload = useCallback(
+    async (id: string) => {
+      if (!native) {
+        setUploads((current) => ({
+          ...current,
+          uploads: current.uploads.map((upload) =>
+            upload.id === id && upload.status === "failed"
+              ? { ...upload, status: "queued" as const, error: null }
+              : upload,
+          ),
+        }));
+        return;
+      }
+      try {
+        setError(null);
+        const snapshot = await invoke<UploadQueueSnapshot>("upload_retry", { id });
+        setUploads(snapshot);
+      } catch (cause) {
+        setError(errorMessage(cause));
+        throw cause;
+      }
+    },
+    [native],
+  );
+
   const clearFinishedUploads = useCallback(async () => {
     if (!native) {
       setUploads((current) => ({
@@ -213,6 +238,7 @@ export function useLocalSharing() {
     setUploadSlots,
     setUploadPolicy,
     cancelUpload,
+    retryUpload,
     clearFinishedUploads,
     clearError: () => setError(null),
   };

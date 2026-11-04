@@ -194,6 +194,7 @@ pub fn run() {
             connection::local_shares_set_upload_policy,
             connection::uploads_snapshot,
             connection::upload_cancel,
+            connection::upload_retry,
             connection::upload_clear_finished,
             connection::people_snapshot,
             connection::people_profile,

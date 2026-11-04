@@ -363,7 +363,11 @@ pub(super) fn spawn_outbound_upload_control_peer(
     };
     tauri::async_runtime::spawn(async move {
         let _permit = permit;
-        let result = async {
+        // The direct route races the indirect one (the downloader connecting to
+        // us after the server relays ConnectToPeer). Failing to reach the
+        // downloader directly is normal for firewalled peers, so it must not
+        // fail the upload: the indirect route and its request timeout decide.
+        let connected = async {
             let mut stream = timeout(
                 PEER_CONNECT_TIMEOUT,
                 TcpStream::connect((address.address, address.port as u16)),
@@ -372,14 +376,19 @@ pub(super) fn spawn_outbound_upload_control_peer(
             .map_err(|_| peer_timeout_error())??;
             let _ = stream.set_nodelay(true);
             write_raw_frame(&mut stream, &peer_init_frame(&own_username, "P")).await?;
-            let claimed = services
-                .uploads
-                .claim_control(ticket.connection_token)
-                .ok_or_else(peer_timeout_error)?;
-            negotiate_upload_on_peer(&mut stream, claimed, services.clone()).await
+            Ok::<_, ProtocolError>(stream)
         }
         .await;
-        if let Err(error) = result {
+        let Ok(mut stream) = connected else {
+            return;
+        };
+        // Losing the claim means the indirect route already owns the handshake.
+        let Some(claimed) = services.uploads.claim_control(ticket.connection_token) else {
+            return;
+        };
+        // Once this route owns the control channel nothing else can recover
+        // the attempt, so a failure here is final.
+        if let Err(error) = negotiate_upload_on_peer(&mut stream, claimed, services.clone()).await {
             if services.uploads.fail_connection(
                 ticket.connection_token,
                 format!("The downloader did not accept the upload: {error}"),

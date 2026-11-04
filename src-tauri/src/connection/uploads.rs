@@ -544,6 +544,57 @@ impl UploadHub {
         Ok(self.snapshot())
     }
 
+    /// Puts a failed upload back in the queue. If the same user already has the
+    /// same file waiting, the failed record is dropped instead of duplicated.
+    pub fn retry(&self, id: &str) -> Result<UploadQueueSnapshot, UploadError> {
+        {
+            let mut uploads = self
+                .uploads
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let index = uploads
+                .iter()
+                .position(|upload| upload.id == id && upload.status == UploadStatus::Failed)
+                .ok_or(UploadError::NotFound)?;
+            let duplicate = uploads.iter().any(|other| {
+                !other.status.finished()
+                    && other
+                        .username
+                        .eq_ignore_ascii_case(&uploads[index].username)
+                    && other
+                        .remote_filename
+                        .eq_ignore_ascii_case(&uploads[index].remote_filename)
+            });
+            if duplicate {
+                uploads.remove(index);
+            } else {
+                if uploads
+                    .iter()
+                    .filter(|upload| !upload.status.finished())
+                    .count()
+                    >= MAX_UPLOAD_QUEUE
+                {
+                    return Err(UploadError::QueueFull);
+                }
+                let (username, size) = (uploads[index].username.clone(), uploads[index].size_bytes);
+                let policy = self
+                    .scheduler
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .policy
+                    .clone();
+                check_user_limits(&uploads, &username, size, &policy)?;
+                let upload = &mut uploads[index];
+                reset_pending(upload);
+                upload.updated_at_ms = timestamp_ms();
+            }
+            self.refresh_queue_positions(&mut uploads);
+            let _ = self.persist(&uploads);
+        }
+        self.publish();
+        Ok(self.snapshot())
+    }
+
     pub fn clear_finished(&self) -> UploadQueueSnapshot {
         {
             let mut uploads = self
@@ -1187,6 +1238,37 @@ mod tests {
         assert_eq!(hub.snapshot().uploads[0].transferred_bytes, 0);
         hub.cancel(&new.id).unwrap();
         assert!(cancellation.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn failed_uploads_can_be_retried_once_and_only_when_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = hub(dir.path());
+        queue(&hub, "A", 1);
+        let ticket = hub.activate_next(1, 1).unwrap();
+        assert!(matches!(hub.retry(&ticket.id), Err(UploadError::NotFound)));
+        hub.fail_attempt(&ticket.id, ticket.transfer_token, "timed out".into());
+        assert_eq!(hub.snapshot().uploads[0].status, UploadStatus::Failed);
+
+        let snapshot = hub.retry(&ticket.id).unwrap();
+        assert_eq!(snapshot.uploads[0].status, UploadStatus::Queued);
+        assert_eq!(snapshot.uploads[0].error, None);
+        assert!(hub.activate_next(2, 1).is_some());
+    }
+
+    #[test]
+    fn retrying_a_failed_upload_does_not_duplicate_a_waiting_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = hub(dir.path());
+        queue(&hub, "A", 1);
+        let ticket = hub.activate_next(1, 1).unwrap();
+        hub.fail_attempt(&ticket.id, ticket.transfer_token, "timed out".into());
+        queue(&hub, "A", 1);
+        assert_eq!(hub.snapshot().uploads.len(), 2);
+
+        let snapshot = hub.retry(&ticket.id).unwrap();
+        assert_eq!(snapshot.uploads.len(), 1);
+        assert_eq!(snapshot.uploads[0].status, UploadStatus::Queued);
     }
 
     #[test]

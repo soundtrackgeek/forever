@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.0.96] - 2026-11-04
+
+### Added
+
+- **Retry button for failed uploads.** On the Uploads tab, a failed upload now
+  has a Retry button next to Remove that puts it back in the queue, so you no
+  longer have to wait for the downloader to ask for the file again. If the same
+  person already has that file waiting, the failed entry is simply removed
+  instead of being queued twice.
+
+### Fixed
+
+- **Uploads no longer fail with "The downloader did not accept the upload:
+  Soulseek peer timed out" for people behind a firewall.** Forever tries to
+  reach the downloader directly and also asks the server to have them connect
+  to you. When the direct attempt failed (typically after 8 seconds), the whole
+  upload was marked failed even though the other route was still working, so
+  firewalled downloaders could never get your files. A failed direct attempt
+  is now ignored while the other route can still succeed; the upload only
+  fails if the other route also times out.
+
 ## [0.0.95] - 2026-10-31
 
 ### Fixed

@@ -1,6 +1,6 @@
 import { createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { Transfer } from "../types";
+import type { Transfer, Upload } from "../types";
 import { TransfersWorkspace } from "./TransfersWorkspace";
 
 const releaseTransfer = (
@@ -65,6 +65,7 @@ describe("TransfersWorkspace signal order", () => {
         personByUsername={() => null}
         onOpenPerson={vi.fn()}
         onCancelUpload={vi.fn()}
+        onRetryUpload={vi.fn()}
         onClearFinishedUploads={vi.fn()}
         onDismissUploadError={vi.fn()}
       />,
@@ -122,6 +123,7 @@ describe("TransfersWorkspace signal order", () => {
         personByUsername={() => null}
         onOpenPerson={vi.fn()}
         onCancelUpload={vi.fn()}
+        onRetryUpload={vi.fn()}
         onClearFinishedUploads={vi.fn()}
         onDismissUploadError={vi.fn()}
       />,
@@ -262,6 +264,7 @@ describe("TransfersWorkspace signal order", () => {
         personByUsername={() => null}
         onOpenPerson={vi.fn()}
         onCancelUpload={vi.fn()}
+        onRetryUpload={vi.fn()}
         onClearFinishedUploads={vi.fn()}
         onDismissUploadError={vi.fn()}
       />,
@@ -346,6 +349,7 @@ describe("TransfersWorkspace signal order", () => {
         personByUsername={() => null}
         onOpenPerson={vi.fn()}
         onCancelUpload={vi.fn()}
+        onRetryUpload={vi.fn()}
         onClearFinishedUploads={vi.fn()}
         onDismissUploadError={vi.fn()}
       />,
@@ -358,5 +362,65 @@ describe("TransfersWorkspace signal order", () => {
     expect(within(release).getAllByText("Filed away in Music Library")).toHaveLength(2);
     expect(within(release).getByText(/Archive owns album · Checked 2m ago/)).toBeInTheDocument();
     expect(within(release).queryByText("Needs attention")).not.toBeInTheDocument();
+  });
+
+  it("offers Retry only on failed uploads", () => {
+    const upload = (id: string, status: Upload["status"]): Upload => ({
+      id,
+      username: "ElectroDevil-138",
+      remoteFilename: `Music\${id}.mp3`,
+      filename: `${id}.mp3`,
+      sizeBytes: 1_000,
+      transferredBytes: 0,
+      speedBytesPerSecond: 0,
+      etaSeconds: null,
+      status,
+      queuePosition: null,
+      error: status === "failed" ? "Soulseek peer timed out" : null,
+      createdAtMs: 1,
+      updatedAtMs: 1,
+    });
+    const onRetryUpload = vi.fn();
+    render(
+      <TransfersWorkspace
+        safetyState="running"
+        maxConcurrentDownloads={3}
+        relaySuggestionMinutes={10}
+        relayRecords={{}}
+        online
+        archiveOwnedReleaseIds={new Set()}
+        transfers={[]}
+        uploads={[upload("broken", "failed"), upload("waiting", "queued")]}
+        uploadError={null}
+        error={null}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onCancel={vi.fn()}
+        onReveal={vi.fn()}
+        onPauseRelease={vi.fn()}
+        onResumeRelease={vi.fn()}
+        onCancelRelease={vi.fn()}
+        onRevealRelease={vi.fn()}
+        onReorderRelease={vi.fn()}
+        onClearCompleted={vi.fn()}
+        onVerifyRelease={vi.fn()}
+        onRetryReleaseIssues={vi.fn()}
+        onSwitchReleaseSource={vi.fn()}
+        onFindAlternatives={vi.fn()}
+        onRelayReleaseSource={vi.fn().mockResolvedValue(undefined)}
+        onDismissError={vi.fn()}
+        personByUsername={() => null}
+        onOpenPerson={vi.fn()}
+        onCancelUpload={vi.fn()}
+        onRetryUpload={onRetryUpload}
+        onClearFinishedUploads={vi.fn()}
+        onDismissUploadError={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /Uploads/ }));
+    expect(screen.getAllByRole("button", { name: /^Retry upload/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Retry upload broken.mp3" }));
+    expect(onRetryUpload).toHaveBeenCalledWith("broken");
   });
 });

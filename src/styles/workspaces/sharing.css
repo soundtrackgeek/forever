@@ -69,8 +69,9 @@
 .upload-transfer-progress > span { display: flex; justify-content: space-between; color: #c9c8d2; font-size: 9px; }
 .upload-transfer-progress > i { height: 3px; overflow: hidden; background: #242a3b; border-radius: var(--radius-sm); }
 .upload-transfer-progress > i b { display: block; height: 100%; background: linear-gradient(90deg, #7058ad, #b18aec); }
-.upload-transfer-card > button { display: inline-flex; min-height: 31px; align-items: center; justify-content: center; gap: 5px; color: #969aac; background: #151a2a; border: 1px solid #333a4f; border-radius: var(--radius-md); cursor: pointer; }
-.upload-transfer-card > button small { font-size: 8px; }
+.upload-transfer-actions { display: grid; gap: 6px; }
+.upload-transfer-card > button, .upload-transfer-actions > button { display: inline-flex; min-height: 31px; align-items: center; justify-content: center; gap: 5px; color: #969aac; background: #151a2a; border: 1px solid #333a4f; border-radius: var(--radius-md); cursor: pointer; }
+.upload-transfer-card > button small, .upload-transfer-actions > button small { font-size: 8px; }
 .upload-transfer-card > p { grid-column: 2 / -1; margin: -4px 0 0; color: #df969d; font-size: 8px; }
 
 @media (max-width: 900px) {

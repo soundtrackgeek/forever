@@ -1341,6 +1341,12 @@ impl ConnectionManager {
         Ok(snapshot)
     }
 
+    pub fn retry_upload(&self, id: &str) -> Result<UploadQueueSnapshot, ConnectionServiceError> {
+        let snapshot = self.uploads.retry(id)?;
+        self.schedule_uploads();
+        Ok(snapshot)
+    }
+
     pub fn clear_finished_uploads(&self) -> UploadQueueSnapshot {
         self.uploads.clear_finished()
     }

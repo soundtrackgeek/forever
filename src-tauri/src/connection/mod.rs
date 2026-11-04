@@ -547,6 +547,14 @@ pub async fn upload_cancel(
 }
 
 #[tauri::command]
+pub async fn upload_retry(
+    manager: State<'_, ConnectionManager>,
+    id: String,
+) -> Result<uploads::UploadQueueSnapshot, String> {
+    manager.retry_upload(&id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn upload_clear_finished(
     manager: State<'_, ConnectionManager>,
 ) -> Result<uploads::UploadQueueSnapshot, String> {

@@ -82,6 +82,9 @@ export default function TransfersRoute() {
       onCancelUpload={(id) =>
         void sharing.cancelUpload(id).catch(() => undefined)
       }
+      onRetryUpload={(id) =>
+        void sharing.retryUpload(id).catch(() => undefined)
+      }
       onClearFinishedUploads={() =>
         void sharing.clearFinishedUploads().catch(() => undefined)
       }
