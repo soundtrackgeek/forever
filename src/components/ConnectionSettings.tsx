@@ -75,6 +75,8 @@ type ConnectionSettingsProps = {
   relaySuggestionMinutes: number;
   autoMirrorMinutes: number;
   onSetAutoMirrorMinutes: (minutes: number) => Promise<void>;
+  maxAlbumSizeMb: number;
+  onSetMaxAlbumSizeMb: (megabytes: number) => Promise<void>;
   onSetRelaySuggestionMinutes: (minutes: number) => Promise<unknown>;
   soundcheckEnabled: boolean;
   onSetSoundcheckEnabled: (enabled: boolean) => Promise<unknown>;
@@ -90,6 +92,13 @@ const formatBytes = (bytes: number) => {
   if (bytes < 1_000_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
   return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
 };
+
+// A single album is rarely over 1 GB even as hi-res FLAC; box sets may need more.
+const ALBUM_SIZE_CHOICES = [250, 500, 1024, 2048, 4096, 10240, 0];
+const albumSizeChoices = (current: number) =>
+  ALBUM_SIZE_CHOICES.includes(current) ? ALBUM_SIZE_CHOICES : [...ALBUM_SIZE_CHOICES.slice(0, -1), current, 0].sort((a, b) => (a || Infinity) - (b || Infinity));
+const albumSizeLabel = (megabytes: number) =>
+  megabytes === 0 ? "No limit" : megabytes >= 1024 && megabytes % 1024 === 0 ? `${megabytes / 1024} GB` : `${megabytes} MB`;
 
 const statusLabels: Record<ConnectionSnapshot["state"], string> = {
   unconfigured: "Not configured",
@@ -160,6 +169,8 @@ export function ConnectionSettings({
   relaySuggestionMinutes,
   autoMirrorMinutes,
   onSetAutoMirrorMinutes,
+  maxAlbumSizeMb,
+  onSetMaxAlbumSizeMb,
   onSetRelaySuggestionMinutes,
   soundcheckEnabled,
   onSetSoundcheckEnabled,
@@ -464,6 +475,12 @@ export function ConnectionSettings({
               <span><strong>Auto-switch to exact mirrors</strong><small>Off by default. Switch after this long without a start, only when every unfinished filename and size matches. Other replacements need your approval.</small></span>
               <select aria-label="Auto-switch to exact mirrors" value={autoMirrorMinutes} onChange={(event) => void onSetAutoMirrorMinutes(Number(event.target.value)).catch(() => undefined)}>
                 {[0, 5, 10, 20, 30, 60].map((minutes) => <option value={minutes} key={minutes}>{minutes === 0 ? "Off" : `${minutes} min`}</option>)}
+              </select>
+            </label>
+            <label className="download-lanes-field signal-relay-setting">
+              <span><strong>Largest album to download</strong><small>Refuse folders bigger than this. A huge "album" is usually someone's whole share or a fake release.</small></span>
+              <select aria-label="Largest album to download" value={maxAlbumSizeMb} onChange={(event) => void onSetMaxAlbumSizeMb(Number(event.target.value)).catch(() => undefined)}>
+                {albumSizeChoices(maxAlbumSizeMb).map((megabytes) => <option value={megabytes} key={megabytes}>{albumSizeLabel(megabytes)}</option>)}
               </select>
             </label>
             <label className="download-lanes-field soundcheck-setting">

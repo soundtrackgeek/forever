@@ -1,5 +1,5 @@
 import { ConnectionSettings } from "../../components/ConnectionSettings";
-import { savePreference } from "../../settings";
+import { DEFAULT_MAX_ALBUM_SIZE_MB, savePreference } from "../../settings";
 import { normalizeMusicBrainzFallbackTrackCount } from "../../utils/musicbrainzFallback";
 import { useShell } from "../shellStore";
 
@@ -84,6 +84,8 @@ export default function SettingsRoute() {
       onSetRelaySuggestionMinutes={transfers.setRelaySuggestionMinutes}
       soundcheckEnabled={transfers.snapshot.soundcheckEnabled}
       onSetSoundcheckEnabled={transfers.setSoundcheckEnabled}
+      maxAlbumSizeMb={transfers.snapshot.maxAlbumSizeMb ?? DEFAULT_MAX_ALBUM_SIZE_MB}
+      onSetMaxAlbumSizeMb={transfers.setMaxAlbumSizeMb}
       messageNotificationsEnabled={messages.notificationsEnabled}
       onMessageNotificationsChange={messages.setNotificationsEnabled}
       roomNotificationsEnabled={rooms.notificationsEnabled}

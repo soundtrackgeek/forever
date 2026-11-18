@@ -16,6 +16,7 @@ type Inputs = {
   /** Changes whenever a Wanted album's sources or Smart state change. */
   signature: string;
   excluded: (username: string) => boolean;
+  maxAlbumSizeMb: number;
   deps: Omit<SmartDeps, "now">;
 };
 
@@ -43,6 +44,7 @@ export function useSmartDownloads(inputs: Inputs) {
         progress: progress.current,
         checking: current.checking,
         excluded: current.excluded,
+        maxAlbumSizeMb: current.maxAlbumSizeMb,
         deps: { now: Date.now, ...current.deps },
         cancelled: () => !latest.current.enabled || !latest.current.settings.enabled,
       });

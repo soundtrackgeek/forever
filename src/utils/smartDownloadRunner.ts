@@ -39,6 +39,8 @@ export type PassInput = {
   progress: Map<string, ProgressMemo>;
   checking: boolean;
   excluded?: (username: string) => boolean;
+  /** Album folder size limit in MB (0 = none); the backend refuses bigger folders too. */
+  maxAlbumSizeMb?: number;
   deps: SmartDeps;
   cancelled?: () => boolean;
 };
@@ -53,7 +55,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 type Vetted = { ok: true; inspection: FolderInspection; audioCount: number } | { ok: false; outcome: string };
 
-async function vet(album: WantedAlbum, source: WantedBestSource, tracks: AlbumTrack[], deps: SmartDeps): Promise<Vetted> {
+/**
+ * A folder holding far more audio than the album has tracks is a share dump
+ * (say, every artist starting with "T"); it can still contain the whole
+ * tracklist, so the match check alone would accept it.
+ */
+export const tooManyTracks = (audioCount: number, officialCount: number) =>
+  officialCount > 0 && audioCount > Math.max(officialCount * 2, officialCount + 10);
+
+async function vet(album: WantedAlbum, source: WantedBestSource, tracks: AlbumTrack[], deps: SmartDeps, maxAlbumSizeMb: number): Promise<Vetted> {
   let inspection: FolderInspection;
   try {
     inspection = await withTimeout(deps.inspect(album, source), INSPECT_TIMEOUT_MS);
@@ -64,6 +74,9 @@ async function vet(album: WantedAlbum, source: WantedBestSource, tracks: AlbumTr
   if (audioCount === 0) return { ok: false, outcome: "noAudio" };
   const minimum = album.preferences.minimumTrackCount ?? 0;
   if (audioCount < minimum) return { ok: false, outcome: "short" };
+  const totalBytes = inspection.files.reduce((sum, file) => sum + file.sizeBytes, 0);
+  if (maxAlbumSizeMb > 0 && totalBytes > maxAlbumSizeMb * 1024 * 1024) return { ok: false, outcome: "tooLarge" };
+  if (tooManyTracks(audioCount, tracks.length)) return { ok: false, outcome: "extras" };
   if (tracks.length > 0) {
     try {
       const confidence = await deps.confidence(inspection, tracks, album.artist);
@@ -98,7 +111,7 @@ async function startDownload(
   const rejected: WantedSmartTriedSource[] = [];
   for (const source of plan.candidates.slice(0, SMART_VETS_PER_PASS)) {
     if (input.cancelled?.()) return "unchanged";
-    const result = await vet(album, source, tracks, deps);
+    const result = await vet(album, source, tracks, deps, input.maxAlbumSizeMb ?? 0);
     if (!result.ok) {
       rejected.push({ username: source.username, folder: source.folder, outcome: result.outcome, atMs: now });
       continue;

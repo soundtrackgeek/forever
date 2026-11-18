@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.0.97] - 2026-11-18
+
+### Added
+
+- **Album size limit (default 1 GB).** New setting in Settings → Download
+  lanes: **Largest album to download** (250 MB to 10 GB, or No limit). Any album
+  folder bigger than this is refused before a single byte is downloaded, whether
+  you click Download, Discovery queues it, or Smart downloads picks it. A real
+  album is rarely over 1 GB even as hi-res FLAC; anything much bigger is
+  usually a fake release or someone's whole share.
+
+### Fixed
+
+- **Smart downloads no longer queue a whole share as one album.** A peer's
+  folder holding thousands of songs (for example every artist starting with
+  "T") could contain the full tracklist of the wanted album, pass the
+  MusicBrainz check, and be queued in full: 2,689 files and 20 GB for a
+  12-track album. Smart downloads now skips folders over the album size limit
+  ("was over the album size limit") and folders holding far more audio than the
+  album has tracks, more than twice the official count and more than ten extra
+  ("held far more tracks than the album"). Deluxe editions with bonus tracks
+  still pass.
 ## [0.0.96] - 2026-11-04
 
 ### Added

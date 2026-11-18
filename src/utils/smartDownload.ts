@@ -198,6 +198,8 @@ const outcomeCopy: Record<string, string> = {
   unreachable: "could not be reached",
   noAudio: "had no audio files",
   short: "had too few tracks",
+  tooLarge: "was over the album size limit",
+  extras: "held far more tracks than the album",
   lengths: "had track lengths that differ",
   tracklist: "did not match the official tracklist",
   enqueue: "could not be queued",

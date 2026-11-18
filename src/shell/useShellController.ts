@@ -25,7 +25,7 @@ import { useSoulseekSearch } from "../hooks/useSoulseekSearch";
 import { useSoulseekShares } from "../hooks/useSoulseekShares";
 import { useSoulseekTransfers } from "../hooks/useSoulseekTransfers";
 import { useWantedAlbums } from "../hooks/useWantedAlbums";
-import { defaultSmartDownloads, useSettings } from "../settings";
+import { DEFAULT_MAX_ALBUM_SIZE_MB, defaultSmartDownloads, useSettings } from "../settings";
 import type {
   AlbumEditions,
   AlbumReleaseGroup,
@@ -439,6 +439,7 @@ export function useShellController() {
     checking: Boolean(wanted.snapshot.activeAlbumId),
     signature: smartSignature,
     excluded: (user) => { const person = people.personByUsername(user); return !!person?.blocked || !!person?.ignored; },
+    maxAlbumSizeMb: transfers.snapshot.maxAlbumSizeMb ?? DEFAULT_MAX_ALBUM_SIZE_MB,
     deps: createSmartDownloadDeps({
       officialTracks: loadOfficialTracklist,
       save: wanted.updateSmart,

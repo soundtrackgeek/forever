@@ -163,6 +163,14 @@ pub struct TransferSettings {
     #[serde(default)]
     pub auto_mirror_minutes: u32,
     pub soundcheck_enabled: bool,
+    /// Largest album folder accepted for download, in MB. 0 turns the limit
+    /// off. Guards against "albums" that are really someone's whole share.
+    #[serde(default = "default_max_album_size_mb")]
+    pub max_album_size_mb: u32,
+}
+pub const DEFAULT_MAX_ALBUM_SIZE_MB: u32 = 1024;
+fn default_max_album_size_mb() -> u32 {
+    DEFAULT_MAX_ALBUM_SIZE_MB
 }
 impl Default for TransferSettings {
     fn default() -> Self {
@@ -173,6 +181,7 @@ impl Default for TransferSettings {
             relay_suggestion_minutes: 10,
             auto_mirror_minutes: 0,
             soundcheck_enabled: true,
+            max_album_size_mb: DEFAULT_MAX_ALBUM_SIZE_MB,
         }
     }
 }
@@ -337,6 +346,13 @@ impl Settings {
         {
             return Err("Invalid download lanes or relay delay.".into());
         }
+        if self.transfers.max_album_size_mb != 0
+            && !(50..=100_000).contains(&self.transfers.max_album_size_mb)
+        {
+            return Err(
+                "Choose an album size limit between 50 MB and 100 GB, or 0 for no limit.".into(),
+            );
+        }
         if ![0, 15, 30, 60].contains(&self.wanted.interval_minutes) {
             return Err("Invalid Wanted interval.".into());
         }
@@ -488,6 +504,7 @@ pub struct SettingsPatch {
     pub relay_suggestion_minutes: Option<u32>,
     pub auto_mirror_minutes: Option<u32>,
     pub soundcheck_enabled: Option<bool>,
+    pub max_album_size_mb: Option<u32>,
     pub upload_slots: Option<u8>,
     pub upload_policy: Option<super::upload_policy::UploadPolicy>,
     pub wanted_interval_minutes: Option<u32>,
@@ -533,6 +550,7 @@ impl SettingsPatch {
         assign!(filing, s.transfers.filing);
         assign!(bandwidth, s.transfers.bandwidth);
         assign!(soundcheck_enabled, s.transfers.soundcheck_enabled);
+        assign!(max_album_size_mb, s.transfers.max_album_size_mb);
         assign!(upload_slots, s.sharing.upload_slots);
         assign!(upload_policy, s.sharing.upload_policy);
         assign!(wanted_interval_minutes, s.wanted.interval_minutes);
@@ -739,7 +757,8 @@ mod tests {
                 max_concurrent_downloads: 5,
                 relay_suggestion_minutes: 30,
                 auto_mirror_minutes: 0,
-                soundcheck_enabled: false
+                soundcheck_enabled: false,
+                max_album_size_mb: DEFAULT_MAX_ALBUM_SIZE_MB,
             }
         );
         assert_eq!(settings.sharing.upload_slots, 2);
@@ -1032,5 +1051,30 @@ mod tests {
         assert!(settings.validate().is_err());
         settings.transfers = TransferSettings::default();
         assert_eq!(settings.transfers.auto_mirror_minutes, 0);
+    }
+    #[test]
+    fn album_size_limit_defaults_to_one_gigabyte_validates_and_allows_off() {
+        let mut settings = Settings::default();
+        let mut older = serde_json::to_value(&settings).unwrap();
+        older["transfers"]
+            .as_object_mut()
+            .unwrap()
+            .remove("maxAlbumSizeMb");
+        let restored: Settings = serde_json::from_value(older).unwrap();
+        assert_eq!(restored.transfers.max_album_size_mb, 1024);
+        for (value, ok) in [
+            (0, true),
+            (50, true),
+            (2048, true),
+            (49, false),
+            (100_001, false),
+        ] {
+            SettingsPatch {
+                max_album_size_mb: Some(value),
+                ..Default::default()
+            }
+            .apply(&mut settings);
+            assert_eq!(settings.validate().is_ok(), ok, "{value}");
+        }
     }
 }

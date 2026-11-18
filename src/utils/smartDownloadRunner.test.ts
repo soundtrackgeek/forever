@@ -5,7 +5,7 @@ import {
 import type { AlbumTrack, WantedAlbum, WantedSmartState } from "../types";
 import type { ProgressMemo } from "./smartDownload";
 import { SMART_COOLDOWN_MS, SMART_VETS_PER_PASS } from "./smartDownload";
-import { runSmartPass, type SmartDeps } from "./smartDownloadRunner";
+import { runSmartPass, tooManyTracks, type SmartDeps } from "./smartDownloadRunner";
 import type { TracklistConfidence } from "./tracklistConfidence";
 
 const tracks: AlbumTrack[] = [1, 2].map((position) => ({ position, discNumber: 1, discPosition: position, title: `Track ${position}`, durationMs: 240_000 }));
@@ -27,8 +27,8 @@ function harness(overrides: Partial<SmartDeps> = {}) {
     setAuto: vi.fn(async () => undefined),
     ...overrides,
   } satisfies SmartDeps;
-  const pass = (albums: WantedAlbum[], groups = groupsOf(), extra: { progress?: Map<string, ProgressMemo>; checking?: boolean } = {}) =>
-    runSmartPass({ albums, groups, settings: smartSettings, progress: extra.progress ?? new Map(), checking: extra.checking ?? false, deps });
+  const pass = (albums: WantedAlbum[], groups = groupsOf(), extra: { progress?: Map<string, ProgressMemo>; checking?: boolean; maxAlbumSizeMb?: number } = {}) =>
+    runSmartPass({ albums, groups, settings: smartSettings, progress: extra.progress ?? new Map(), checking: extra.checking ?? false, maxAlbumSizeMb: extra.maxAlbumSizeMb, deps });
   return { deps, saved, pass };
 }
 
@@ -98,6 +98,40 @@ describe("starting a download without anyone clicking", () => {
     await pass([wantedAlbum({ preferences: { formatPreference: "any", minimumBitrateKbps: null, minimumTrackCount: 3 } })]);
     expect(deps.enqueue).not.toHaveBeenCalled();
     expect(lastSaved(saved).tried[0].outcome).toBe("short");
+  });
+
+  it("rejects a folder over the album size limit before queuing anything", async () => {
+    // Two 10 MB tracks against a 10 MB limit: twice the limit.
+    const { deps, saved, pass } = harness();
+    await pass([wantedAlbum()], groupsOf(), { maxAlbumSizeMb: 10 });
+    expect(deps.enqueue).not.toHaveBeenCalled();
+    expect(lastSaved(saved).tried.map((t) => t.outcome)).toEqual(Array(SMART_VETS_PER_PASS).fill("tooLarge"));
+    expect(lastSaved(saved).message).toContain("was over the album size limit");
+  });
+
+  it("queues the same folder when the limit is off or big enough", async () => {
+    for (const maxAlbumSizeMb of [0, 1024]) {
+      const { deps, pass } = harness();
+      await pass([wantedAlbum()], groupsOf(), { maxAlbumSizeMb });
+      expect(deps.enqueue).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("rejects a share dump that contains the whole tracklist among thousands of other songs", async () => {
+    // The match check passes (every official track is present), but the folder is someone's "T" artists.
+    const { deps, saved, pass } = harness({ inspect: vi.fn(async (_a, c) => inspection(c.username, 2689)) });
+    await pass([wantedAlbum()]);
+    expect(deps.enqueue).not.toHaveBeenCalled();
+    expect(lastSaved(saved).tried[0].outcome).toBe("extras");
+  });
+
+  it("allows a deluxe edition with a reasonable number of bonus tracks", () => {
+    expect(tooManyTracks(12, 12)).toBe(false);
+    expect(tooManyTracks(22, 12)).toBe(false);
+    expect(tooManyTracks(24, 12)).toBe(false);
+    expect(tooManyTracks(25, 12)).toBe(true);
+    expect(tooManyTracks(2689, 12)).toBe(true);
+    expect(tooManyTracks(400, 0)).toBe(false);
   });
 
   it("falls back to track count alone when MusicBrainz has no tracklist", async () => {

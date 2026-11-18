@@ -1305,6 +1305,7 @@ export function useSoulseekTransfers() {
   const setAutoMirrorMinutes = useCallback(async (minutes: number) => { await patchSettings({ autoMirrorMinutes: minutes }); }, []);
   const setRelaySuggestionMinutes = useCallback(async (minutes: number) => { await patchSettings({ relaySuggestionMinutes: minutes }); }, []);
   const setSoundcheckEnabled = useCallback(async (enabled: boolean) => { await patchSettings({ soundcheckEnabled: enabled }); }, []);
+  const setMaxAlbumSizeMb = useCallback(async (megabytes: number) => { await patchSettings({ maxAlbumSizeMb: megabytes }); }, []);
 
   const prepareForRestart = useCallback(async (
     mode: "pauseNow" | "finishCurrentFiles",
@@ -1400,6 +1401,7 @@ export function useSoulseekTransfers() {
       setRelaySuggestionMinutes,
       setAutoMirrorMinutes,
       setSoundcheckEnabled,
+      setMaxAlbumSizeMb,
       prepareForRestart,
       cancelRestartPreparation,
       completionNotice,
@@ -1440,6 +1442,7 @@ export function useSoulseekTransfers() {
       setRelaySuggestionMinutes,
       setAutoMirrorMinutes,
       setSoundcheckEnabled,
+      setMaxAlbumSizeMb,
       prepareForRestart,
       cancelRestartPreparation,
       completionNotice,

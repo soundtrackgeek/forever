@@ -226,6 +226,7 @@ pub struct TransferQueueSnapshot {
     pub revision: u64,
     pub source_reliability: HashMap<String, SourceReliability>,
     pub auto_mirror_minutes: u32,
+    pub max_album_size_mb: u32,
     pub persistence_error: Option<String>,
     pub transfers: Vec<TransferSnapshot>,
     pub active_count: usize,
@@ -440,6 +441,7 @@ pub struct TransferHub {
     filing_releases: Arc<Mutex<HashSet<String>>>,
     source_reliability: Arc<Mutex<HashMap<String, SourceReliability>>>,
     auto_mirror_minutes: Arc<AtomicU32>,
+    max_album_size_mb: Arc<AtomicU32>,
     scheduler: super::download_scheduler::DownloadScheduler,
     app: AppHandle,
     writer: Arc<TransferWriter<TransferStore>>,
@@ -496,6 +498,7 @@ impl TransferHub {
             filing_releases: Arc::new(Mutex::new(HashSet::new())),
             source_reliability: Arc::new(Mutex::new(store.source_reliability)),
             auto_mirror_minutes: Arc::new(AtomicU32::new(settings.auto_mirror_minutes)),
+            max_album_size_mb: Arc::new(AtomicU32::new(settings.max_album_size_mb)),
             scheduler: super::download_scheduler::DownloadScheduler::default(),
             app,
             writer: Arc::new(writer),
@@ -613,6 +616,7 @@ impl TransferHub {
             revision: *revision,
             source_reliability,
             auto_mirror_minutes: self.auto_mirror_minutes.load(Ordering::SeqCst),
+            max_album_size_mb: self.max_album_size_mb.load(Ordering::SeqCst),
             persistence_error: self.writer.error(),
             transfers,
             active_count,
@@ -705,6 +709,8 @@ impl TransferHub {
             .store(settings.max_concurrent_downloads, Ordering::SeqCst);
         self.auto_mirror_minutes
             .store(settings.auto_mirror_minutes, Ordering::SeqCst);
+        self.max_album_size_mb
+            .store(settings.max_album_size_mb, Ordering::SeqCst);
         self.relay_suggestion_minutes
             .store(settings.relay_suggestion_minutes, Ordering::SeqCst);
         let enabled_now = settings.soundcheck_enabled
@@ -795,6 +801,7 @@ impl TransferHub {
         download_directory: &Path,
     ) -> Result<TransferQueueSnapshot, TransferError> {
         validate_release_request(&request)?;
+        check_release_size(&request, self.max_album_size_mb.load(Ordering::SeqCst))?;
         let mut transfers = self
             .transfers
             .write()
@@ -2621,6 +2628,25 @@ fn validate_request(request: &EnqueueTransferRequest) -> Result<(), TransferErro
     Ok(())
 }
 
+/// Refuses a folder whose total size is over the album limit (0 = no limit).
+/// Some shares hold thousands of unrelated tracks in one folder; one of them
+/// can still contain every track of the wanted album and pass the tracklist
+/// check, so size is the last line of defence before gigabytes land on disk.
+fn check_release_size(request: &EnqueueReleaseRequest, limit_mb: u32) -> Result<(), TransferError> {
+    if limit_mb == 0 {
+        return Ok(());
+    }
+    let total: u64 = request.files.iter().map(|file| file.size_bytes).sum();
+    let limit = u64::from(limit_mb) * 1024 * 1024;
+    if total > limit {
+        return Err(TransferError::ReleaseTooLarge {
+            size_mb: total.div_ceil(1024 * 1024),
+            limit_mb,
+        });
+    }
+    Ok(())
+}
+
 fn validate_release_request(request: &EnqueueReleaseRequest) -> Result<(), TransferError> {
     if request.title.trim().is_empty()
         || request.username.trim().is_empty()
@@ -3442,6 +3468,8 @@ pub enum TransferError {
     InvalidRelaySuggestionMinutes,
     #[error("Choose at least one valid file before downloading the release.")]
     InvalidReleaseRequest,
+    #[error("That folder is {size_mb} MB, over the {limit_mb} MB album limit. It is probably not a single album; raise the limit in Settings → Downloads if it is.")]
+    ReleaseTooLarge { size_mb: u64, limit_mb: u32 },
     #[error("The incoming Soulseek file connection did not match the active download.")]
     UnexpectedFileConnection,
     #[error(
@@ -3459,6 +3487,37 @@ pub enum TransferError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_size_limit_refuses_whole_share_folders_but_allows_albums_and_off() {
+        let release = |count: usize, each: u64| EnqueueReleaseRequest {
+            title: "Tin Machine - Tin Machine II (1991)".into(),
+            username: "listener".into(),
+            remote_folder: "Music/T".into(),
+            files: (0..count)
+                .map(|i| EnqueueReleaseFileRequest {
+                    title: format!("{i}.mp3"),
+                    remote_filename: format!("Music/T/{i}.mp3"),
+                    size_bytes: each,
+                })
+                .collect(),
+            expected_track_count: None,
+            release_group_id: None,
+            search_album: None,
+            alternatives: Vec::new(),
+        };
+        let mb = 1024 * 1024;
+        assert!(check_release_size(&release(12, 10 * mb), 1024).is_ok());
+        assert!(check_release_size(&release(2, 512 * mb), 1024).is_ok());
+        assert!(matches!(
+            check_release_size(&release(2689, 7 * mb), 1024),
+            Err(TransferError::ReleaseTooLarge {
+                size_mb: 18823,
+                limit_mb: 1024
+            })
+        ));
+        assert!(check_release_size(&release(2689, 7 * mb), 0).is_ok());
+    }
 
     #[test]
     fn transfer_query_identity_round_trips_and_v2_migration_keeps_legacy_labels_unparsed() {

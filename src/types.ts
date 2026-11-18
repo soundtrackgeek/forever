@@ -641,6 +641,8 @@ export type SourceReliability = {
 export type TransferQueueSnapshot = {
   sourceReliability?: Record<string, SourceReliability>;
   autoMirrorMinutes?: number;
+  /** Largest album folder accepted for download, in MB; 0 means no limit. */
+  maxAlbumSizeMb?: number;
   revision?: number;
   persistenceError?: string | null;
   transfers: Transfer[];

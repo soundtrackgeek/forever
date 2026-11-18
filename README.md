@@ -872,7 +872,10 @@ For each album Forever takes the ranked list from the latest Wanted check and
 tries the sources in order. Before queueing one it opens the peer's folder,
 counts the audio files against the album's minimum track count, and compares the
 titles and lengths with the official MusicBrainz edition, exactly as the manual
-review does. The first folder that passes is queued with the usual verification
+review does. It also skips folders over the album size limit and folders
+holding far more audio than the album has tracks (more than twice the official
+count and over ten extra), which is what a peer's whole share looks like even
+when it happens to contain every track. The first folder that passes is queued with the usual verification
 and Soundcheck. Sources that cannot be reached, hold the wrong tracks, or differ
 in length are skipped and remembered.
 
@@ -1069,6 +1072,12 @@ default is 10 minutes. Once a release has waited that long, Signal Relay quietly
 checks Soulseek for compatible album folders, shows a notification when routes
 are ready, and leaves the final switch to you unless automatic mirrors are enabled.
 The active transfer card can also open Signal Relay or start a scan immediately.
+
+**Largest album to download** in Download lanes refuses any album folder bigger
+than the limit before anything is downloaded: 1 GB by default, choose 250 MB to
+10 GB or No limit. It applies to every album download (manual, Discovery, and
+Smart downloads), so a fake or mislabelled "album" that is really someone's
+whole share cannot fill your disk.
 
 **Auto-switch to exact mirrors** is a separate opt-in setting in Download lanes:
 Off (default), or after 5, 10, 20, 30, or 60 minutes stalled. It works while

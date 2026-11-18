@@ -14,12 +14,14 @@ export type UpdateCheckIntervalMinutes = 0 | 1 | 5 | 15 | 30 | 60 | 360;
 export type Preferences = { updateCheckIntervalMinutes: UpdateCheckIntervalMinutes; updateChannel: UpdateChannel; messageNotificationsEnabled: boolean; roomNotificationsEnabled: boolean; downloadNotificationsEnabled: boolean; musicBrainzFallbackTrackCount: number };
 // Hands-off downloading for Wanted albums. The accepted format range is each
 // album's own Smart Match profile; these decide how patient to be.
+/** Folders bigger than this are almost never one album; 0 turns the check off. */
+export const DEFAULT_MAX_ALBUM_SIZE_MB = 1024;
 export type SmartDownloadSettings = { enabled: boolean; stallMinutes: number; maxAttempts: number; maxActiveAlbums: number; durationToleranceSeconds: number; allowedLengthMismatches: number };
 export const defaultSmartDownloads = (): SmartDownloadSettings => ({ enabled: false, stallMinutes: 20, maxAttempts: 5, maxActiveAlbums: 2, durationToleranceSeconds: 3, allowedLengthMismatches: 0 });
 export type Settings = {
   desktop: { closeToTray: boolean; startInTray: boolean };
   version: number; revision: number; webviewMigrated: boolean; connection: ConnectionProfile | null;
-  transfers: { bandwidth?: BandwidthSettings; maxConcurrentDownloads: number; relaySuggestionMinutes: number; autoMirrorMinutes: number; soundcheckEnabled: boolean; filing?: FilingSettings };
+  transfers: { bandwidth?: BandwidthSettings; maxConcurrentDownloads: number; relaySuggestionMinutes: number; autoMirrorMinutes: number; soundcheckEnabled: boolean; maxAlbumSizeMb?: number; filing?: FilingSettings };
   sharing: { version: number; uploadSlots: number; uploadPolicy: UploadPolicy; roots: { id: string; path: string; alias: string; enabled: boolean; addedAtMs: number }[] };
   wanted: { intervalMinutes: 0 | 15 | 30 | 60; defaultPreferences: WantedPreferences; smart: SmartDownloadSettings };
   archiveDatabasePath: string | null; preferences: Preferences; dialMemory: DialMemory;
@@ -29,7 +31,7 @@ export type SettingsSection = "desktop" | "connection" | "transfers" | "sharing"
 export const defaultSettings = (): Settings => ({
   desktop: { closeToTray: true, startInTray: true },
   version: 1, revision: 0, webviewMigrated: false, connection: null,
-  transfers: { bandwidth: defaultBandwidth(), maxConcurrentDownloads: 3, relaySuggestionMinutes: 10, autoMirrorMinutes: 0, soundcheckEnabled: true, filing: defaultFilingSettings() },
+  transfers: { bandwidth: defaultBandwidth(), maxConcurrentDownloads: 3, relaySuggestionMinutes: 10, autoMirrorMinutes: 0, soundcheckEnabled: true, maxAlbumSizeMb: DEFAULT_MAX_ALBUM_SIZE_MB, filing: defaultFilingSettings() },
   sharing: { version: 3, uploadSlots: 1, uploadPolicy: { maxFilesPerUser: 100, maxMegabytesPerUser: 10000, prioritizeFavorites: false, prioritizePrivileged: false }, roots: [] },
   wanted: { intervalMinutes: 30, defaultPreferences: { formatPreference: "preferLossless", minimumBitrateKbps: 320, minimumTrackCount: null }, smart: defaultSmartDownloads() },
   archiveDatabasePath: null,
@@ -142,6 +144,7 @@ export async function validateSettingsImport(json: string): Promise<Settings> {
   if (value?.transfers?.bandwidth && value.transfers.bandwidth.manualPaused === undefined) value.transfers.bandwidth.manualPaused = false;
   if (value?.transfers && value.transfers.bandwidth === undefined) value.transfers.bandwidth = defaultBandwidth();
   if (value?.transfers && value.transfers.autoMirrorMinutes === undefined) value.transfers.autoMirrorMinutes = 0;
+  if (value?.transfers && value.transfers.maxAlbumSizeMb === undefined) value.transfers.maxAlbumSizeMb = DEFAULT_MAX_ALBUM_SIZE_MB;
   if (value?.wanted && value.wanted.smart === undefined) value.wanted.smart = defaultSmartDownloads();
   if (value?.preferences && value.preferences.downloadNotificationsEnabled === undefined) value.preferences.downloadNotificationsEnabled = true;
   // Browser previews never write desktop settings; Rust performs full validation.
