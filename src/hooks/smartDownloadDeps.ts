@@ -35,6 +35,8 @@ export function createSmartDownloadDeps(api: Api): Omit<SmartDeps, "now"> {
           searchAlbum: { artist: album.artist, title: album.title },
           alternatives: [],
         },
+        // Marks the download as automatic in the activity log.
+        origin: "smart",
       });
       const albumId = album.albumId.toLowerCase();
       const created = snapshot.transfers

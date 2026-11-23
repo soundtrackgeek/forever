@@ -60,6 +60,24 @@ Tauri references: [single instance](https://v2.tauri.app/plugin/single-instance/
 [window state](https://v2.tauri.app/plugin/window-state/),
 [system tray](https://v2.tauri.app/learn/system-tray/).
 
+### Activity log
+
+Forever writes one JSON line for each thing you do to
+`%APPDATA%\com.soundtrackgeek.forever\logs\activity.YYYY-MM-DD.jsonl`:
+
+| `event` | when | fields |
+| --- | --- | --- |
+| `search` | you start a search, or search inside someone's shares | `query`, `scope` (`network`/`user`), `username`, `artist`/`album` for album searches |
+| `browse` | you open someone's shares | `username`, `ok`, `files`, `bytes` |
+| `wanted_add` | albums are added to Wanted | `albumId`, `artist`, `title`, `year` |
+| `download_queued` | a release or file is queued | `username`, `title`, `folder`, `files`, `bytes`, `origin` (`user`/`smart`) |
+| `download` | a release's last file is in | `username`, `users`, `title`, `files`, `bytes`, `path` |
+
+Every line also has `ts` (Unix ms), a unique `id` and `service` (`soulseek`).
+Wanted Signals checks and relay searches run on their own and are not logged.
+The log stays on this computer and is pruned after 90 days; it exists so you,
+or a local tool such as Watchme, can look back at what you searched for and got.
+
 ### Bandwidth limits and scheduling
 
 Open **Settings → Bandwidth limits and scheduling** to set combined, download,

@@ -154,9 +154,12 @@ pub async fn wanted_add(
     manager: State<'_, ConnectionManager>,
     request: wanted::WantedAlbumRequest,
 ) -> Result<wanted::WantedSnapshot, String> {
-    manager
+    let before = manager.current_wanted();
+    let after = manager
         .add_wanted(request)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    record_wanted_added(&before, &after);
+    Ok(after)
 }
 
 #[tauri::command]
@@ -165,9 +168,42 @@ pub async fn wanted_add_many(
     requests: Vec<wanted::WantedAlbumRequest>,
     preferences: wanted::WantedPreferences,
 ) -> Result<wanted::WantedSnapshot, String> {
-    manager
+    let before = manager.current_wanted();
+    let after = manager
         .add_many_wanted(requests, preferences)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    record_wanted_added(&before, &after);
+    Ok(after)
+}
+
+/// Logs the albums a Wanted change added: those in `after` that were not in
+/// `before`, so re-adding an album already on the list logs nothing.
+fn record_wanted_added(before: &wanted::WantedSnapshot, after: &wanted::WantedSnapshot) {
+    let known: std::collections::HashSet<&str> = before
+        .albums
+        .iter()
+        .map(|album| album.album_id.as_str())
+        .collect();
+    for album in after
+        .albums
+        .iter()
+        .filter(|album| !known.contains(album.album_id.as_str()))
+    {
+        let year = album
+            .first_release_date
+            .get(..4)
+            .and_then(|year| year.parse::<u32>().ok());
+        crate::activity::record(
+            "wanted_add",
+            serde_json::json!({
+                "service": "soulseek",
+                "albumId": album.album_id,
+                "artist": album.artist,
+                "title": album.title,
+                "year": year,
+            }),
+        );
+    }
 }
 
 #[tauri::command]
@@ -623,19 +659,43 @@ pub async fn transfer_enqueue(
     manager: State<'_, ConnectionManager>,
     request: downloads::EnqueueTransferRequest,
 ) -> Result<downloads::TransferQueueSnapshot, String> {
-    manager
+    let activity = serde_json::json!({
+        "service": "soulseek",
+        "username": request.username,
+        "title": request.title,
+        "files": 1,
+        "bytes": request.size_bytes,
+        "origin": "user",
+    });
+    let snapshot = manager
         .enqueue_transfer(request)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    crate::activity::record("download_queued", activity);
+    Ok(snapshot)
 }
 
+/// `origin` is "smart" when Smart downloads queued the album; a click leaves it out.
 #[tauri::command]
 pub async fn transfer_enqueue_release(
     manager: State<'_, ConnectionManager>,
     request: downloads::EnqueueReleaseRequest,
+    origin: Option<String>,
 ) -> Result<downloads::TransferQueueSnapshot, String> {
-    manager
+    let activity = serde_json::json!({
+        "service": "soulseek",
+        "username": request.username,
+        "title": request.title,
+        "folder": request.remote_folder,
+        "files": request.files.len(),
+        "bytes": request.files.iter().map(|file| file.size_bytes).sum::<u64>(),
+        "albumId": request.release_group_id,
+        "origin": origin.as_deref().unwrap_or("user"),
+    });
+    let snapshot = manager
         .enqueue_release(request)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    crate::activity::record("download_queued", activity);
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -863,10 +923,23 @@ pub async fn shares_browse(
     username: String,
     refresh: bool,
 ) -> Result<shares::UserSharesOverview, String> {
-    manager
-        .browse_shares(username, refresh)
+    let result = manager
+        .browse_shares(username.clone(), refresh)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string());
+    let overview = result.as_ref().ok();
+    crate::activity::record(
+        "browse",
+        serde_json::json!({
+            "service": "soulseek",
+            "username": username,
+            "refresh": refresh,
+            "ok": overview.is_some(),
+            "files": overview.map(|o| o.total_file_count),
+            "bytes": overview.map(|o| o.total_size_bytes),
+        }),
+    );
+    result
 }
 
 #[tauri::command]
@@ -887,9 +960,20 @@ pub async fn shares_search(
     query: String,
     extension: Option<String>,
 ) -> Result<shares::ShareSearchSnapshot, String> {
-    manager
+    let snapshot = manager
         .search_shares(&username, &query, extension.as_deref())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    crate::activity::record(
+        "search",
+        serde_json::json!({
+            "service": "soulseek",
+            "scope": "user",
+            "username": username,
+            "query": query,
+            "extension": extension,
+        }),
+    );
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -951,9 +1035,25 @@ pub async fn search_start(
     query: String,
     album: Option<album_query::AlbumIdentity>,
 ) -> Result<SearchSnapshot, String> {
-    manager
+    // Relay searches look for another source for a stalled download on their
+    // own; they are not something the person searched for.
+    let automatic = client_id.starts_with("signal-relay:");
+    let activity = (!automatic).then(|| {
+        serde_json::json!({
+            "service": "soulseek",
+            "scope": "network",
+            "query": query,
+            "artist": album.as_ref().map(|a| a.artist.clone()),
+            "album": album.as_ref().map(|a| a.title.clone()),
+        })
+    });
+    let snapshot = manager
         .start_search(client_id, query, album)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    if let Some(activity) = activity {
+        crate::activity::record("search", activity);
+    }
+    Ok(snapshot)
 }
 
 #[tauri::command]

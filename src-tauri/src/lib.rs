@@ -1,3 +1,4 @@
+mod activity;
 mod archive;
 mod connection;
 mod desktop;
@@ -40,6 +41,7 @@ pub fn run() {
         )
         .on_window_event(desktop::window_event)
         .setup(|app| {
+            activity::start(app.path().app_config_dir()?.join("logs"));
             app.manage(connection::initialize(app.handle())?);
             connection::bandwidth::start(app.handle().clone());
             app.manage(connection::filing::FilingHub::new(

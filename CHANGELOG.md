@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.0.98] - 2026-11-23
+
+### Added
+
+- **Activity log.** Forever now keeps a plain record of what you do in
+  `logs\activity.YYYY-MM-DD.jsonl` in its data folder, one JSON line each:
+  searches (the network, or inside one user's shares), whose shares you
+  browsed, albums added to Wanted, downloads you queued (marked `smart` when
+  Smart downloads queued them) and releases that finished, with the users who
+  sent them. Wanted checks and relay searches are background work and are not
+  logged. Nothing is uploaded; files older than 90 days are deleted. Local
+  tools such as Watchme read it to show your Soulseek activity.
+
 ## [0.0.97] - 2026-11-18
 
 ### Added
